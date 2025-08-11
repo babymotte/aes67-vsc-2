@@ -1,0 +1,30 @@
+name: Rust Test
+
+on:
+  push:
+    branches: ["main"]
+    tags-ignore:
+      - "v*.*.*"
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: aes67-vsc-2-${{ runner.os }}-cargo
+          key: aes67-vsc-2-${{ runner.os }}-cargo
+      - uses: davidB/rust-cargo-make@v1
+      - name: Run linter
+        run: cargo clippy -- --deny warnings
+      - name: Run tests
+        run: cargo test

@@ -1,0 +1,151 @@
+name: Release binary artifacts
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Install latest rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          default: true
+          override: true
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: aes67-vsc-2-${{ runner.os }}-cargo
+          key: aes67-vsc-2-${{ runner.os }}-cargo
+
+      - name: Run format check
+        run: cargo fmt --check
+      - name: Run linter
+        run: cargo clippy -- --deny warnings
+      - name: Run tests
+        run: cargo test
+
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Install latest rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          default: true
+          override: true
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: aes67-vsc-2-${{ runner.os }}-cargo
+          key: aes67-vsc-2-${{ runner.os }}-cargo
+
+      - name: Publish to crates.io
+        run: cargo publish
+        env:
+          CRATES_TOKEN: ${{ secrets.CRATES_TOKEN }}
+
+  docker:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          # list of Docker images to use as base name for tags
+          images: |
+            babymotte/aes67-vsc-2
+          # generate Docker tags based on the following events/attributes
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern=
+            type=semver,pattern=.
+            type=semver,pattern=
+            type=sha
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # For pull requests, export results to the build cache.
+          # Otherwise, push to a registry.
+          outputs: ${{ github.event_name == 'pull_request' && 'type=cacheonly' || 'type=registry,push=true' }}
+
+  release:
+    needs: test
+    runs-on: ${{ matrix.image }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            image: ubuntu-latest
+            ext: ""
+          - target: x86_64-pc-windows-msvc
+            image: windows-latest
+            ext: ".exe"
+          - target: aarch64-apple-darwin
+            image: macos-latest
+            ext: ""
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Install latest rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          default: true
+          override: true
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: aes67-vsc-2-${{ runner.os }}-cargo
+          key: aes67-vsc-2-${{ runner.os }}-cargo
+
+      - name: Build
+        run: cargo build --release
+
+      - name: Package Binaries
+        uses: vimtor/action-zip@v1
+        with:
+          files: target/release/aes67-vsc-2${{ matrix.ext }}
+          dest: aes67-vsc-2-${{ matrix.target }}.zip
+
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: aes67-vsc-2-${{ matrix.target }}.zip
