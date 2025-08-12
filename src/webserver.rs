@@ -15,38 +15,48 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{config::Config, error::Aes67Vsc2Result};
-use axum::{
-    Router,
-    extract::{Path, State},
-    response::Html,
-    routing::get,
+use crate::{
+    config::Config,
+    error::{Aes67Vsc2Error, Aes67Vsc2Result},
+    receiver::{ReceiverApiMessage, api::ReceiverInfo},
 };
-use tokio::net::TcpListener;
+use axum::{
+    Json, Router,
+    extract::State,
+    routing::{get, post},
+};
+use std::net::SocketAddr;
+use tokio::{
+    net::TcpListener,
+    sync::{mpsc, oneshot},
+};
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
 use tower_http::trace::TraceLayer;
 use tracing::{info, instrument};
-use worterbuch_client::Worterbuch;
 
 pub fn start_webserver(
     subsys: &SubsystemHandle,
     config: Config,
-    wb: worterbuch_client::Worterbuch,
+    api_tx: mpsc::Sender<ReceiverApiMessage>,
+    ready_tx: oneshot::Sender<SocketAddr>,
 ) {
     info!("Starting webserver subsystem");
     subsys.start(SubsystemBuilder::new("webserver", |subsys| {
-        webserver(subsys, wb, config)
+        webserver(subsys, config, api_tx, ready_tx)
     }));
 }
 
-#[instrument(skip(subsys, wb), ret, err)]
+#[instrument(skip(subsys), ret, err)]
 async fn webserver(
     subsys: SubsystemHandle,
-    wb: Worterbuch,
     config: Config,
+    api_tx: mpsc::Sender<ReceiverApiMessage>,
+    ready_tx: oneshot::Sender<SocketAddr>,
 ) -> Aes67Vsc2Result<()> {
     let app = Router::new()
-        .route("/{*path}", get(handler).with_state(wb.clone()))
+        .route("/stop", post(stop))
+        .route("/info", get(info))
+        .with_state(api_tx)
         .layer(TraceLayer::new_for_http());
 
     info!(
@@ -58,7 +68,9 @@ async fn webserver(
         config.webserver.bind_address, config.webserver.port
     ))
     .await?;
-    info!("REST endpoint up at http://{}", listener.local_addr()?);
+    let local_address = listener.local_addr()?;
+    info!("REST endpoint up at http://{}", local_address);
+    ready_tx.send(local_address).ok();
     axum::serve(listener, app)
         .with_graceful_shutdown(async move { subsys.on_shutdown_requested().await })
         .await?;
@@ -66,15 +78,26 @@ async fn webserver(
     Ok(())
 }
 
-#[instrument(skip(wb), ret)]
-async fn handler(
-    Path(path): Path<Vec<String>>,
-    State(wb): State<Worterbuch>,
-) -> Aes67Vsc2Result<Html<String>> {
-    let greet = wb
-        .get(path.join("/"))
-        .await?
-        .unwrap_or("&lt;unknown&gt;".to_owned());
+#[instrument(ret)]
+async fn stop(
+    State(api_tx): State<mpsc::Sender<ReceiverApiMessage>>,
+) -> Aes67Vsc2Result<Json<bool>> {
+    match api_tx.send(ReceiverApiMessage::Stop).await {
+        Ok(_) => Ok(Json(true)),
+        Err(_) => Ok(Json(false)),
+    }
+}
 
-    Ok(Html(format!("<h1>Hello, {greet}!</h1>")))
+#[instrument(ret)]
+async fn info(
+    State(api_tx): State<mpsc::Sender<ReceiverApiMessage>>,
+) -> Aes67Vsc2Result<Json<ReceiverInfo>> {
+    let (tx, rx) = oneshot::channel();
+    api_tx.send(ReceiverApiMessage::GetInfo(tx)).await.ok();
+    match rx.await {
+        Ok(addr) => Ok(Json(addr)),
+        Err(_) => Err(Aes67Vsc2Error::Other(
+            "error getting shared memory address".to_owned(),
+        )),
+    }
 }

@@ -15,16 +15,17 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::error::Aes67Vsc2Result;
+use crate::{error::Aes67Vsc2Result, receiver::config::ReceiverConfig};
 use clap::Parser;
 use gethostname::gethostname;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{
     net::{IpAddr, Ipv4Addr},
     path::{Path, PathBuf},
+    time::Duration,
 };
 use tokio::fs;
-use tracing::{info, warn};
+use tracing::{info, instrument, warn};
 use worterbuch_client::topic;
 
 #[derive(Parser)]
@@ -35,23 +36,15 @@ pub struct Args {
     config: Option<PathBuf>,
 
     /// Web server bind address
-    #[arg(
-        short,
-        long,
-        env = "AES67_VSC_2_WEB_SERVER_BIND_ADDRESS"
-    )]
+    #[arg(short, long, env = "AES67_VSC_2_WEB_SERVER_BIND_ADDRESS")]
     bind_address: Option<IpAddr>,
 
     /// Web server port
-    #[arg(
-        short,
-        long,
-        env = "AES67_VSC_2_WEB_SERVER_PORT"
-    )]
+    #[arg(short, long, env = "AES67_VSC_2_WEB_SERVER_PORT")]
     port: Option<u16>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WebServerConfig {
     pub bind_address: IpAddr,
@@ -67,32 +60,32 @@ impl Default for WebServerConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TelemetryConfig {
     pub endpoint: EndpointConfig,
     pub credentials: Option<Credentials>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum EndpointConfig {
     Grpc(String),
     Http(String),
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Credentials {
     pub user: String,
     pub token: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppConfig {
     pub name: String,
-    pub instance: InstanceConfig
+    pub instance: InstanceConfig,
 }
 
 impl Default for AppConfig {
@@ -104,7 +97,7 @@ impl Default for AppConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InstanceConfig {
     pub name: String,
@@ -118,7 +111,22 @@ impl Default for InstanceConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SocketConfig {
+    pub bind_address: IpAddr,
+    pub port: u16,
+    #[serde(default, with = "serde_millis")]
+    pub keepalive_time: Option<Duration>,
+    #[serde(default, with = "serde_millis")]
+    pub keepalive_interval: Option<Duration>,
+    pub keepalive_retries: Option<u32>,
+    #[serde(default, with = "serde_millis")]
+    pub user_timeout: Option<Duration>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct Config {
     #[serde(default = "AppConfig::default")]
     pub app: AppConfig,
@@ -126,9 +134,12 @@ pub struct Config {
     pub webserver: WebServerConfig,
     #[serde(default)]
     pub telemetry: Option<TelemetryConfig>,
+    #[serde(default)]
+    pub receiver_config: Option<ReceiverConfig>,
 }
 
 impl Config {
+    #[instrument]
     pub async fn load() -> Aes67Vsc2Result<Config> {
         let args = Args::parse();
 
@@ -141,6 +152,7 @@ impl Config {
         Ok(config)
     }
 
+    #[instrument]
     async fn load_from_file(path: Option<&Path>) -> Aes67Vsc2Result<Config> {
         match path {
             Some(path) => {

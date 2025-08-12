@@ -1,0 +1,28 @@
+v=0
+o=- 345678 345979 IN IP4 10.0.1.2
+s=My sample redundant flow
+i=2 channels: c6, c7
+t=0 0
+a=recvonly
+a=group:DUP prim sec
+m=audio 5004 RTP/AVP 98
+c=IN IP4 239.69.22.33/32
+a=rtpmap:98 L24/48000/2
+a=ptime:1
+a=ts-refclk:ptp=IEEE1588-2008:00-11-22-FF-FE-33-44-55:0
+a=mediaclk:direct=0
+a=mid:prim
+m=audio 5004 RTP/AVP 98
+c=IN IP4 239.69.22.33/32
+a=rtpmap:98 L24/48000/2
+a=ptime:1
+a=ts-refclk:ptp=IEEE1588-2008:00-11-22-FF-FE-33-44-55:0
+a=mediaclk:direct=0
+a=mid:prim
+m=audio 5004 RTP/AVP 98
+c=IN IP4 239.69.44.55/32
+a=rtpmap:98 L24/48000/2
+a=ptime:1
+a=ts-refclk:ptp=IEEE1588-2008:00-11-22-FF-FE-33-44-55:0
+a=mediaclk:direct=0
+a=mid:sec

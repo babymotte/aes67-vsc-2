@@ -18,13 +18,14 @@
 use crate::{config::Config, error::Aes67Vsc2Result};
 use tokio::select;
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
-use tracing::info;
-use worterbuch_client::{KeyValuePair, OnDisconnect, Worterbuch, topic};
+use tracing::{info, instrument};
+use worterbuch_client::{ConnectionResult, KeyValuePair, OnDisconnect, Worterbuch, topic};
 
+#[instrument(skip(subsys))]
 pub async fn start_worterbuch(
     subsys: &SubsystemHandle,
     config: Config,
-) -> Result<worterbuch_client::Worterbuch, miette::Error> {
+) -> ConnectionResult<worterbuch_client::Worterbuch> {
     info!("Starting worterbuch client subsystem");
     let (wb, on_disconnect, _) = worterbuch_client::connect_with_default_config().await?;
     let wbc = wb.clone();
@@ -40,16 +41,22 @@ async fn worterbuch(
     on_disconnect: OnDisconnect,
     config: Config,
 ) -> Aes67Vsc2Result<()> {
-    wb.set_client_name(format!("{}/{}", config.app.name, config.app.instance.name)).await?;
-    wb.set_grave_goods(vec![topic!(config.app.name, config.app.instance.name, "#").as_ref()].as_ref())
+    wb.set_client_name(format!("{}/{}", config.app.name, config.app.instance.name))
         .await?;
+    wb.set_grave_goods(
+        vec![topic!(config.app.name, config.app.instance.name, "#").as_ref()].as_ref(),
+    )
+    .await?;
     wb.set_last_will(&vec![KeyValuePair::of(
         topic!(config.app.name, config.app.instance.name, "running"),
         false,
     )])
     .await?;
-    wb.set(topic!(config.app.name, config.app.instance.name, "running"), true)
-        .await?;
+    wb.set(
+        topic!(config.app.name, config.app.instance.name, "running"),
+        true,
+    )
+    .await?;
     select! {
         _ = on_disconnect => {
             subsys.request_shutdown();

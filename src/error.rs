@@ -18,8 +18,11 @@
 use axum::{http::StatusCode, response::IntoResponse};
 use miette::Diagnostic;
 use opentelemetry_otlp::ExporterBuildError;
-use std::io;
+use rtp_rs::RtpReaderError;
+use shared_memory::ShmemError;
+use std::{fmt::Display, io};
 use thiserror::Error;
+use tokio::sync::oneshot;
 use tracing_subscriber::{filter::ParseError, util::TryInitError};
 use worterbuch_client::ConnectionError;
 
@@ -37,6 +40,31 @@ pub enum Aes67Vsc2Error {
     TraceError(#[from] ExporterBuildError),
     #[error("Tracing config parse error: {0}")]
     ParseError(#[from] ParseError),
+    #[error("API error.")]
+    ApiError(#[from] oneshot::error::RecvError),
+    #[error("Unknown smaple format: {0}")]
+    UnknownSampleFormat(String),
+    #[error("Invalid SDP: {0}")]
+    InvalidSdp(String),
+    #[error("HTTP request error: {0}")]
+    HttpRequestError(#[from] reqwest::Error),
+    #[error("JSON serde error: {0}")]
+    JsonSerdeError(#[from] serde_json::Error),
+    #[error("Shared memory error: {0}")]
+    SharedMemoryError(#[from] ShmemError),
+    #[error("Received invalid RTP data: {0:?}")]
+    InvalidRtpData(#[from] WrappedRtpError),
+    #[error("General error: {0}")]
+    Other(String),
+}
+
+#[derive(Error, Debug, Diagnostic)]
+pub struct WrappedRtpError(pub RtpReaderError);
+
+impl Display for WrappedRtpError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.0)
+    }
 }
 
 impl IntoResponse for Aes67Vsc2Error {

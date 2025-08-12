@@ -1,0 +1,14 @@
+app:
+  name: AES67-VSC-2 Jack Playout
+  instance:
+    name: thinkpad-p14s/1
+webserver:
+  bindAddress: 127.0.0.1
+  port: 32001
+telemetry:
+  endpoint: !grpc http://127.0.0.1:4317
+playoutConfig:
+  channels: 2
+  initialRouting:
+    - http://127.0.0.1:32000: 0
+    - http://127.0.0.1:32000: 1

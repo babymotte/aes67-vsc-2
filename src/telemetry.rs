@@ -15,7 +15,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use aes67_vsc_2::{
+use crate::{
     config::{Config, EndpointConfig},
     error::Aes67Vsc2Result,
 };
