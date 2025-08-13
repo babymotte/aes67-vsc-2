@@ -1,15 +1,11 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PlayoutConfig {
-    pub channels: usize,
-    pub initial_routing: Vec<Option<ReceiverChannel>>,
-}
+use crate::config::WebServerConfig;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ReceiverChannel {
-    receiver: String,
-    channel: usize,
+pub struct PlayoutConfig {
+    #[serde(default = "WebServerConfig::default")]
+    pub webserver: WebServerConfig,
+    pub receiver: String,
 }

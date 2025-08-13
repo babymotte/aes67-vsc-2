@@ -1,13 +1,18 @@
 app:
   name: AES67-VSC-2 Receiver
   instance:
-    name: thinkpad-p14s
-webserver:
-  bindAddress: 127.0.0.1
-  port: 32000
+    name: thinkpad-p14s/1
 telemetry:
   endpoint: !grpc http://127.0.0.1:4317
+playoutConfig:
+  webserver:
+    bindAddress: 127.0.0.1
+    port: 32001
+  receiver: http://127.0.0.1:32000
 receiverConfig:
+  webserver:
+    bindAddress: 127.0.0.1
+    port: 32000
   session: |
     v=0
     o=- 10943522194 10943522194 IN IP4 192.168.178.97
@@ -22,6 +27,6 @@ receiverConfig:
     a=ptime:1
     a=ts-refclk:ptp=IEEE1588-2008:00-1D-C1-FF-FE-0E-10-C4:0
     a=mediaclk:direct=0
-  linkOffset: 4
-  bufferOverhead: 10
+  linkOffset: 2
+  bufferOverhead: 4
   interfaceIp: 192.168.178.39

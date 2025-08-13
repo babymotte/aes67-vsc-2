@@ -6,7 +6,6 @@ GET http://127.0.0.1:32000/info
 
 POST http://127.0.0.1:32000/stop
 
-
 ### Playout stop
 
 POST http://127.0.0.1:32001/stop

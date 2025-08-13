@@ -1,6 +1,7 @@
 use crate::{
+    config::WebServerConfig,
     error::{Aes67Vsc2Error, Aes67Vsc2Result},
-    formats::{self, AudioFormat, FrameFormat},
+    formats::{self, AudioFormat, FrameFormat, MilliSeconds},
 };
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -17,18 +18,22 @@ lazy_static! {
         Regex::new(r"ptp=(.+):(.+):(.+)").expect("no dynammic input, can't fail");
     static ref MEDIACLK_REGEX: Regex =
         Regex::new(r"direct=([0-9]+)").expect("no dynammic input, can't fail");
+    static ref CHANNELS_REGEX: Regex =
+        Regex::new(r"([0-9]+) channels: (.+)").expect("no dynammic input, can't fail");
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReceiverConfig {
+    #[serde(default = "WebServerConfig::default")]
+    pub webserver: WebServerConfig,
     #[serde(
         deserialize_with = "crate::serde::deserialize_sdp",
         serialize_with = "crate::serde::serialize_sdp"
     )]
     pub session: SessionDescription,
-    pub link_offset: u32,
-    pub buffer_overhead: u32,
+    pub link_offset: MilliSeconds,
+    pub buffer_overhead: f32,
     pub interface_ip: IpAddr,
 }
 
@@ -38,18 +43,19 @@ pub struct RxDescriptor {
     pub session_name: String,
     pub session_id: u64,
     pub session_version: u64,
-    pub packet_time: f32,
-    pub link_offset: u32,
+    pub packet_time: MilliSeconds,
+    pub link_offset: MilliSeconds,
     pub origin_ip: IpAddr,
-    pub rtp_offset: u32,
+    pub rtp_offset: f32,
     pub audio_format: AudioFormat,
+    pub channel_labels: Vec<Option<String>>,
 }
 
 impl RxDescriptor {
     pub fn new(
         receiver_id: String,
         sd: &SessionDescription,
-        link_offset: u32,
+        link_offset: MilliSeconds,
     ) -> Aes67Vsc2Result<Self> {
         let media = if let Some(it) = sd.media_descriptions.iter().next() {
             it
@@ -85,6 +91,24 @@ impl RxDescriptor {
             } else {
                 return Err(Aes67Vsc2Error::InvalidSdp("malformed rtpmap".to_owned()));
             };
+
+        let no_labels = || {
+            let mut v = vec![];
+            for _ in 0..channels {
+                v.push(None);
+            }
+            v
+        };
+
+        let channel_labels = if let Some(i) = &sd.session_information {
+            if let Some(caps) = CHANNELS_REGEX.captures(i) {
+                caps[2].split(", ").map(|it| Some(it.to_owned())).collect()
+            } else {
+                no_labels()
+            }
+        } else {
+            no_labels()
+        };
 
         if &payload_type != fmt {
             return Err(Aes67Vsc2Error::InvalidSdp(
@@ -131,6 +155,7 @@ impl RxDescriptor {
             frame_format,
             sample_rate,
         };
+        // let channel_labels = sd.session_information.
         Ok(RxDescriptor {
             id: receiver_id,
             session_name,
@@ -141,6 +166,7 @@ impl RxDescriptor {
             link_offset,
             origin_ip,
             rtp_offset,
+            channel_labels,
         })
     }
 
@@ -182,7 +208,7 @@ impl RxDescriptor {
         formats::packets_in_link_offset(self.link_offset, self.packet_time)
     }
 
-    pub fn frames_in_link_offset(&self) -> u32 {
+    pub fn frames_in_link_offset(&self) -> usize {
         formats::frames_per_link_offset_buffer(self.link_offset, self.audio_format.sample_rate)
     }
 

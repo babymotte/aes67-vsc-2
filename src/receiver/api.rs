@@ -29,30 +29,36 @@ pub enum ReceiverApiMessage {
 
 #[derive(Debug, Clone)]
 pub struct ReceiverApi {
-    addr: SocketAddr,
-    use_tls: bool,
+    url: String,
     reqwest_client: Client,
 }
 
 impl ReceiverApi {
-    pub fn new(addr: SocketAddr, use_tls: bool) -> Self {
+    pub fn with_socket_addr(addr: SocketAddr, use_tls: bool) -> Self {
+        let schema = if use_tls { "https" } else { "http" };
+        let url = format!("{}://{}", schema, addr);
         ReceiverApi {
-            addr,
-            use_tls,
+            url,
             reqwest_client: Client::new(),
         }
     }
 
-    pub fn url(&self) -> String {
-        let schema = if self.use_tls { "https" } else { "http" };
-        format!("{}://{}", schema, self.addr)
+    pub fn with_url(url: String) -> Self {
+        ReceiverApi {
+            url,
+            reqwest_client: Client::new(),
+        }
     }
 
-    #[instrument]
+    pub fn url(&self) -> &str {
+        &self.url
+    }
+
+    #[instrument(ret, err)]
     pub async fn stop(&self) -> Aes67Vsc2Result<bool> {
         let body = self
             .reqwest_client
-            .post(format!("{}/stop", self.url()))
+            .post(format!("{}/stop", self.url))
             .send()
             .await?
             .text()
@@ -60,11 +66,11 @@ impl ReceiverApi {
         Ok(serde_json::from_str(&body)?)
     }
 
-    #[instrument]
+    #[instrument(ret, err)]
     pub async fn info(&self) -> Aes67Vsc2Result<ReceiverInfo> {
         let body = self
             .reqwest_client
-            .get(format!("{}/info", self.url()))
+            .get(format!("{}/info", self.url))
             .send()
             .await?
             .text()

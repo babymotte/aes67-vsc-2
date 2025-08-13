@@ -1,4 +1,9 @@
-use aes67_vsc_2::{config::Config, error::Aes67Vsc2Result, receiver::config::ReceiverConfig};
+use aes67_vsc_2::{
+    config::{Config, WebServerConfig},
+    error::Aes67Vsc2Result,
+    playout::config::PlayoutConfig,
+    receiver::config::ReceiverConfig,
+};
 use sdp::SessionDescription;
 use std::{
     io::Cursor,
@@ -17,15 +22,27 @@ async fn main() -> Aes67Vsc2Result<()> {
 
     config.app.name = "AES67-VSC-2 Receiver".to_owned();
 
-    config.webserver.bind_address = IpAddr::V4(Ipv4Addr::LOCALHOST);
-    config.webserver.port = 32000;
+    let mut webserver = WebServerConfig::default();
+    webserver.bind_address = IpAddr::V4(Ipv4Addr::LOCALHOST);
+    webserver.port = 32000;
 
     config.receiver_config = Some(ReceiverConfig {
+        webserver,
         session,
-        link_offset: 4,
-        buffer_overhead: 10,
+        link_offset: 4.0,
+        buffer_overhead: 10.0,
         interface_ip: IpAddr::V4(Ipv4Addr::new(192, 168, 178, 39)),
     });
+
+    let mut webserver = WebServerConfig::default();
+    webserver.bind_address = IpAddr::V4(Ipv4Addr::LOCALHOST);
+    webserver.port = 32001;
+
+    config.playout_config = Some(PlayoutConfig {
+        webserver,
+        receiver: "http://127.0.0.1:32000".to_owned(),
+    });
+
     println!(
         "{}",
         serde_yaml::to_string(&config).expect("could not serialize config")

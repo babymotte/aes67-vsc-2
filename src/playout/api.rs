@@ -29,7 +29,7 @@ impl PlayoutApi {
         format!("{}://{}", schema, self.addr)
     }
 
-    #[instrument]
+    #[instrument(ret, err)]
     pub async fn stop(&self) -> Aes67Vsc2Result<bool> {
         let body = self
             .reqwest_client

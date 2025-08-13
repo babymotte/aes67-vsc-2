@@ -17,7 +17,10 @@
 
 pub mod statime_linux;
 
-use crate::{error::Aes67Vsc2Result, formats::frames_per_link_offset_buffer};
+use crate::{
+    error::Aes67Vsc2Result,
+    formats::{FramesPerSecond, MilliSeconds, frames_per_link_offset_buffer},
+};
 use libc::{CLOCK_TAI, clock_gettime, timespec};
 use std::{
     cmp::Ordering,
@@ -33,7 +36,7 @@ use tracing::{error, info};
 #[derive(Debug, Clone, Copy)]
 pub struct MediaClockTimestamp {
     pub timestamp: u32,
-    sample_rate: u32,
+    sample_rate: FramesPerSecond,
 }
 
 impl Display for MediaClockTimestamp {
@@ -43,7 +46,7 @@ impl Display for MediaClockTimestamp {
 }
 
 impl MediaClockTimestamp {
-    pub fn new(timestamp: u32, sample_rate: u32) -> Self {
+    pub fn new(timestamp: u32, sample_rate: FramesPerSecond) -> Self {
         Self {
             timestamp,
             sample_rate,
@@ -75,7 +78,7 @@ impl MediaClockTimestamp {
         }
     }
 
-    pub fn playout_time(&self, link_offset: u32) -> MediaClockTimestamp {
+    pub fn playout_time(&self, link_offset: MilliSeconds) -> MediaClockTimestamp {
         let timestamp = wrap_u64(
             self.timestamp as u64
                 + frames_per_link_offset_buffer(link_offset, self.sample_rate) as u64,
@@ -186,12 +189,12 @@ pub struct LocalMediaClock {}
 #[derive(Clone)]
 pub struct RemoteMediaClock {
     offset: Arc<AtomicI64>,
-    sample_rate: u32,
+    sample_rate: FramesPerSecond,
     close: mpsc::Sender<()>,
 }
 
 impl RemoteMediaClock {
-    pub async fn connect(port: u16, sample_rate: u32) -> Aes67Vsc2Result<Self> {
+    pub async fn connect(port: u16, sample_rate: FramesPerSecond) -> Aes67Vsc2Result<Self> {
         let offset = Arc::new(AtomicI64::new(0));
         let task_offset = offset.clone();
         let (close, mut close_rx) = mpsc::channel(1);
@@ -260,7 +263,7 @@ async fn read_offset(
     }
 }
 
-pub fn media_time(offset: i64, sample_rate: u32) -> MediaClockTimestamp {
+pub fn media_time(offset: i64, sample_rate: FramesPerSecond) -> MediaClockTimestamp {
     let timestamp = wrapped_media_time(sample_rate, offset);
     MediaClockTimestamp {
         timestamp,
@@ -268,11 +271,11 @@ pub fn media_time(offset: i64, sample_rate: u32) -> MediaClockTimestamp {
     }
 }
 
-fn wrapped_media_time(sample_rate: u32, offset: i64) -> u32 {
+fn wrapped_media_time(sample_rate: FramesPerSecond, offset: i64) -> u32 {
     wrap_u128(raw_media_time(sample_rate, offset))
 }
 
-fn raw_media_time(sample_rate: u32, offset: i64) -> u128 {
+fn raw_media_time(sample_rate: FramesPerSecond, offset: i64) -> u128 {
     let now = system_time();
     let nanos =
         (now.tv_sec * Duration::from_secs(1).as_nanos() as i64 + now.tv_nsec + offset) as u128;
@@ -447,7 +450,7 @@ mod test {
 
         let mut last_playout_time = None;
         for i in 0..u32::MAX {
-            let playout_time = ts.playout_time(4).timestamp;
+            let playout_time = ts.playout_time(4.0).timestamp;
             if let Some(lpt) = last_playout_time {
                 assert_eq!(wrap_u64(lpt as u64 + 1), playout_time);
             }

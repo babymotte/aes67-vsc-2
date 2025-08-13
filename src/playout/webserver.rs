@@ -16,11 +16,7 @@
  */
 
 use crate::{config::Config, error::Aes67Vsc2Result, playout::api::PlayoutApiMessage};
-use axum::{
-    Json, Router,
-    extract::State,
-    routing::{get, post},
-};
+use axum::{Json, Router, extract::State, routing::post};
 use std::net::SocketAddr;
 use tokio::{
     net::TcpListener,
@@ -54,15 +50,18 @@ async fn webserver(
         .with_state(api_tx)
         .layer(TraceLayer::new_for_http());
 
+    let web_config = &config
+        .playout_config
+        .as_ref()
+        .expect("no playout config")
+        .webserver;
+
     info!(
         "Listening on {}:{} …",
-        config.webserver.bind_address, config.webserver.port
+        web_config.bind_address, web_config.port
     );
-    let listener = TcpListener::bind(format!(
-        "{}:{}",
-        config.webserver.bind_address, config.webserver.port
-    ))
-    .await?;
+    let listener =
+        TcpListener::bind(format!("{}:{}", web_config.bind_address, web_config.port)).await?;
     let local_address = listener.local_addr()?;
     info!("REST endpoint up at http://{}", local_address);
     ready_tx.send(local_address).ok();
@@ -73,7 +72,7 @@ async fn webserver(
     Ok(())
 }
 
-#[instrument(ret)]
+#[instrument(ret, err)]
 async fn stop(
     State(api_tx): State<mpsc::Sender<PlayoutApiMessage>>,
 ) -> Aes67Vsc2Result<Json<bool>> {

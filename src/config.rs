@@ -36,14 +36,6 @@ pub struct Args {
     /// Path to config file
     #[arg(short, long, env = "AES67_VSC_2_CONFIG")]
     config: Option<PathBuf>,
-
-    /// Web server bind address
-    #[arg(short, long, env = "AES67_VSC_2_WEB_SERVER_BIND_ADDRESS")]
-    bind_address: Option<IpAddr>,
-
-    /// Web server port
-    #[arg(short, long, env = "AES67_VSC_2_WEB_SERVER_PORT")]
-    port: Option<u16>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -132,8 +124,6 @@ pub struct SocketConfig {
 pub struct Config {
     #[serde(default = "AppConfig::default")]
     pub app: AppConfig,
-    #[serde(default = "WebServerConfig::default")]
-    pub webserver: WebServerConfig,
     #[serde(default)]
     pub telemetry: Option<TelemetryConfig>,
     #[serde(default)]
@@ -149,9 +139,7 @@ impl Config {
 
         info!("Loading config …");
 
-        let mut config = Config::load_from_file(args.config.as_deref()).await?;
-
-        config.merge(args)?;
+        let config = Config::load_from_file(args.config.as_deref()).await?;
 
         Ok(config)
     }
@@ -188,18 +176,6 @@ impl Config {
                 }
             }
         }
-    }
-
-    fn merge(&mut self, args: Args) -> Aes67Vsc2Result<()> {
-        if let Some(it) = args.bind_address {
-            self.webserver.bind_address = it
-        }
-
-        if let Some(it) = args.port {
-            self.webserver.port = it
-        }
-
-        Ok(())
     }
 
     pub fn instance_name(&self) -> String {

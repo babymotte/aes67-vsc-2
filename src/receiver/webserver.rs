@@ -59,15 +59,18 @@ async fn webserver(
         .with_state(api_tx)
         .layer(TraceLayer::new_for_http());
 
+    let web_config = &config
+        .receiver_config
+        .as_ref()
+        .expect("no receiver config")
+        .webserver;
+
     info!(
         "Listening on {}:{} …",
-        config.webserver.bind_address, config.webserver.port
+        web_config.bind_address, web_config.port
     );
-    let listener = TcpListener::bind(format!(
-        "{}:{}",
-        config.webserver.bind_address, config.webserver.port
-    ))
-    .await?;
+    let listener =
+        TcpListener::bind(format!("{}:{}", web_config.bind_address, web_config.port)).await?;
     let local_address = listener.local_addr()?;
     info!("REST endpoint up at http://{}", local_address);
     ready_tx.send(local_address).ok();

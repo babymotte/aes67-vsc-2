@@ -2,12 +2,12 @@ use crate::{
     config::Config,
     error::Aes67Vsc2Result,
     formats::{AudioFormat, BufferFormat},
-    receiver::config::RxDescriptor,
+    receiver::{api::ReceiverInfo, config::RxDescriptor},
 };
 use rtp_rs::RtpReader;
 use serde::{Deserialize, Serialize};
 use shared_memory::{Shmem, ShmemConf};
-use std::fmt::Debug;
+use std::{fmt::Debug, slice::from_raw_parts};
 use tokio::sync::oneshot;
 use tracing::{info, instrument, warn};
 
@@ -17,12 +17,32 @@ pub struct BufferConfig {
     pub address: String,
 }
 
+pub struct AudioBufferRef {
+    shared_memory_ptr: usize,
+    buffer_len: usize,
+}
+
+impl AudioBufferRef {
+    pub fn buffer<'a>(&'a self) -> &'a [u8] {
+        unsafe { from_raw_parts(self.shared_memory_ptr as *const u8, self.buffer_len) }
+    }
+}
+
 pub struct AudioBuffer {
     shmem: Shmem,
     desc: RxDescriptor,
 }
 
 impl AudioBuffer {
+    pub fn get_ref(&self) -> AudioBufferRef {
+        let buffer_len = unsafe { self.shmem.as_slice().len() };
+        let shared_memory_ptr = self.shmem.as_ptr() as usize;
+        AudioBufferRef {
+            shared_memory_ptr,
+            buffer_len,
+        }
+    }
+
     pub fn insert(&mut self, rtp: RtpReader, timestamp_offset: u64) {
         // TODO make sure this does not break when rtp timestamp wraps around
 
@@ -30,7 +50,7 @@ impl AudioBuffer {
 
         let bpf = self.desc.bytes_per_frame();
         let frames_in_link_offset = self.desc.frames_in_link_offset() as u64;
-        let egress_timestamp = 
+        let egress_timestamp =
         // wrapped ingress timestamp including random offset
         rtp.timestamp() as u64
         // subtract random timestamp offset from SDP to get the actual wrapped ingress timestamp
@@ -99,17 +119,13 @@ pub fn create_audio_buffer(
 }
 
 #[instrument]
-pub fn open_audio_buffer(
-    address: &str,
-    audio_format: AudioFormat,
-    desc: RxDescriptor,
-) -> Aes67Vsc2Result<AudioBuffer> {
-    info!("Opening shared memory {} …", address);
-    let shmem = ShmemConf::new().os_id(address).open()?;
+pub fn open_audio_buffer(receiver_info: ReceiverInfo) -> Aes67Vsc2Result<AudioBuffer> {
+    info!("Opening shared memory {} …", receiver_info.shmem_address);
+    let shmem = ShmemConf::new().os_id(receiver_info.shmem_address).open()?;
     let buffer_len = unsafe { shmem.as_slice().len() };
     let format = BufferFormat {
         buffer_len,
-        audio_format,
+        audio_format: receiver_info.descriptor.audio_format,
     };
 
     info!(
@@ -117,5 +133,8 @@ pub fn open_audio_buffer(
         format.buffer_len
     );
 
-    Ok(AudioBuffer { shmem, desc })
+    Ok(AudioBuffer {
+        shmem,
+        desc: receiver_info.descriptor,
+    })
 }

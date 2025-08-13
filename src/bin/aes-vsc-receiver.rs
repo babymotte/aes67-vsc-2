@@ -16,18 +16,12 @@
  */
 
 use aes67_vsc_2::{
-    config::Config,
-    error::{Aes67Vsc2Error, Aes67Vsc2Result},
-    receiver::start_receiver,
-    telemetry,
+    config::Config, error::Aes67Vsc2Error, playout::jack::start_jack_playout,
+    receiver::start_receiver, telemetry, time::statime_linux::statime_linux,
+    utils::find_network_interface, worterbuch::start_worterbuch,
 };
 use miette::Result;
-use std::{
-    io::{self, BufRead},
-    thread,
-    time::Duration,
-};
-use tokio::{spawn, sync::mpsc};
+use std::time::Duration;
 use tokio_graceful_shutdown::{SubsystemBuilder, Toplevel};
 use tracing::info;
 
@@ -36,6 +30,12 @@ async fn main() -> Result<()> {
     let config = Config::load().await?;
 
     telemetry::init(&config).await?;
+
+    let rx_config = config
+        .receiver_config
+        .as_ref()
+        .expect("no receiver config")
+        .clone();
 
     info!(
         "Starting {} instance '{}' with session description:\n{}",
@@ -49,27 +49,25 @@ async fn main() -> Result<()> {
             .marshal()
     );
 
-    let (stdin_tx, mut stdin_rx) = mpsc::channel(1);
+    Toplevel::new(move |s| async move {
+        s.start(SubsystemBuilder::new("aes67-vsc-2", move |s| async move {
+            let wb = start_worterbuch(&s, config.clone()).await?;
+            let iface = find_network_interface(rx_config.interface_ip)?;
+            let clock = statime_linux(
+                iface,
+                rx_config.interface_ip,
+                wb.clone(),
+                config.instance_name(),
+            )
+            .await;
 
-    Toplevel::new(|s| async move {
-        s.start(SubsystemBuilder::new("aes67-vsc-2", |s| async move {
-            let api = start_receiver(&s, config, false).await?;
-            info!("Receiver API running at {}", api.url());
+            let receiver_api =
+                start_receiver(&s, config.clone(), false, wb.clone(), clock.clone()).await?;
+            info!("Receiver API running at {}", receiver_api.url());
 
-            thread::spawn(move || {
-                stdin_api(stdin_tx).ok();
-            });
-
-            spawn(async move {
-                while let Some(line) = stdin_rx.recv().await {
-                    match line.trim() {
-                        "info" => println!("{}", api.info().await?),
-                        "stop" => println!("{}", api.stop().await?),
-                        _ => eprintln!("unknown command"),
-                    }
-                }
-                Ok::<(), Aes67Vsc2Error>(())
-            });
+            let playout_api =
+                start_jack_playout(&s, config.clone(), false, wb.clone(), clock.clone()).await?;
+            info!("Playout API running at {}", playout_api.url());
 
             Ok::<(), Aes67Vsc2Error>(())
         }));
@@ -77,16 +75,6 @@ async fn main() -> Result<()> {
     .catch_signals()
     .handle_shutdown_requests(Duration::from_secs(1))
     .await?;
-
-    Ok(())
-}
-
-fn stdin_api(stdin_tx: mpsc::Sender<String>) -> Aes67Vsc2Result<()> {
-    for line in io::stdin().lock().lines() {
-        if stdin_tx.blocking_send(line?).is_err() {
-            break;
-        }
-    }
 
     Ok(())
 }
