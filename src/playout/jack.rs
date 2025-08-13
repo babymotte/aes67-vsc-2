@@ -214,10 +214,10 @@ struct ProcessHandlerState<C: Clock + Send + 'static> {
 
 impl<C: Clock + Send + 'static> ProcessHandlerState<C> {
     pub fn slew(&mut self, jack_media_time: u64) -> u64 {
-        self.drift_slew -= self.drift_slew.signum();
         if self.drift_slew != 0 {
             info!("drift slew {}", self.drift_slew);
         }
+        self.drift_slew -= self.drift_slew.signum();
         (jack_media_time as i64 + self.drift_slew.signum()) as u64
     }
 }
@@ -325,9 +325,7 @@ fn process<C: Clock + Send + 'static>(
             if drift != 0 {
                 warn!("Current JACK clock drift: {drift}");
             }
-            if drift.abs() >= (link_offset_frames / 8) as i64 && state.drift_slew == 0 {
-                state.drift_slew = -drift;
-            }
+            state.drift_slew = -drift;
             state.slew(jack_media_time)
         }
     } else {
