@@ -18,7 +18,7 @@
 use crate::{
     buffer::{AudioBufferRef, open_audio_buffer},
     config::Config,
-    error::{Aes67Vsc2Error, Aes67Vsc2Result},
+    error::Aes67Vsc2Result,
     formats::SampleReader,
     playout::{
         api::{PlayoutApi, PlayoutApiMessage},
@@ -132,7 +132,7 @@ impl PlayoutActor {
                 buffer_ref_drop_rx.blocking_recv().ok();
                 drop(buffer);
             }
-            Err(e) => _ = buffer_ref_tx.send(Err(Aes67Vsc2Error::from(e))),
+            Err(e) => _ = buffer_ref_tx.send(Err(e)),
         });
 
         let audio_buffer_ref = buffer_ref_rx.await??;
@@ -337,7 +337,7 @@ fn process<C: Clock + Send + 'static>(
 
     let next_media_time = if let Some(drift) = state.drift_calculator.update(current_drift) {
         // we got a new average drift, let's see if we need to compensate
-        if drift.abs() as u64 > link_offset_frames / 2 {
+        if drift.unsigned_abs() > link_offset_frames / 2 {
             warn!("JACK media clock if too far off ({drift}), resetting it to ptp media clock");
             state.drift_slew = 0;
             current_media_time

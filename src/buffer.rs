@@ -40,7 +40,7 @@ pub struct AudioBufferRef {
 }
 
 impl AudioBufferRef {
-    pub fn buffer<'a>(&'a self) -> &'a [u8] {
+    pub fn buffer(&self) -> &[u8] {
         unsafe { from_raw_parts(self.shared_memory_ptr as *const u8, self.buffer_len) }
     }
 }
@@ -77,7 +77,7 @@ impl AudioBuffer {
         let frames_in_buffer = (buffer.len() / bpf) as u64;
         let frame_index = ingress_timestamp % frames_in_buffer;
         let byte_index = frame_index as usize * bpf;
-        let end_index = byte_index as usize + payload.len();
+        let end_index = byte_index + payload.len();
 
         if end_index <= buffer.len() {
             buffer[byte_index..end_index].copy_from_slice(payload);

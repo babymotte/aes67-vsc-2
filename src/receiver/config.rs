@@ -74,7 +74,7 @@ impl RxDescriptor {
         sd: &SessionDescription,
         link_offset: MilliSeconds,
     ) -> Aes67Vsc2Result<Self> {
-        let media = if let Some(it) = sd.media_descriptions.iter().next() {
+        let media = if let Some(it) = sd.media_descriptions.first() {
             it
         } else {
             return Err(Aes67Vsc2Error::InvalidSdp(
@@ -82,7 +82,7 @@ impl RxDescriptor {
             ));
         };
 
-        let fmt = if let Some(format) = media.media_name.formats.iter().next() {
+        let fmt = if let Some(format) = media.media_name.formats.first() {
             format
         } else {
             return Err(Aes67Vsc2Error::InvalidSdp(

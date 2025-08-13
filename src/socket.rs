@@ -73,7 +73,7 @@ pub fn create_rx_socket(sdp: &SessionDescription, local_ip: IpAddr) -> Aes67Vsc2
         ));
     }
 
-    let media = if let Some(media) = sdp.media_descriptions.iter().next() {
+    let media = if let Some(media) = sdp.media_descriptions.first() {
         media
     } else {
         return Err(Aes67Vsc2Error::InvalidSdp(
@@ -123,15 +123,13 @@ pub fn create_rx_socket(sdp: &SessionDescription, local_ip: IpAddr) -> Aes67Vsc2
 
     if address_type != "IP4" && address_type != "IP6" {
         return Err(Aes67Vsc2Error::InvalidSdp(format!(
-            "unsupported addrtype: {}",
-            address_type
+            "unsupported addrtype: {address_type}"
         )));
     }
 
     if network_type != "IN" {
         return Err(Aes67Vsc2Error::InvalidSdp(format!(
-            "unsupported nettype: {}",
-            network_type
+            "unsupported nettype: {network_type}"
         )));
     }
 

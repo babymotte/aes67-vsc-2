@@ -47,7 +47,7 @@ async fn worterbuch(
         vec![topic!(config.app.name, config.app.instance.name, "#").as_ref()].as_ref(),
     )
     .await?;
-    wb.set_last_will(&vec![KeyValuePair::of(
+    wb.set_last_will(&[KeyValuePair::of(
         topic!(config.app.name, config.app.instance.name, "running"),
         false,
     )])

@@ -53,7 +53,7 @@ pub struct ReceiverApi {
 impl ReceiverApi {
     pub fn with_socket_addr(addr: SocketAddr, use_tls: bool) -> Self {
         let schema = if use_tls { "https" } else { "http" };
-        let url = format!("{}://{}", schema, addr);
+        let url = format!("{schema}://{addr}");
         ReceiverApi {
             url,
             reqwest_client: Client::new(),

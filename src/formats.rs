@@ -87,7 +87,7 @@ impl From<&RxDescriptor> for FrameFormat {
     fn from(value: &RxDescriptor) -> Self {
         Self {
             channels: value.audio_format.frame_format.channels,
-            sample_format: value.audio_format.frame_format.sample_format.clone(),
+            sample_format: value.audio_format.frame_format.sample_format,
         }
     }
 }
@@ -189,7 +189,7 @@ fn bytes_to_f32_3_bytes(bytes: &[u8]) -> f32 {
 
 fn bytes_to_i32_3_bytes(bytes: &[u8]) -> i32 {
     let mut value =
-        (((bytes[0] as i32) << 16) | ((bytes[1] as i32) << 8) | (bytes[2] as i32)) as i32;
+        ((bytes[0] as i32) << 16) | ((bytes[1] as i32) << 8) | (bytes[2] as i32);
 
     // Sign extend from 24-bit to 32-bit
     if value & 0x800000 != 0 {
