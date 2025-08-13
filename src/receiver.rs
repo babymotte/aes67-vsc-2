@@ -4,19 +4,20 @@
 
 pub mod api;
 pub mod config;
+pub mod webserver;
 
 use crate::{
     buffer::{AudioBuffer, create_shared_memory_buffer},
     config::Config,
     error::Aes67Vsc2Result,
     receiver::{
-        api::{ReceiverApi, ReceiverInfo},
+        api::{ReceiverApi, ReceiverApiMessage, ReceiverInfo},
         config::{ReceiverConfig, RxDescriptor},
+        webserver::start_webserver,
     },
     socket::create_rx_socket,
     time::statime_linux::statime_linux,
     utils::{find_network_interface, panic_to_string},
-    webserver::start_webserver,
     worterbuch::start_worterbuch,
 };
 use rtp_rs::{RtpReader, Seq};
@@ -69,12 +70,6 @@ async fn run(
     Ok(())
 }
 
-#[derive(Debug)]
-pub enum ReceiverApiMessage {
-    Stop,
-    GetInfo(oneshot::Sender<ReceiverInfo>),
-}
-
 struct ReceiverActor {
     subsys: SubsystemHandle,
     config: Config,
@@ -120,6 +115,7 @@ impl ReceiverActor {
                     last_timestamp: None,
                     timestamp_offset: None,
                     clock,
+                    delay_buffer: NetworkDelayBuffer::new(),
                 }
                 .run(shmem_addr_tx)
             })?;
@@ -218,6 +214,7 @@ struct RxThread<C: Clock> {
     last_sequence_number: Option<Seq>,
     timestamp_offset: Option<u64>,
     clock: SharedClock<C>,
+    delay_buffer: NetworkDelayBuffer,
 }
 
 impl<C: Clock> RxThread<C> {
@@ -270,22 +267,31 @@ impl<C: Clock> RxThread<C> {
             if let (Some(last_ts), Some(last_seq)) =
                 (self.last_timestamp, self.last_sequence_number)
             {
-                if last_seq.next() != seq {
+                let expected_seq = last_seq.next();
+                let expected_ts = last_ts.wrapping_add(self.desc.frames_per_packet() as u32);
+                if seq != expected_seq {
                     warn!(
                         "inconsistent sequence number: {} (last was {})",
                         u16::from(seq),
                         u16::from(last_seq)
                     );
-                    // TODO this will never recover from a dropped packet, needs some way to recover
-                    // TODO track late packets
-                    return;
-                }
 
-                if last_ts.wrapping_add(self.desc.frames_per_packet() as u32) != ts {
-                    warn!("inconsistent timestamp: {} (last was {})", ts, last_ts);
-                    // TODO this will never recover from a dropped packet, needs some way to recover
+                    let diff = seq - expected_seq;
+                    let consistent_ts =
+                        expected_ts as i64 + self.desc.frames_per_packet() as i64 * diff as i64;
+                    if consistent_ts == ts as i64 {
+                        info!(
+                            "timestamp of out-of-order packet is consistent with sequence id, queuing it for playout"
+                        );
+                    } else {
+                        warn!(
+                            "timestamp of out-of-order packet is not consistent with sequence id, discarding it"
+                        );
+                        return;
+                    }
+
+                    // TODO check AES67 spec for exact rules how to handle this kind of situation
                     // TODO track late packets
-                    return;
                 }
 
                 ts_wrapped = ts < last_ts;
@@ -313,6 +319,14 @@ impl<C: Clock> RxThread<C> {
             self.last_timestamp = Some(ts);
 
             if let &Some(offset) = &self.timestamp_offset {
+                let ptp_time = self.clock.now();
+                let media_time = to_media_time(ptp_time, &self.desc);
+                let delay = media_time as i64 - (rtp.timestamp() as i64 + offset as i64);
+                if let Some(average) = self.delay_buffer.update(delay) {
+                    let micros = (average * 1_000_000) / self.desc.audio_format.sample_rate as i64;
+                    let packets = average as f32 / self.desc.frames_per_packet() as f32;
+                    info!("Network delay: {average} frames / {micros} µs / {packets:.1} packets");
+                }
                 buffer.insert(rtp, offset);
             }
         } else {
@@ -357,4 +371,30 @@ fn to_media_time(ptp_time: Time, desc: &RxDescriptor) -> u64 {
     let ptp_nanos = (ptp_time.secs() as u128) * 1_000_000_000 + ptp_time.subsec_nanos() as u128;
     let total_frames = (ptp_nanos * desc.audio_format.sample_rate as u128) / 1_000_000_000;
     total_frames as u64
+}
+
+struct NetworkDelayBuffer {
+    delays: [i64; 1024],
+    cursor: usize,
+}
+
+impl NetworkDelayBuffer {
+    fn new() -> Self {
+        Self {
+            delays: [0; 1024],
+            cursor: 0,
+        }
+    }
+
+    fn update(&mut self, delay: i64) -> Option<i64> {
+        self.delays[self.cursor] = delay;
+        self.cursor += 1;
+        if self.cursor >= self.delays.len() {
+            self.cursor = 0;
+            let average = self.delays.iter().sum::<i64>() / self.delays.len() as i64;
+            Some(average)
+        } else {
+            None
+        }
+    }
 }

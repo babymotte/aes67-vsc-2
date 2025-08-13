@@ -1,5 +1,12 @@
+### Receiver info
+
+GET http://127.0.0.1:32000/info
+
+### Receiver stop
+
 POST http://127.0.0.1:32000/stop
 
-###
 
-GET http://127.0.0.1:32000/shmem
+### Playout stop
+
+POST http://127.0.0.1:32001/stop

@@ -15,7 +15,9 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{error::Aes67Vsc2Result, receiver::config::ReceiverConfig};
+use crate::{
+    error::Aes67Vsc2Result, playout::config::PlayoutConfig, receiver::config::ReceiverConfig,
+};
 use clap::Parser;
 use gethostname::gethostname;
 use serde::{Deserialize, Serialize};
@@ -136,6 +138,8 @@ pub struct Config {
     pub telemetry: Option<TelemetryConfig>,
     #[serde(default)]
     pub receiver_config: Option<ReceiverConfig>,
+    #[serde(default)]
+    pub playout_config: Option<PlayoutConfig>,
 }
 
 impl Config {

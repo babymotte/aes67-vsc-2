@@ -15,11 +15,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{
-    config::Config,
-    error::{Aes67Vsc2Error, Aes67Vsc2Result},
-    receiver::{ReceiverApiMessage, api::ReceiverInfo},
-};
+use crate::{config::Config, error::Aes67Vsc2Result, playout::api::PlayoutApiMessage};
 use axum::{
     Json, Router,
     extract::State,
@@ -37,7 +33,7 @@ use tracing::{info, instrument};
 pub fn start_webserver(
     subsys: &SubsystemHandle,
     config: Config,
-    api_tx: mpsc::Sender<ReceiverApiMessage>,
+    api_tx: mpsc::Sender<PlayoutApiMessage>,
     ready_tx: oneshot::Sender<SocketAddr>,
 ) {
     info!("Starting webserver subsystem");
@@ -50,12 +46,11 @@ pub fn start_webserver(
 async fn webserver(
     subsys: SubsystemHandle,
     config: Config,
-    api_tx: mpsc::Sender<ReceiverApiMessage>,
+    api_tx: mpsc::Sender<PlayoutApiMessage>,
     ready_tx: oneshot::Sender<SocketAddr>,
 ) -> Aes67Vsc2Result<()> {
     let app = Router::new()
         .route("/stop", post(stop))
-        .route("/info", get(info))
         .with_state(api_tx)
         .layer(TraceLayer::new_for_http());
 
@@ -80,24 +75,10 @@ async fn webserver(
 
 #[instrument(ret)]
 async fn stop(
-    State(api_tx): State<mpsc::Sender<ReceiverApiMessage>>,
+    State(api_tx): State<mpsc::Sender<PlayoutApiMessage>>,
 ) -> Aes67Vsc2Result<Json<bool>> {
-    match api_tx.send(ReceiverApiMessage::Stop).await {
+    match api_tx.send(PlayoutApiMessage::Stop).await {
         Ok(_) => Ok(Json(true)),
         Err(_) => Ok(Json(false)),
-    }
-}
-
-#[instrument(ret)]
-async fn info(
-    State(api_tx): State<mpsc::Sender<ReceiverApiMessage>>,
-) -> Aes67Vsc2Result<Json<ReceiverInfo>> {
-    let (tx, rx) = oneshot::channel();
-    api_tx.send(ReceiverApiMessage::GetInfo(tx)).await.ok();
-    match rx.await {
-        Ok(addr) => Ok(Json(addr)),
-        Err(_) => Err(Aes67Vsc2Error::Other(
-            "error getting shared memory address".to_owned(),
-        )),
     }
 }

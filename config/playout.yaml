@@ -10,5 +10,7 @@ telemetry:
 playoutConfig:
   channels: 2
   initialRouting:
-    - http://127.0.0.1:32000: 0
-    - http://127.0.0.1:32000: 1
+    - receiver: http://127.0.0.1:32000
+      channel: 0
+    - receiver: http://127.0.0.1:32000
+      channel: 1

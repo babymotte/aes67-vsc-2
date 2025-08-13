@@ -54,6 +54,8 @@ pub enum Aes67Vsc2Error {
     SharedMemoryError(#[from] ShmemError),
     #[error("Received invalid RTP data: {0:?}")]
     InvalidRtpData(#[from] WrappedRtpError),
+    #[error("Jack error: {0:?}")]
+    JackError(#[from] jack::Error),
     #[error("General error: {0}")]
     Other(String),
 }

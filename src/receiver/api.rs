@@ -2,6 +2,7 @@ use crate::{error::Aes67Vsc2Result, receiver::config::RxDescriptor};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::{fmt::Display, net::SocketAddr};
+use tokio::sync::oneshot;
 use tracing::instrument;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19,6 +20,11 @@ impl Display for ReceiverInfo {
             serde_yaml::to_string(self).unwrap_or_else(|_| "<invalid yaml>".to_owned())
         )
     }
+}
+#[derive(Debug)]
+pub enum ReceiverApiMessage {
+    Stop,
+    GetInfo(oneshot::Sender<ReceiverInfo>),
 }
 
 #[derive(Debug, Clone)]

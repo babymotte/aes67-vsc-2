@@ -24,4 +24,4 @@ receiverConfig:
     a=mediaclk:direct=0
   linkOffset: 4
   bufferOverhead: 10
-  interfaceIp: "192.168.178.39"
+  interfaceIp: 192.168.178.39
