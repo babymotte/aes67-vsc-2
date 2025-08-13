@@ -15,7 +15,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::config::WebServerConfig;
+use crate::{config::WebServerConfig, formats::Seconds};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -24,4 +24,5 @@ pub struct PlayoutConfig {
     #[serde(default = "WebServerConfig::default")]
     pub webserver: WebServerConfig,
     pub receiver: String,
+    pub clock_drift_compensation_interval: Seconds,
 }

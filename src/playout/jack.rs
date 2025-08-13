@@ -154,8 +154,9 @@ impl PlayoutActor {
         }
 
         let desc = receiver_info.descriptor;
-        let drift_calculator_buffer_len =
-            5 * desc.audio_format.sample_rate / client.buffer_size() as usize;
+        let drift_calculator_buffer_len = playout_config.clock_drift_compensation_interval as usize
+            * desc.audio_format.sample_rate
+            / client.buffer_size() as usize;
         let drift_calculator_buffer = vec![0; drift_calculator_buffer_len];
 
         let notification_handler = TracingNotificationHandler;
@@ -235,7 +236,7 @@ struct ProcessHandlerState<C: Clock + Send + 'static> {
 impl<C: Clock + Send + 'static> ProcessHandlerState<C> {
     pub fn slew(&mut self, jack_media_time: u64) -> u64 {
         if self.drift_slew != 0 {
-            info!("drift slew {}", self.drift_slew);
+            info!("JACK clock slew {}", self.drift_slew);
         }
         self.drift_slew -= self.drift_slew.signum();
         (jack_media_time as i64 + self.drift_slew.signum()) as u64

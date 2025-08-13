@@ -117,6 +117,15 @@ impl ReceiverActor {
         let descriptor = RxDescriptor::new(id, &rx_config.session, rx_config.link_offset)?;
         let desc = descriptor.clone();
 
+        let delay_calculation_interval = config
+            .playout_config
+            .as_ref()
+            .map(|c| c.clock_drift_compensation_interval)
+            .unwrap_or(1);
+        let delay_calculation_buffer_len =
+            f32::floor(delay_calculation_interval as f32 * 1_000.0 / descriptor.packet_time)
+                as usize;
+
         let rx_thread = thread::Builder::new()
             .name("rx-thread".to_owned())
             .spawn(move || {
@@ -129,7 +138,9 @@ impl ReceiverActor {
                     last_timestamp: None,
                     timestamp_offset: None,
                     clock,
-                    delay_buffer: AverageCalculationBuffer::new(Box::new([0i64; 1024])),
+                    delay_buffer: AverageCalculationBuffer::new(
+                        vec![0i64; delay_calculation_buffer_len].into(),
+                    ),
                 }
                 .run(shmem_addr_tx)
             })?;

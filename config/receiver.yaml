@@ -9,6 +9,7 @@ playoutConfig:
     bindAddress: 127.0.0.1
     port: 32001
   receiver: http://127.0.0.1:32000
+  clockDriftCompensationInterval: 3
 receiverConfig:
   webserver:
     bindAddress: 127.0.0.1
