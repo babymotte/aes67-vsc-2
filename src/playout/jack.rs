@@ -137,6 +137,9 @@ impl PlayoutActor {
         }
 
         let desc = receiver_info.descriptor;
+        let drift_calculator_buffer_len =
+            5 * desc.audio_format.sample_rate / client.buffer_size() as usize;
+        let drift_calculator_buffer = vec![0; drift_calculator_buffer_len];
 
         let notification_handler = TracingNotificationHandler;
         let process_handler_state = ProcessHandlerState {
@@ -145,7 +148,7 @@ impl PlayoutActor {
             desc,
             clock,
             jack_media_clock: None,
-            drift_calculator: AverageCalculationBuffer::new(Box::new([0i64; 100])),
+            drift_calculator: AverageCalculationBuffer::new(drift_calculator_buffer.into()),
             drift_slew: 0,
         };
         let process_handler =
