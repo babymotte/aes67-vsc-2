@@ -7,8 +7,9 @@ license = "AGPL-3.0-or-later"
 
 [dependencies]
 axum = "0.8.1"
-clap = { version = "4.5.32", features = ["derive", "env"] }
+clap = { version = "4.5.44", features = ["derive", "env"] }
 gethostname = "1.0.0"
+hex = "0.4.3"
 lazy_static = "1.5.0"
 libc = "0.2.175"
 miette = { version = "7.5.0", features = ["fancy"] }
@@ -17,8 +18,11 @@ opentelemetry-otlp = { version = "0.30.0", features = ["grpc-tonic"] }
 opentelemetry-resource-detectors = "0.9.0"
 opentelemetry-semantic-conventions = "0.30.0"
 opentelemetry_sdk = "0.30.0"
+pin-project-lite = "0.2.16"
+pnet = "0.35.0"
+rand = "0.8.5"
 regex = "1.11.1"
-reqwest = "0.12.22"
+reqwest = "0.12.23"
 rtp-rs = "0.6.0"
 sdp = "0.8.0"
 serde = { version = "1.0.219", features = ["derive"] }
@@ -27,8 +31,11 @@ serde_millis = "0.1.1"
 serde_yaml = "0.9.34"
 shared_memory = "0.12.4"
 socket2 = "0.6.0"
+statime = "0.2.2"
+statime-linux = "0.2.2"
 supports-color = "3.0.2"
-thiserror = "2.0.12"
+thiserror = "2.0.14"
+timestamped-socket = "0.2.7"
 tokio = { version = "1.44.1", features = ["sync", "rt", "macros", "fs"] }
 tokio-graceful-shutdown = "0.16.0"
 tower-http = { version = "0.6.2", features = ["trace"] }

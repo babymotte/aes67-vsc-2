@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use shared_memory::{Shmem, ShmemConf};
 use std::fmt::Debug;
 use tokio::sync::oneshot;
-use tracing::{info, instrument};
+use tracing::{info, instrument, warn};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BufferConfig {
@@ -23,20 +23,41 @@ pub struct AudioBuffer {
 }
 
 impl AudioBuffer {
-    pub fn insert(&mut self, rtp: RtpReader) {
+    pub fn insert(&mut self, rtp: RtpReader, timestamp_offset: u64) {
+        // TODO make sure this does not break when rtp timestamp wraps around
+
         let payload = rtp.payload();
 
-        let egress_timestamp = rtp.timestamp() + self.desc.link_offset;
-
+        let bpf = self.desc.bytes_per_frame();
+        let frames_in_link_offset = self.desc.frames_in_link_offset() as u64;
+        let egress_timestamp = 
+        // wrapped ingress timestamp including random offset
+        rtp.timestamp() as u64
+        // subtract random timestamp offset from SDP to get the actual wrapped ingress timestamp
+        - self.desc.rtp_offset as u64
+        // add calibrated timestamp offset to transform it into the unwrapped ingress media clock time
+        + timestamp_offset
+        // add the number of frames in the link offset to convert it into the egress media clock time
+        + frames_in_link_offset;
         let buffer = unsafe { self.shmem.as_slice_mut() };
-        // TODO remove check once this has proven consistent
-        if buffer.len() % payload.len() != 0 {
-            panic!("payload and buffer sizes aren't aligned");
+        let frames_in_buffer = (buffer.len() / bpf) as u64;
+        let frame_index = egress_timestamp % frames_in_buffer;
+        let byte_index = frame_index as usize * bpf;
+        let end_index = byte_index as usize + payload.len();
+
+        if end_index <= buffer.len() {
+            buffer[byte_index..end_index].copy_from_slice(payload);
+        } else {
+            let modulo = end_index - buffer.len();
+
+            if modulo % bpf != 0 {
+                panic!("wrap within frame");
+            }
+
+            let pivot = payload.len() - modulo;
+            buffer[byte_index..].copy_from_slice(&payload[..pivot]);
+            buffer[..modulo].copy_from_slice(&payload[pivot..]);
         }
-
-        let index = (egress_timestamp as usize * payload.len()) % buffer.len();
-
-        buffer[index..index + payload.len()].copy_from_slice(payload);
     }
 }
 

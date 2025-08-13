@@ -182,7 +182,7 @@ impl RxDescriptor {
         formats::packets_in_link_offset(self.link_offset, self.packet_time)
     }
 
-    pub fn frames_per_link_offset_buffer(&self) -> usize {
+    pub fn frames_in_link_offset(&self) -> u32 {
         formats::frames_per_link_offset_buffer(self.link_offset, self.audio_format.sample_rate)
     }
 

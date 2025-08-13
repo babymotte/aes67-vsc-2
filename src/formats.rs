@@ -42,7 +42,7 @@ impl BufferFormat {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
 pub struct AudioFormat {
-    pub sample_rate: usize,
+    pub sample_rate: u32,
     pub frame_format: FrameFormat,
 }
 
@@ -57,7 +57,7 @@ impl AudioFormat {
     }
 
     pub fn frames_per_link_offset_buffer(&self, link_offset: u32) -> usize {
-        (self.sample_rate * link_offset as usize) / Duration::from_secs(1).as_millis() as usize
+        ((self.sample_rate * link_offset) / Duration::from_secs(1).as_millis() as u32) as usize
     }
 }
 
@@ -215,11 +215,11 @@ pub fn bytes_per_frame(channels: usize, sample_format: SampleFormat) -> usize {
     channels * sample_format.bytes_per_sample()
 }
 
-pub fn frames_per_packet(sample_rate: usize, packet_time: f32) -> usize {
+pub fn frames_per_packet(sample_rate: u32, packet_time: f32) -> usize {
     f32::ceil((sample_rate as f32 * packet_time) / 1000.0) as usize
 }
 
-pub fn samples_per_packet(channels: usize, sample_rate: usize, packet_time: f32) -> usize {
+pub fn samples_per_packet(channels: usize, sample_rate: u32, packet_time: f32) -> usize {
     channels * frames_per_packet(sample_rate, packet_time)
 }
 
@@ -227,14 +227,14 @@ pub fn packets_in_link_offset(link_offset: u32, packet_time: f32) -> usize {
     f32::floor(link_offset as f32 / packet_time) as usize
 }
 
-pub fn frames_per_link_offset_buffer(link_offset: u32, sample_rate: usize) -> usize {
-    (sample_rate * link_offset as usize) / Duration::from_secs(1).as_millis() as usize
+pub fn frames_per_link_offset_buffer(link_offset: u32, sample_rate: u32) -> u32 {
+    (sample_rate * link_offset) / Duration::from_secs(1).as_millis() as u32
 }
 
 pub fn link_offset_buffer_size(
     channels: usize,
     link_offset: u32,
-    sample_rate: usize,
+    sample_rate: u32,
     sample_format: SampleFormat,
 ) -> usize {
     samples_per_link_offset_buffer(channels, link_offset, sample_rate)
@@ -242,7 +242,7 @@ pub fn link_offset_buffer_size(
 }
 
 pub fn rtp_payload_size(
-    sample_rate: usize,
+    sample_rate: u32,
     packet_time: f32,
     channels: usize,
     sample_format: SampleFormat,
@@ -251,7 +251,7 @@ pub fn rtp_payload_size(
 }
 
 pub fn rtp_packet_size(
-    sample_rate: usize,
+    sample_rate: u32,
     packet_time: f32,
     channels: usize,
     sample_format: SampleFormat,
@@ -262,15 +262,15 @@ pub fn rtp_packet_size(
 pub fn samples_per_link_offset_buffer(
     channels: usize,
     link_offset: u32,
-    sample_rate: usize,
+    sample_rate: u32,
 ) -> usize {
-    channels * frames_per_link_offset_buffer(link_offset, sample_rate)
+    channels * frames_per_link_offset_buffer(link_offset, sample_rate) as usize
 }
 
 pub fn rtp_buffer_size(
     link_offset: u32,
     packet_time: f32,
-    sample_rate: usize,
+    sample_rate: u32,
     channels: usize,
     sample_format: SampleFormat,
 ) -> usize {
@@ -278,7 +278,7 @@ pub fn rtp_buffer_size(
         * rtp_packet_size(sample_rate, packet_time, channels, sample_format)
 }
 
-pub fn to_link_offset(samples: usize, sample_rate: usize) -> usize {
+pub fn to_link_offset(samples: usize, sample_rate: u32) -> usize {
     f32::ceil((samples as f32 * 1000.0) / sample_rate as f32) as usize
 }
 

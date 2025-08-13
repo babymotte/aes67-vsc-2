@@ -14,11 +14,13 @@ use crate::{
         config::{ReceiverConfig, RxDescriptor},
     },
     socket::create_rx_socket,
-    utils::panic_to_string,
+    time::statime_linux::statime_linux,
+    utils::{find_network_interface, panic_to_string},
     webserver::start_webserver,
     worterbuch::start_worterbuch,
 };
-use rtp_rs::RtpReader;
+use rtp_rs::{RtpReader, Seq};
+use statime::{Clock, SharedClock, time::Time};
 use std::{
     any::Any,
     io::ErrorKind,
@@ -36,6 +38,7 @@ use tokio::{
 };
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
 use tracing::{error, info, instrument, warn};
+use worterbuch_client::Worterbuch;
 
 #[instrument(skip(subsys))]
 pub async fn start_receiver(
@@ -58,10 +61,9 @@ async fn run(
     config: Config,
     ready_tx: oneshot::Sender<SocketAddr>,
 ) -> Aes67Vsc2Result<()> {
-    let _wb = start_worterbuch(&subsys, config.clone()).await?;
-
+    let wb = start_worterbuch(&subsys, config.clone()).await?;
     let (api_tx, api_rx) = mpsc::channel(1024);
-    ReceiverActor::start(&subsys, api_rx, config.clone()).await?;
+    ReceiverActor::start(&subsys, api_rx, config.clone(), wb).await?;
     start_webserver(&subsys, config, api_tx, ready_tx);
 
     Ok(())
@@ -83,11 +85,12 @@ struct ReceiverActor {
 }
 
 impl ReceiverActor {
-    #[instrument(skip(subsys, api_rx))]
+    #[instrument(skip(subsys, api_rx, wb))]
     async fn start(
         subsys: &SubsystemHandle,
         api_rx: mpsc::Receiver<ReceiverApiMessage>,
         config: Config,
+        wb: Worterbuch,
     ) -> Aes67Vsc2Result<()> {
         let rx_cancellation_token = Arc::new(AtomicBool::new(false));
         let rxct = rx_cancellation_token.clone();
@@ -101,6 +104,10 @@ impl ReceiverActor {
         let descriptor = RxDescriptor::new(id, &rx_config.session, link_offset)?;
         let desc = descriptor.clone();
 
+        let iface = find_network_interface(rx_config.interface_ip)?;
+
+        let clock = statime_linux(iface, rx_config.interface_ip, wb, config.instance_name()).await;
+
         let rx_thread = thread::Builder::new()
             .name("rx-thread".to_owned())
             .spawn(move || {
@@ -109,6 +116,10 @@ impl ReceiverActor {
                     rx_cancellation_token: rxct,
                     rx_config,
                     desc,
+                    last_sequence_number: None,
+                    last_timestamp: None,
+                    timestamp_offset: None,
+                    clock,
                 }
                 .run(shmem_addr_tx)
             })?;
@@ -198,15 +209,19 @@ impl ReceiverActor {
     }
 }
 
-struct RxThread {
+struct RxThread<C: Clock> {
     config: Config,
     rx_config: ReceiverConfig,
     rx_cancellation_token: Arc<AtomicBool>,
     desc: RxDescriptor,
+    last_timestamp: Option<u32>,
+    last_sequence_number: Option<Seq>,
+    timestamp_offset: Option<u64>,
+    clock: SharedClock<C>,
 }
 
-impl RxThread {
-    fn run(self, path_tx: oneshot::Sender<String>) -> Aes67Vsc2Result<()> {
+impl<C: Clock> RxThread<C> {
+    fn run(mut self, path_tx: oneshot::Sender<String>) -> Aes67Vsc2Result<()> {
         let mut audio_buffer =
             create_shared_memory_buffer(&self.config, path_tx, self.desc.clone())?;
         let socket = create_rx_socket(&self.rx_config.session, self.rx_config.interface_ip)?;
@@ -236,10 +251,8 @@ impl RxThread {
         Ok(())
     }
 
-    fn rtp_data_received(&self, data: &[u8], addr: SocketAddr, buffer: &mut AudioBuffer) {
+    fn rtp_data_received(&mut self, data: &[u8], addr: SocketAddr, buffer: &mut AudioBuffer) {
         if addr.ip() == self.desc.origin_ip {
-            // TODO only insert packet if sequence number is consistent with timestamp
-
             let rtp = match RtpReader::new(data) {
                 Ok(it) => it,
                 Err(e) => {
@@ -248,11 +261,100 @@ impl RxThread {
                 }
             };
 
-            // TODO log late packets
+            let seq = rtp.sequence_number();
+            let ts = rtp.timestamp();
 
-            buffer.insert(rtp);
+            let mut ts_wrapped = false;
+            let mut seq_wrapped = false;
+
+            if let (Some(last_ts), Some(last_seq)) =
+                (self.last_timestamp, self.last_sequence_number)
+            {
+                if last_seq.next() != seq {
+                    warn!(
+                        "inconsistent sequence number: {} (last was {})",
+                        u16::from(seq),
+                        u16::from(last_seq)
+                    );
+                    // TODO this will never recover from a dropped packet, needs some way to recover
+                    // TODO track late packets
+                    return;
+                }
+
+                if last_ts.wrapping_add(self.desc.frames_per_packet() as u32) != ts {
+                    warn!("inconsistent timestamp: {} (last was {})", ts, last_ts);
+                    // TODO this will never recover from a dropped packet, needs some way to recover
+                    // TODO track late packets
+                    return;
+                }
+
+                ts_wrapped = ts < last_ts;
+                seq_wrapped = u16::from(seq) < u16::from(last_seq);
+            }
+
+            // TODO track late packets
+
+            if seq_wrapped || self.timestamp_offset.is_none() {
+                self.calibrate_timestamp_offset(ts, ts_wrapped);
+            }
+
+            if ts_wrapped {
+                info!("RTP timestamp wrapped");
+                if let Some(previous_offset) = self.timestamp_offset {
+                    let new_offset = previous_offset + 2u64.pow(32);
+                    info!("Updating RTP timestamp offset from {previous_offset} to {new_offset}");
+                    self.timestamp_offset = Some(new_offset);
+                } else {
+                    self.calibrate_timestamp_offset(ts, ts_wrapped);
+                }
+            }
+
+            self.last_sequence_number = Some(seq);
+            self.last_timestamp = Some(ts);
+
+            if let &Some(offset) = &self.timestamp_offset {
+                buffer.insert(rtp, offset);
+            }
         } else {
             warn!("Received packet from wrong sender: {addr}");
         }
     }
+
+    #[instrument(skip(self))]
+    fn calibrate_timestamp_offset(&mut self, rtp_timestamp: u32, timestamp_wrapped: bool) {
+        info!("Calibrating timestamp offset at RTP timestamp {rtp_timestamp}");
+        let ptp_time = self.clock.now();
+        let media_time = to_media_time(ptp_time, &self.desc);
+        let timestamp_wrap = 2u64.pow(32);
+        let timestamp_wraps = media_time / timestamp_wrap;
+        let timestamp_modulo = media_time % timestamp_wrap;
+        let diff = rtp_timestamp as i128 - timestamp_modulo as i128;
+        if diff.abs() >= timestamp_modulo as i128 {
+            warn!("calibrating timestamp offset close to wrap, calibration may be inaccurate");
+        }
+        // the offset is the time of the last wrap in media time,
+        // i.e. offset + rtp.timestamp should give us an accurate
+        // unwrapped media clock timestamp of an rtp packet
+        let offset = timestamp_wraps * timestamp_wrap;
+
+        if let Some(previous_offset) = self.timestamp_offset {
+            if previous_offset != offset {
+                warn!(
+                    "RTP timestamp offset changed from {previous_offset} to {offset}, this may lead to audio interruptions"
+                );
+            } else {
+                info!("Offset did not change ({offset})");
+            }
+        } else {
+            info!("Offset: {offset}");
+        }
+
+        self.timestamp_offset = Some(offset);
+    }
+}
+
+fn to_media_time(ptp_time: Time, desc: &RxDescriptor) -> u64 {
+    let ptp_nanos = (ptp_time.secs() as u128) * 1_000_000_000 + ptp_time.subsec_nanos() as u128;
+    let total_frames = (ptp_nanos * desc.audio_format.sample_rate as u128) / 1_000_000_000;
+    total_frames as u64
 }
