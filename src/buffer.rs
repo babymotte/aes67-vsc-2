@@ -49,19 +49,16 @@ impl AudioBuffer {
         let payload = rtp.payload();
 
         let bpf = self.desc.bytes_per_frame();
-        let frames_in_link_offset = self.desc.frames_in_link_offset() as u64;
-        let egress_timestamp =
+        let ingress_timestamp =
         // wrapped ingress timestamp including random offset
         rtp.timestamp() as u64
         // subtract random timestamp offset from SDP to get the actual wrapped ingress timestamp
         - self.desc.rtp_offset as u64
         // add calibrated timestamp offset to transform it into the unwrapped ingress media clock time
-        + timestamp_offset
-        // add the number of frames in the link offset to convert it into the egress media clock time
-        + frames_in_link_offset;
+        + timestamp_offset;
         let buffer = unsafe { self.shmem.as_slice_mut() };
         let frames_in_buffer = (buffer.len() / bpf) as u64;
-        let frame_index = egress_timestamp % frames_in_buffer;
+        let frame_index = ingress_timestamp % frames_in_buffer;
         let byte_index = frame_index as usize * bpf;
         let end_index = byte_index as usize + payload.len();
 
@@ -88,12 +85,10 @@ pub fn create_shared_memory_buffer(
     descriptor: RxDescriptor,
 ) -> Aes67Vsc2Result<AudioBuffer> {
     let rx_config = config.receiver_config.as_ref().expect("no receiver config");
-    let link_offset = rx_config.link_offset;
-    let buffer_overhead = rx_config.buffer_overhead;
+    let buffer_time = rx_config.buffer_time;
     let audio_format = AudioFormat::from(&descriptor);
 
-    let buffer_format =
-        BufferFormat::for_rtp_playout_buffer(link_offset, buffer_overhead, audio_format);
+    let buffer_format = BufferFormat::for_rtp_playout_buffer(buffer_time, audio_format);
 
     let (buffer, path) = create_audio_buffer(buffer_format, descriptor)?;
     info!("Created shared memory buffer at {path}");

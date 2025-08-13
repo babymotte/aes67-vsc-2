@@ -16,7 +16,7 @@ use crate::{
         webserver::start_webserver,
     },
     socket::create_rx_socket,
-    utils::{media_time_from_ptp, panic_to_string},
+    utils::{AverageCalculationBuffer, media_time_from_ptp, panic_to_string},
 };
 use rtp_rs::{RtpReader, Seq};
 use statime::Clock;
@@ -97,8 +97,7 @@ impl ReceiverActor {
         let (shmem_addr_tx, shmem_add_rx) = oneshot::channel();
 
         let id = config.app.instance.name.clone();
-        let link_offset = rx_config.link_offset;
-        let descriptor = RxDescriptor::new(id, &rx_config.session, link_offset)?;
+        let descriptor = RxDescriptor::new(id, &rx_config.session, rx_config.link_offset)?;
         let desc = descriptor.clone();
 
         let rx_thread = thread::Builder::new()
@@ -113,7 +112,7 @@ impl ReceiverActor {
                     last_timestamp: None,
                     timestamp_offset: None,
                     clock,
-                    delay_buffer: NetworkDelayBuffer::new(),
+                    delay_buffer: AverageCalculationBuffer::new(Box::new([0i64; 1024])),
                 }
                 .run(shmem_addr_tx)
             })?;
@@ -212,7 +211,7 @@ struct RxThread<C: Clock> {
     last_sequence_number: Option<Seq>,
     timestamp_offset: Option<u64>,
     clock: C,
-    delay_buffer: NetworkDelayBuffer,
+    delay_buffer: AverageCalculationBuffer,
 }
 
 impl<C: Clock> RxThread<C> {
@@ -363,31 +362,5 @@ impl<C: Clock> RxThread<C> {
         }
 
         self.timestamp_offset = Some(offset);
-    }
-}
-
-struct NetworkDelayBuffer {
-    delays: [i64; 1024],
-    cursor: usize,
-}
-
-impl NetworkDelayBuffer {
-    fn new() -> Self {
-        Self {
-            delays: [0; 1024],
-            cursor: 0,
-        }
-    }
-
-    fn update(&mut self, delay: i64) -> Option<i64> {
-        self.delays[self.cursor] = delay;
-        self.cursor += 1;
-        if self.cursor >= self.delays.len() {
-            self.cursor = 0;
-            let average = self.delays.iter().sum::<i64>() / self.delays.len() as i64;
-            Some(average)
-        } else {
-            None
-        }
     }
 }

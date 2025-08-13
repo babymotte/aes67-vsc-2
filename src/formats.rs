@@ -13,12 +13,8 @@ pub struct BufferFormat {
 }
 
 impl BufferFormat {
-    pub fn for_rtp_playout_buffer(
-        link_offset: MilliSeconds,
-        overhead: f32,
-        audio_format: AudioFormat,
-    ) -> Self {
-        let buffer_len = audio_format.bytes_per_buffer(overhead * link_offset);
+    pub fn for_rtp_playout_buffer(buffer_time: MilliSeconds, audio_format: AudioFormat) -> Self {
+        let buffer_len = audio_format.bytes_per_buffer(buffer_time);
         Self {
             buffer_len,
             audio_format,

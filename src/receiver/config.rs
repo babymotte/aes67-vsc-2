@@ -33,7 +33,7 @@ pub struct ReceiverConfig {
     )]
     pub session: SessionDescription,
     pub link_offset: MilliSeconds,
-    pub buffer_overhead: f32,
+    pub buffer_time: MilliSeconds,
     pub interface_ip: IpAddr,
 }
 
@@ -163,10 +163,10 @@ impl RxDescriptor {
             session_version,
             audio_format,
             packet_time,
-            link_offset,
             origin_ip,
             rtp_offset,
             channel_labels,
+            link_offset,
         })
     }
 
@@ -196,28 +196,15 @@ impl RxDescriptor {
         formats::frames_per_packet(self.audio_format.sample_rate, self.packet_time)
     }
 
+    pub(crate) fn frames_per_ms(&self) -> usize {
+        formats::frames_per_packet(self.audio_format.sample_rate, 1.0)
+    }
+
     pub fn samples_per_packet(&self) -> usize {
         formats::samples_per_packet(
             self.audio_format.frame_format.channels,
             self.audio_format.sample_rate,
             self.packet_time,
-        )
-    }
-
-    pub fn packets_in_link_offset(&self) -> usize {
-        formats::packets_in_link_offset(self.link_offset, self.packet_time)
-    }
-
-    pub fn frames_in_link_offset(&self) -> usize {
-        formats::frames_per_link_offset_buffer(self.link_offset, self.audio_format.sample_rate)
-    }
-
-    pub fn link_offset_buffer_size(&self) -> usize {
-        formats::link_offset_buffer_size(
-            self.audio_format.frame_format.channels,
-            self.link_offset,
-            self.audio_format.sample_rate,
-            self.audio_format.frame_format.sample_format,
         )
     }
 
@@ -234,24 +221,6 @@ impl RxDescriptor {
         formats::rtp_packet_size(
             self.audio_format.sample_rate,
             self.packet_time,
-            self.audio_format.frame_format.channels,
-            self.audio_format.frame_format.sample_format,
-        )
-    }
-
-    pub fn samples_per_link_offset_buffer(&self) -> usize {
-        formats::samples_per_link_offset_buffer(
-            self.audio_format.frame_format.channels,
-            self.link_offset,
-            self.audio_format.sample_rate,
-        )
-    }
-
-    pub fn rtp_buffer_size(&self) -> usize {
-        formats::rtp_buffer_size(
-            self.link_offset,
-            self.packet_time,
-            self.audio_format.sample_rate,
             self.audio_format.frame_format.channels,
             self.audio_format.frame_format.sample_format,
         )

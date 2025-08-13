@@ -8,7 +8,7 @@ use crate::{
         webserver::start_webserver,
     },
     receiver::{api::ReceiverApi, config::RxDescriptor},
-    utils::media_time_from_ptp,
+    utils::{AverageCalculationBuffer, media_time_from_ptp},
 };
 use jack::{
     AudioOut, Client, ClientOptions, Control, NotificationHandler, Port, ProcessScope,
@@ -145,6 +145,8 @@ impl PlayoutActor {
             desc,
             clock,
             jack_media_clock: None,
+            drift_calculator: AverageCalculationBuffer::new(Box::new([0i64; 100])),
+            drift_slew: 0,
         };
         let process_handler =
             ClosureProcessHandler::with_state(process_handler_state, process, buffer_change);
@@ -206,6 +208,18 @@ struct ProcessHandlerState<C: Clock + Send + 'static> {
     desc: RxDescriptor,
     clock: C,
     jack_media_clock: Option<u64>,
+    drift_calculator: AverageCalculationBuffer,
+    drift_slew: i64,
+}
+
+impl<C: Clock + Send + 'static> ProcessHandlerState<C> {
+    pub fn slew(&mut self, jack_media_time: u64) -> u64 {
+        self.drift_slew -= self.drift_slew.signum();
+        if self.drift_slew != 0 {
+            info!("drift slew {}", self.drift_slew);
+        }
+        (jack_media_time as i64 + self.drift_slew.signum()) as u64
+    }
 }
 
 struct TracingNotificationHandler;
@@ -285,22 +299,47 @@ fn process<C: Clock + Send + 'static>(
     _: &Client,
     ps: &ProcessScope,
 ) -> Control {
-    let buffer = state.audio_buffer_ref.buffer();
-
-    let ptpt_time = state.clock.now();
-    let actual_media_time = media_time_from_ptp(ptpt_time, &state.desc);
-    let jack_media_time = state.jack_media_clock.unwrap_or(actual_media_time);
-
     let jack_buffer_len = state
         .out_ports
         .iter_mut()
         .next()
         .map(|p| p.as_mut_slice(ps).len())
-        .unwrap_or(0);
+        .unwrap_or(0) as u64;
 
-    let media_time = jack_media_time;
+    let ptpt_time = state.clock.now();
+    let current_media_time = media_time_from_ptp(ptpt_time, &state.desc);
+    let jack_media_time = state.jack_media_clock.unwrap_or(current_media_time);
 
-    state.jack_media_clock = Some(media_time + jack_buffer_len as u64);
+    let link_offset = state.desc.link_offset;
+    let link_offset_frames = f32::floor(link_offset * state.desc.frames_per_ms() as f32) as u64;
+
+    let current_drift = jack_media_time as i64 - current_media_time as i64;
+
+    let next_media_time = if let Some(drift) = state.drift_calculator.update(current_drift) {
+        // we got a new average drift, let's see if we need to compensate
+        if drift.abs() as u64 > link_offset_frames / 2 {
+            warn!("JACK media clock if too far off ({drift}), resetting it to ptp media clock");
+            state.drift_slew = 0;
+            current_media_time
+        } else {
+            if drift != 0 {
+                warn!("Current JACK clock drift: {drift}");
+            }
+            if drift.abs() >= (link_offset_frames / 8) as i64 && state.drift_slew == 0 {
+                state.drift_slew = -drift;
+            }
+            state.slew(jack_media_time)
+        }
+    } else {
+        state.slew(jack_media_time)
+    } + jack_buffer_len;
+
+    state.jack_media_clock = Some(next_media_time);
+
+    let ingress_time = jack_media_time - link_offset_frames;
+    let playout_time = ingress_time - jack_buffer_len;
+
+    let buffer = state.audio_buffer_ref.buffer();
 
     for (port_nr, port) in state.out_ports.iter_mut().enumerate() {
         let output_buffer = port.as_mut_slice(ps);
@@ -315,7 +354,7 @@ fn process<C: Clock + Send + 'static>(
         let sample_format = state.desc.audio_format.frame_format.sample_format;
         let frames_per_buffer = buffer.len() / bytes_per_buffer_frame;
 
-        let frame_start = (media_time % frames_per_buffer as u64) as usize;
+        let frame_start = (playout_time % frames_per_buffer as u64) as usize;
 
         for (frame, sample) in output_buffer.iter_mut().enumerate() {
             let buffer_frame_index = (frame_start + frame) % frames_per_buffer;

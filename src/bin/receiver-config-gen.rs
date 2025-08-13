@@ -30,7 +30,7 @@ async fn main() -> Aes67Vsc2Result<()> {
         webserver,
         session,
         link_offset: 4.0,
-        buffer_overhead: 10.0,
+        buffer_time: 1000.0,
         interface_ip: IpAddr::V4(Ipv4Addr::new(192, 168, 178, 39)),
     });
 
