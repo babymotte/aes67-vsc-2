@@ -16,7 +16,7 @@
  */
 
 use crate::{
-    config::WebServerConfig,
+    config::{Config, WebServerConfig},
     error::{Aes67Vsc2Error, Aes67Vsc2Result},
     formats::{self, AudioFormat, FrameFormat, MilliSeconds},
 };
@@ -51,7 +51,6 @@ pub struct ReceiverConfig {
     pub session: SessionDescription,
     pub link_offset: MilliSeconds,
     pub buffer_time: MilliSeconds,
-    pub interface_ip: IpAddr,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,6 +65,19 @@ pub struct RxDescriptor {
     pub rtp_offset: f32,
     pub audio_format: AudioFormat,
     pub channel_labels: Vec<Option<String>>,
+}
+
+impl TryFrom<&Config> for RxDescriptor {
+    type Error = Aes67Vsc2Error;
+    fn try_from(cfg: &Config) -> Aes67Vsc2Result<Self> {
+        let rx_config = cfg
+            .receiver_config
+            .as_ref()
+            .ok_or_else(|| Aes67Vsc2Error::Other("no receiver config".to_owned()))?;
+        let id = cfg.app.instance.name.clone();
+        let descriptor = RxDescriptor::new(id, &rx_config.session, rx_config.link_offset)?;
+        Ok(descriptor)
+    }
 }
 
 impl RxDescriptor {

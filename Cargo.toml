@@ -7,6 +7,7 @@ license = "AGPL-3.0-or-later"
 
 [dependencies]
 axum = "0.8.1"
+chrono = "0.4.41"
 clap = { version = "4.5.44", features = ["derive", "env"] }
 gethostname = "1.0.0"
 hex = "0.4.3"
@@ -36,6 +37,7 @@ statime = "0.2.2"
 statime-linux = "0.2.2"
 supports-color = "3.0.2"
 thiserror = "2.0.14"
+thread-priority = "2.1.0"
 timestamped-socket = "0.2.7"
 tokio = { version = "1.44.1", features = ["sync", "rt", "macros", "fs"] }
 tokio-graceful-shutdown = "0.16.0"

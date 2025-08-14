@@ -25,13 +25,13 @@ use crate::{
         webserver::start_webserver,
     },
     receiver::{api::ReceiverApi, config::RxDescriptor},
-    utils::{AverageCalculationBuffer, media_time_from_ptp},
+    time::MediaClock,
+    utils::{AverageCalculationBuffer, set_realtime_priority},
 };
 use jack::{
     AudioOut, Client, ClientOptions, Control, NotificationHandler, Port, ProcessScope,
     contrib::ClosureProcessHandler,
 };
-use statime::Clock;
 use std::{net::SocketAddr, thread};
 use tokio::{
     select,
@@ -42,32 +42,42 @@ use tracing::{error, info, instrument, warn};
 use worterbuch_client::Worterbuch;
 
 #[instrument(skip(subsys, wb, clock))]
-pub async fn start_jack_playout<C: Clock + Send + 'static>(
+pub async fn start_jack_playout<C: MediaClock>(
     subsys: &SubsystemHandle,
     config: Config,
     use_tls: bool,
     wb: Worterbuch,
     clock: C,
+    compensate_clock_drift: bool,
 ) -> Aes67Vsc2Result<PlayoutApi> {
     let id = config.app.instance.name.clone();
     let (ready_tx, ready_rx) = oneshot::channel();
-    subsys.start(SubsystemBuilder::new(format!("receiver-{id}"), |s| {
-        run(s, config, ready_tx, wb, clock)
+    subsys.start(SubsystemBuilder::new(format!("receiver-{id}"), move |s| {
+        run(s, config, ready_tx, wb, clock, compensate_clock_drift)
     }));
     let api_address = ready_rx.await?;
     info!("Receiver '{id}' started successfully.");
     Ok(PlayoutApi::new(api_address, use_tls))
 }
 
-async fn run<C: Clock + Send + 'static>(
+async fn run<C: MediaClock>(
     subsys: SubsystemHandle,
     config: Config,
     ready_tx: oneshot::Sender<SocketAddr>,
     wb: Worterbuch,
     clock: C,
+    compensate_clock_drift: bool,
 ) -> Aes67Vsc2Result<()> {
     let (api_tx, api_rx) = mpsc::channel(1024);
-    PlayoutActor::start(&subsys, api_rx, config.clone(), wb, clock).await?;
+    PlayoutActor::start(
+        &subsys,
+        api_rx,
+        config.clone(),
+        wb,
+        clock,
+        compensate_clock_drift,
+    )
+    .await?;
     start_webserver(&subsys, config, api_tx, ready_tx);
 
     Ok(())
@@ -81,32 +91,37 @@ struct PlayoutActor {
 
 impl PlayoutActor {
     #[instrument(skip(subsys, api_rx, _wb, clock))]
-    async fn start<C: Clock + Send + 'static>(
+    async fn start<C: MediaClock>(
         subsys: &SubsystemHandle,
         api_rx: mpsc::Receiver<PlayoutApiMessage>,
         config: Config,
         _wb: Worterbuch,
         clock: C,
+        compensate_clock_drift: bool,
     ) -> Aes67Vsc2Result<()> {
         let playout_config = config.playout_config.clone().expect("no playout config");
         let id: String = config.app.instance.name.clone();
 
         info!("Starting JACK playout {id} with config {playout_config:?}");
 
-        subsys.start(SubsystemBuilder::new("actor", |s| async move {
+        subsys.start(SubsystemBuilder::new("actor", move |s| async move {
             PlayoutActor {
                 subsys: s,
                 api_rx,
                 config,
             }
-            .run(clock)
+            .run(clock, compensate_clock_drift)
             .await
         }));
 
         Ok(())
     }
 
-    async fn run<C: Clock + Send + 'static>(mut self, clock: C) -> Aes67Vsc2Result<()> {
+    async fn run<C: MediaClock>(
+        mut self,
+        clock: C,
+        compensate_clock_drift: bool,
+    ) -> Aes67Vsc2Result<()> {
         info!(
             "Receiver actor '{}' started.",
             self.config.app.instance.name
@@ -168,6 +183,8 @@ impl PlayoutActor {
             jack_media_clock: None,
             drift_calculator: AverageCalculationBuffer::new(drift_calculator_buffer.into()),
             drift_slew: 0,
+            thread_prio_set: false,
+            compensate_clock_drift,
         };
         let process_handler =
             ClosureProcessHandler::with_state(process_handler_state, process, buffer_change);
@@ -223,7 +240,7 @@ impl PlayoutActor {
     }
 }
 
-struct ProcessHandlerState<C: Clock + Send + 'static> {
+struct ProcessHandlerState<C: MediaClock> {
     out_ports: Vec<Port<AudioOut>>,
     audio_buffer_ref: AudioBufferRef,
     desc: RxDescriptor,
@@ -231,12 +248,14 @@ struct ProcessHandlerState<C: Clock + Send + 'static> {
     jack_media_clock: Option<u64>,
     drift_calculator: AverageCalculationBuffer,
     drift_slew: i64,
+    thread_prio_set: bool,
+    compensate_clock_drift: bool,
 }
 
-impl<C: Clock + Send + 'static> ProcessHandlerState<C> {
+impl<C: MediaClock> ProcessHandlerState<C> {
     pub fn slew(&mut self, jack_media_time: u64) -> u64 {
         if self.drift_slew != 0 {
-            info!("JACK clock slew {}", self.drift_slew);
+            info!("JACK clock slew {} frames", self.drift_slew);
         }
         self.drift_slew -= self.drift_slew.signum();
         (jack_media_time as i64 + self.drift_slew.signum()) as u64
@@ -306,7 +325,7 @@ impl NotificationHandler for TracingNotificationHandler {
     }
 }
 
-fn buffer_change<C: Clock + Send + 'static>(
+fn buffer_change<C: MediaClock>(
     _: &mut ProcessHandlerState<C>,
     _: &Client,
     buffer_len: jack::Frames,
@@ -315,11 +334,16 @@ fn buffer_change<C: Clock + Send + 'static>(
     Control::Continue
 }
 
-fn process<C: Clock + Send + 'static>(
+fn process<C: MediaClock>(
     state: &mut ProcessHandlerState<C>,
     _: &Client,
     ps: &ProcessScope,
 ) -> Control {
+    if !state.thread_prio_set {
+        set_realtime_priority();
+        state.thread_prio_set = true;
+    }
+
     let jack_buffer_len = state
         .out_ports
         .iter_mut()
@@ -327,8 +351,7 @@ fn process<C: Clock + Send + 'static>(
         .map(|p| p.as_mut_slice(ps).len())
         .unwrap_or(0) as u64;
 
-    let ptpt_time = state.clock.now();
-    let current_media_time = media_time_from_ptp(ptpt_time, &state.desc);
+    let current_media_time = state.clock.current_media_time();
     let jack_media_time = state.jack_media_clock.unwrap_or(current_media_time);
 
     let link_offset = state.desc.link_offset;
@@ -336,21 +359,31 @@ fn process<C: Clock + Send + 'static>(
 
     let current_drift = jack_media_time as i64 - current_media_time as i64;
 
-    let next_media_time = if let Some(drift) = state.drift_calculator.update(current_drift) {
-        // we got a new average drift, let's see if we need to compensate
-        if drift.unsigned_abs() > link_offset_frames / 2 {
-            warn!("JACK media clock if too far off ({drift}), resetting it to ptp media clock");
-            state.drift_slew = 0;
-            current_media_time
-        } else {
-            if drift != 0 {
-                warn!("Current JACK clock drift: {drift}");
+    let next_media_time = if state.compensate_clock_drift {
+        if let Some(drift) = state.drift_calculator.update(current_drift) {
+            // we got a new average drift, let's see if we need to compensate
+            if drift.unsigned_abs() > link_offset_frames / 2 {
+                warn!(
+                    "JACK media clock if too far off ({drift} frames), resetting it to ptp media clock"
+                );
+                state.drift_slew = 0;
+                current_media_time
+            } else {
+                if drift != 0 {
+                    warn!(
+                        "Current JACK clock drift: {} frames / {} µs",
+                        drift,
+                        (drift * 1_000_000) / state.desc.audio_format.sample_rate as i64
+                    );
+                }
+                state.drift_slew = -drift;
+                state.slew(jack_media_time)
             }
-            state.drift_slew = -drift;
+        } else {
             state.slew(jack_media_time)
         }
     } else {
-        state.slew(jack_media_time)
+        jack_media_time
     } + jack_buffer_len;
 
     state.jack_media_clock = Some(next_media_time);

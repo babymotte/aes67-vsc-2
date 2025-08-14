@@ -15,13 +15,17 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-pub mod statime_linux;
+mod statime_linux;
 
 use crate::{
+    config::Config,
     error::Aes67Vsc2Result,
-    formats::{FramesPerSecond, MilliSeconds, frames_per_link_offset_buffer},
+    formats::{AudioFormat, FramesPerSecond, MilliSeconds, frames_per_link_offset_buffer},
+    time::statime_linux::{PtpClock, statime_linux},
+    utils::find_network_interface,
 };
 use libc::{CLOCK_TAI, clock_gettime, timespec};
+use statime::Clock;
 use std::{
     cmp::Ordering,
     fmt::Display,
@@ -32,6 +36,7 @@ use std::{
 };
 use tokio::{io::AsyncReadExt, net::TcpStream, spawn, sync::mpsc, time::sleep};
 use tracing::{error, info};
+use worterbuch_client::Worterbuch;
 
 #[derive(Debug, Clone, Copy)]
 pub struct MediaClockTimestamp {
@@ -291,6 +296,83 @@ pub fn system_time() -> timespec {
         // TODO handle error
     }
     tp
+}
+
+pub trait MediaClock: Clone + Send + 'static {
+    fn current_media_time(&self) -> u64;
+    fn current_ptp_time_millis(&self) -> u64;
+}
+
+#[derive(Clone)]
+pub struct SystemMediaClock {
+    audio_format: AudioFormat,
+}
+
+impl SystemMediaClock {
+    pub fn new(audio_format: AudioFormat) -> Self {
+        Self { audio_format }
+    }
+}
+
+impl MediaClock for SystemMediaClock {
+    fn current_media_time(&self) -> u64 {
+        let ptp_time = system_time();
+        media_time_from_ptp(
+            ptp_time.tv_sec as u64,
+            ptp_time.tv_nsec as u64,
+            &self.audio_format,
+        )
+    }
+
+    fn current_ptp_time_millis(&self) -> u64 {
+        let ptp_time = system_time();
+        ptp_time.tv_sec as u64 * 1_000 + ptp_time.tv_nsec as u64 / 1_000_000
+    }
+}
+
+#[derive(Clone)]
+pub struct StatimePtpMediaClock {
+    audio_format: AudioFormat,
+    statime_ptp_clock: PtpClock,
+}
+
+impl StatimePtpMediaClock {
+    pub async fn new(
+        config: &Config,
+        audio_format: AudioFormat,
+        wb: Worterbuch,
+    ) -> Aes67Vsc2Result<Self> {
+        let iface = find_network_interface(config.interface_ip)?;
+        let ip = config.interface_ip;
+        let root_key = config.instance_name();
+        let statime_ptp_clock = statime_linux(iface, ip, wb, root_key).await;
+        Ok(StatimePtpMediaClock {
+            audio_format,
+            statime_ptp_clock,
+        })
+    }
+}
+
+impl MediaClock for StatimePtpMediaClock {
+    fn current_media_time(&self) -> u64 {
+        let ptp_time = self.statime_ptp_clock.now();
+        media_time_from_ptp(
+            ptp_time.secs(),
+            ptp_time.subsec_nanos() as u64,
+            &self.audio_format,
+        )
+    }
+
+    fn current_ptp_time_millis(&self) -> u64 {
+        let ptp_time = self.statime_ptp_clock.now();
+        ptp_time.secs() as u64 * 1_000 + ptp_time.subsec_nanos() as u64 / 1_000_000
+    }
+}
+
+fn media_time_from_ptp(ptp_time_secs: u64, ptp_time_nanos: u64, audio_format: &AudioFormat) -> u64 {
+    let ptp_nanos = (ptp_time_secs as u128) * 1_000_000_000 + ptp_time_nanos as u128;
+    let total_frames = (ptp_nanos * audio_format.sample_rate as u128) / 1_000_000_000;
+    total_frames as u64
 }
 
 #[cfg(test)]

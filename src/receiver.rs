@@ -33,10 +33,10 @@ use crate::{
         webserver::start_webserver,
     },
     socket::create_rx_socket,
-    utils::{AverageCalculationBuffer, media_time_from_ptp, panic_to_string},
+    time::MediaClock,
+    utils::{AverageCalculationBuffer, panic_to_string, set_realtime_priority},
 };
 use rtp_rs::{RtpReader, Seq};
-use statime::Clock;
 use std::{
     any::Any,
     io::ErrorKind,
@@ -57,7 +57,7 @@ use tracing::{error, info, instrument, warn};
 use worterbuch_client::Worterbuch;
 
 #[instrument(skip(subsys, wb, clock))]
-pub async fn start_receiver<C: Clock + Send + 'static>(
+pub async fn start_receiver<C: MediaClock>(
     subsys: &SubsystemHandle,
     config: Config,
     use_tls: bool,
@@ -74,7 +74,7 @@ pub async fn start_receiver<C: Clock + Send + 'static>(
     Ok(ReceiverApi::with_socket_addr(api_address, use_tls))
 }
 
-async fn run<C: Clock + Send + 'static>(
+async fn run<C: MediaClock>(
     subsys: SubsystemHandle,
     config: Config,
     ready_tx: oneshot::Sender<SocketAddr>,
@@ -99,7 +99,7 @@ struct ReceiverActor {
 
 impl ReceiverActor {
     #[instrument(skip(subsys, api_rx, _wb, clock))]
-    async fn start<C: Clock + Send + 'static>(
+    async fn start<C: MediaClock>(
         subsys: &SubsystemHandle,
         api_rx: mpsc::Receiver<ReceiverApiMessage>,
         config: Config,
@@ -113,8 +113,7 @@ impl ReceiverActor {
 
         let (shmem_addr_tx, shmem_add_rx) = oneshot::channel();
 
-        let id = config.app.instance.name.clone();
-        let descriptor = RxDescriptor::new(id, &rx_config.session, rx_config.link_offset)?;
+        let descriptor = RxDescriptor::try_from(&config)?;
         let desc = descriptor.clone();
 
         let delay_calculation_interval = config
@@ -230,7 +229,7 @@ impl ReceiverActor {
     }
 }
 
-struct RxThread<C: Clock> {
+struct RxThread<C: MediaClock> {
     config: Config,
     rx_config: ReceiverConfig,
     rx_cancellation_token: Arc<AtomicBool>,
@@ -242,11 +241,13 @@ struct RxThread<C: Clock> {
     delay_buffer: AverageCalculationBuffer,
 }
 
-impl<C: Clock> RxThread<C> {
+impl<C: MediaClock> RxThread<C> {
     fn run(mut self, path_tx: oneshot::Sender<String>) -> Aes67Vsc2Result<()> {
+        set_realtime_priority();
+
         let mut audio_buffer =
             create_shared_memory_buffer(&self.config, path_tx, self.desc.clone())?;
-        let socket = create_rx_socket(&self.rx_config.session, self.rx_config.interface_ip)?;
+        let socket = create_rx_socket(&self.rx_config.session, self.config.interface_ip)?;
 
         let mut receive_buffer = [0; 65_535];
 
@@ -344,8 +345,7 @@ impl<C: Clock> RxThread<C> {
             self.last_timestamp = Some(ts);
 
             if let &Some(offset) = &self.timestamp_offset {
-                let ptp_time = self.clock.now();
-                let media_time = media_time_from_ptp(ptp_time, &self.desc);
+                let media_time = self.clock.current_media_time();
                 let delay = media_time as i64 - (rtp.timestamp() as i64 + offset as i64);
                 if let Some(average) = self.delay_buffer.update(delay) {
                     let micros = (average * 1_000_000) / self.desc.audio_format.sample_rate as i64;
@@ -363,8 +363,7 @@ impl<C: Clock> RxThread<C> {
     fn calibrate_timestamp_offset(&mut self, rtp_timestamp: u32, timestamp_wrapped: bool) {
         info!("Calibrating timestamp offset at RTP timestamp {rtp_timestamp}");
 
-        let ptp_time = self.clock.now();
-        let media_time = media_time_from_ptp(ptp_time, &self.desc);
+        let media_time = self.clock.current_media_time();
         let timestamp_wrap = 2u64.pow(32);
         let timestamp_wraps = media_time / timestamp_wrap;
         let timestamp_modulo = media_time % timestamp_wrap;

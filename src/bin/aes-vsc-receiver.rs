@@ -16,12 +16,18 @@
  */
 
 use aes67_vsc_2::{
-    config::Config, error::Aes67Vsc2Error, playout::jack::start_jack_playout,
-    receiver::start_receiver, telemetry, time::statime_linux::statime_linux,
-    utils::find_network_interface, worterbuch::start_worterbuch,
+    config::Config,
+    error::Aes67Vsc2Error,
+    playout::jack::start_jack_playout,
+    receiver::{config::RxDescriptor, start_receiver},
+    telemetry,
+    time::{MediaClock, StatimePtpMediaClock, SystemMediaClock},
+    worterbuch::start_worterbuch,
 };
+use chrono::{DateTime, Local};
 use miette::Result;
-use std::time::Duration;
+use std::time::{Duration, UNIX_EPOCH};
+use tokio::select;
 use tokio_graceful_shutdown::{SubsystemBuilder, Toplevel};
 use tracing::info;
 
@@ -30,12 +36,6 @@ async fn main() -> Result<()> {
     let config = Config::load().await?;
 
     telemetry::init(&config).await?;
-
-    let rx_config = config
-        .receiver_config
-        .as_ref()
-        .expect("no receiver config")
-        .clone();
 
     info!(
         "Starting {} instance '{}' with session description:\n{}",
@@ -52,22 +52,45 @@ async fn main() -> Result<()> {
     Toplevel::new(move |s| async move {
         s.start(SubsystemBuilder::new("aes67-vsc-2", move |s| async move {
             let wb = start_worterbuch(&s, config.clone()).await?;
-            let iface = find_network_interface(rx_config.interface_ip)?;
-            let clock = statime_linux(
-                iface,
-                rx_config.interface_ip,
-                wb.clone(),
-                config.instance_name(),
-            )
-            .await;
+            let descriptor = RxDescriptor::try_from(&config)?;
+
+            // let ptp_clock =
+            //     StatimePtpMediaClock::new(&config, descriptor.audio_format, wb.clone()).await?;
+            let system_clock = SystemMediaClock::new(descriptor.audio_format);
+            let compensate_clock_drift = false;
 
             let receiver_api =
-                start_receiver(&s, config.clone(), false, wb.clone(), clock.clone()).await?;
+                start_receiver(&s, config.clone(), false, wb.clone(), system_clock.clone()).await?;
             info!("Receiver API running at {}", receiver_api.url());
 
-            let playout_api =
-                start_jack_playout(&s, config.clone(), false, wb.clone(), clock.clone()).await?;
+            let playout_api = start_jack_playout(
+                &s,
+                config.clone(),
+                false,
+                wb.clone(),
+                system_clock.clone(),
+                compensate_clock_drift,
+            )
+            .await?;
             info!("Playout API running at {}", playout_api.url());
+
+            s.start(SubsystemBuilder::new("clock-logger", |s| async move {
+                let mut interval = tokio::time::interval(Duration::from_secs(
+                    config
+                        .playout_config
+                        .as_ref()
+                        .map(|c| c.clock_drift_compensation_interval)
+                        .unwrap_or(1) as u64,
+                ));
+                loop {
+                    select! {
+                        _ = interval.tick() => print_time(&system_clock),
+                        _ = s.on_shutdown_requested() => break,
+                    }
+                }
+
+                Ok::<(), Aes67Vsc2Error>(())
+            }));
 
             Ok::<(), Aes67Vsc2Error>(())
         }));
@@ -77,4 +100,13 @@ async fn main() -> Result<()> {
     .await?;
 
     Ok(())
+}
+
+fn print_time<C: MediaClock>(ptp_clock: &C) {
+    let ptp_time = ptp_clock.current_ptp_time_millis();
+    info!("PTP time: {}", datetime(ptp_time),);
+}
+
+fn datetime(now: u64) -> DateTime<Local> {
+    DateTime::<Local>::from(UNIX_EPOCH + Duration::from_millis(now))
 }

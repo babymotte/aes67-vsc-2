@@ -24,5 +24,6 @@ pub struct PlayoutConfig {
     #[serde(default = "WebServerConfig::default")]
     pub webserver: WebServerConfig,
     pub receiver: String,
+    // call this something else and move to general config
     pub clock_drift_compensation_interval: Seconds,
 }

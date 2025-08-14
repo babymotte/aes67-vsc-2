@@ -19,8 +19,9 @@ use crate::{error::Aes67Vsc2Error, receiver::config::RxDescriptor};
 use serde::{Deserialize, Serialize};
 use std::{str::FromStr, time::Duration};
 
-pub type MilliSeconds = f32;
 pub type Seconds = u32;
+pub type MilliSeconds = f32;
+pub type NanoSeconds = u128;
 pub type Frames = u64;
 pub type FramesPerSecond = usize;
 

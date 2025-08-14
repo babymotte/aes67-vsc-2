@@ -4,6 +4,7 @@ app:
     name: thinkpad-p14s/1
 telemetry:
   endpoint: !grpc http://127.0.0.1:4317
+interfaceIp: 192.168.178.39
 playoutConfig:
   webserver:
     bindAddress: 127.0.0.1
@@ -30,4 +31,3 @@ receiverConfig:
     a=mediaclk:direct=0
   linkOffset: 2.0
   bufferTime: 100
-  interfaceIp: 192.168.178.39

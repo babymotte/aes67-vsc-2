@@ -119,7 +119,7 @@ pub struct SocketConfig {
     pub user_timeout: Option<Duration>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Config {
     #[serde(default = "AppConfig::default")]
@@ -130,6 +130,19 @@ pub struct Config {
     pub receiver_config: Option<ReceiverConfig>,
     #[serde(default)]
     pub playout_config: Option<PlayoutConfig>,
+    pub interface_ip: IpAddr,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            app: Default::default(),
+            telemetry: Default::default(),
+            receiver_config: Default::default(),
+            playout_config: Default::default(),
+            interface_ip: IpAddr::V4(Ipv4Addr::LOCALHOST),
+        }
+    }
 }
 
 impl Config {

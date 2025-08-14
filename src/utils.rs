@@ -17,11 +17,17 @@
 
 use crate::{
     error::{Aes67Vsc2Error, Aes67Vsc2Result},
+    formats::AudioFormat,
     receiver::config::RxDescriptor,
 };
 use pnet::datalink::{self, NetworkInterface};
 use statime::time::Time;
 use std::{any::Any, net::IpAddr};
+use thread_priority::{
+    RealtimeThreadSchedulePolicy, ThreadPriority, ThreadSchedulePolicy,
+    set_thread_priority_and_policy, thread_native_id,
+};
+use tracing::{info, warn};
 
 pub fn panic_to_string(panic: Box<dyn Any + Send>) -> String {
     if let Some(s) = panic.downcast_ref::<&'static str>() {
@@ -45,12 +51,6 @@ pub fn find_network_interface(ip: IpAddr) -> Aes67Vsc2Result<NetworkInterface> {
     Err(Aes67Vsc2Error::Other(format!("no NIC with IP {ip} exists")))
 }
 
-pub fn media_time_from_ptp(ptp_time: Time, desc: &RxDescriptor) -> u64 {
-    let ptp_nanos = (ptp_time.secs() as u128) * 1_000_000_000 + ptp_time.subsec_nanos() as u128;
-    let total_frames = (ptp_nanos * desc.audio_format.sample_rate as u128) / 1_000_000_000;
-    total_frames as u64
-}
-
 pub struct AverageCalculationBuffer {
     buffer: Box<[i64]>,
     cursor: usize,
@@ -71,5 +71,18 @@ impl AverageCalculationBuffer {
         } else {
             None
         }
+    }
+}
+
+pub fn set_realtime_priority() {
+    let pid = thread_native_id();
+    if let Err(e) = set_thread_priority_and_policy(
+        pid,
+        ThreadPriority::Max,
+        ThreadSchedulePolicy::Realtime(RealtimeThreadSchedulePolicy::Fifo),
+    ) {
+        warn!("Could not set thread priority: {e}");
+    } else {
+        info!("Successfully set real time priority for thread {pid}.");
     }
 }
