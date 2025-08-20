@@ -18,7 +18,7 @@
 use crate::{
     config::Config,
     error::{Aes67Vsc2Error, Aes67Vsc2Result},
-    receiver::api::{ReceiverApiMessage, ReceiverInfo},
+    receiver::{api::ReceiverApiMessage, config::RxDescriptor},
 };
 use axum::{
     Json, Router,
@@ -94,7 +94,7 @@ async fn stop(
 #[instrument(ret)]
 async fn info(
     State(api_tx): State<mpsc::Sender<ReceiverApiMessage>>,
-) -> Aes67Vsc2Result<Json<ReceiverInfo>> {
+) -> Aes67Vsc2Result<Json<RxDescriptor>> {
     let (tx, rx) = oneshot::channel();
     api_tx.send(ReceiverApiMessage::GetInfo(tx)).await.ok();
     match rx.await {

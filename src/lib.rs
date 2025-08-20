@@ -21,6 +21,7 @@ pub mod error;
 pub mod formats;
 pub mod playout;
 pub mod receiver;
+pub mod sender;
 pub mod serde;
 pub mod socket;
 pub mod telemetry;

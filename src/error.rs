@@ -18,7 +18,7 @@
 use axum::{http::StatusCode, response::IntoResponse};
 use miette::Diagnostic;
 use opentelemetry_otlp::ExporterBuildError;
-use rtp_rs::RtpReaderError;
+use rtp_rs::{RtpPacketBuildError, RtpReaderError};
 use shared_memory::ShmemError;
 use std::{fmt::Display, io};
 use thiserror::Error;
@@ -54,6 +54,8 @@ pub enum Aes67Vsc2Error {
     SharedMemoryError(#[from] ShmemError),
     #[error("Received invalid RTP data: {0:?}")]
     InvalidRtpData(#[from] WrappedRtpError),
+    #[error("RTP packet builder error: {0:?}")]
+    RtpPacketBuildError(#[from] WrappedRtpPacketBuildError),
     #[error("Jack error: {0:?}")]
     JackError(#[from] jack::Error),
     #[error("General error: {0}")]
@@ -64,6 +66,15 @@ pub enum Aes67Vsc2Error {
 pub struct WrappedRtpError(pub RtpReaderError);
 
 impl Display for WrappedRtpError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.0)
+    }
+}
+
+#[derive(Error, Debug, Diagnostic)]
+pub struct WrappedRtpPacketBuildError(pub RtpPacketBuildError);
+
+impl Display for WrappedRtpPacketBuildError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self.0)
     }

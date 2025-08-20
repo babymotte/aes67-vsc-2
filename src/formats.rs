@@ -50,14 +50,15 @@ impl BufferFormat {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AudioFormat {
     pub sample_rate: FramesPerSecond,
     pub frame_format: FrameFormat,
 }
 
 impl AudioFormat {
-    pub fn bytes_per_buffer(&self, link_offset: MilliSeconds) -> usize {
-        self.samples_per_link_offset_buffer(link_offset)
+    pub fn bytes_per_buffer(&self, buffer_time: MilliSeconds) -> usize {
+        self.samples_per_link_offset_buffer(buffer_time)
             * self.frame_format.sample_format.bytes_per_sample()
     }
 
@@ -80,6 +81,7 @@ impl From<&RxDescriptor> for AudioFormat {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FrameFormat {
     pub channels: usize,
     pub sample_format: SampleFormat,
@@ -110,7 +112,6 @@ impl FrameFormat {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
 pub enum SampleFormat {
-    // TODO implement other sample formats
     L16,
     L24,
 }
@@ -143,6 +144,16 @@ impl SampleReader<i32> for SampleFormat {
     }
 }
 
+pub trait SampleWriter<S> {
+    fn write_sample(&self, sample: S, buffer: &mut [u8]);
+}
+
+impl SampleWriter<f32> for SampleFormat {
+    fn write_sample(&self, sample: f32, buffer: &mut [u8]) {
+        self.write_f32(sample, buffer)
+    }
+}
+
 impl SampleFormat {
     fn read_f32(&self, buffer: &[u8]) -> f32 {
         match self {
@@ -155,6 +166,13 @@ impl SampleFormat {
         match self {
             SampleFormat::L16 => bytes_to_i32_2_bytes(buffer),
             SampleFormat::L24 => bytes_to_i32_3_bytes(buffer),
+        }
+    }
+
+    fn write_f32(&self, sample: f32, buffer: &mut [u8]) {
+        match self {
+            SampleFormat::L16 => f32_to_bytes_2_bytes(sample, buffer),
+            SampleFormat::L24 => f32_to_bytes_3_bytes(sample, buffer),
         }
     }
 
@@ -175,10 +193,6 @@ fn bytes_to_f32_2_bytes(bytes: &[u8]) -> f32 {
     }
 }
 
-fn bytes_to_i32_2_bytes(bytes: &[u8]) -> i32 {
-    i16::from_be_bytes([bytes[0], bytes[1]]) as i32
-}
-
 fn bytes_to_f32_3_bytes(bytes: &[u8]) -> f32 {
     let value = bytes_to_i32_3_bytes(bytes);
 
@@ -189,6 +203,28 @@ fn bytes_to_f32_3_bytes(bytes: &[u8]) -> f32 {
     }
 }
 
+fn f32_to_bytes_2_bytes(sample: f32, bytes: &mut [u8]) {
+    let sample_i32 = if sample > 0.0 {
+        (sample * i16::MAX as f32) as i16
+    } else {
+        (sample * i16::MAX as f32) as i16 + 1
+    };
+    i32_to_bytes_2_bytes(sample_i32, bytes);
+}
+
+fn f32_to_bytes_3_bytes(sample: f32, bytes: &mut [u8]) {
+    let sample_i32 = if sample > 0.0 {
+        (sample * i32::MAX as f32 as f32) as i32
+    } else {
+        (sample * i32::MAX as f32 as f32) as i32 + 1
+    };
+    i32_to_bytes_3_bytes(sample_i32, bytes);
+}
+
+fn bytes_to_i32_2_bytes(bytes: &[u8]) -> i32 {
+    i16::from_be_bytes([bytes[0], bytes[1]]) as i32
+}
+
 fn bytes_to_i32_3_bytes(bytes: &[u8]) -> i32 {
     let mut value = ((bytes[0] as i32) << 16) | ((bytes[1] as i32) << 8) | (bytes[2] as i32);
 
@@ -197,6 +233,14 @@ fn bytes_to_i32_3_bytes(bytes: &[u8]) -> i32 {
         value |= !0xFFFFFF;
     }
     value
+}
+
+fn i32_to_bytes_2_bytes(sample: i16, bytes: &mut [u8]) {
+    bytes.copy_from_slice(&sample.to_be_bytes());
+}
+
+fn i32_to_bytes_3_bytes(sample: i32, bytes: &mut [u8]) {
+    bytes.copy_from_slice(&sample.to_be_bytes()[..3]);
 }
 
 pub fn rtp_header_len() -> usize {
@@ -223,6 +267,7 @@ pub fn bytes_per_frame(channels: usize, sample_format: SampleFormat) -> usize {
     channels * sample_format.bytes_per_sample()
 }
 
+#[deprecated = "actual packet size is different for 44.1 kHz, this needs to be hard coded based on an enum"]
 pub fn frames_per_packet(sample_rate: FramesPerSecond, packet_time: MilliSeconds) -> usize {
     f32::ceil((sample_rate as f32 * packet_time) / 1000.0) as usize
 }

@@ -15,19 +15,65 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{
-    error::{Aes67Vsc2Error, Aes67Vsc2Result},
-    formats::AudioFormat,
-    receiver::config::RxDescriptor,
-};
+use crate::error::{Aes67Vsc2Error, Aes67Vsc2Result};
 use pnet::datalink::{self, NetworkInterface};
-use statime::time::Time;
 use std::{any::Any, net::IpAddr};
 use thread_priority::{
     RealtimeThreadSchedulePolicy, ThreadPriority, ThreadSchedulePolicy,
     set_thread_priority_and_policy, thread_native_id,
 };
+use tokio::sync::mpsc;
 use tracing::{info, warn};
+
+pub struct RequestResponseServerChannel<Req, Resp> {
+    requests: mpsc::Receiver<Req>,
+    responses: mpsc::Sender<Resp>,
+}
+
+impl<Req, Resp> RequestResponseServerChannel<Req, Resp> {
+    pub async fn on_request(&mut self) -> Option<Req> {
+        self.requests.recv().await
+    }
+
+    pub fn respond(&self, resp: Resp) -> bool {
+        self.responses.try_send(resp).is_ok()
+    }
+}
+
+pub struct RequestResponseClientChannel<Req, Resp> {
+    requests: mpsc::Sender<Req>,
+    responses: mpsc::Receiver<Resp>,
+}
+
+impl<Req, Resp> RequestResponseClientChannel<Req, Resp> {
+    pub async fn request(&mut self, req: Req) -> Option<Resp> {
+        self.requests.send(req).await.ok()?;
+        self.responses.recv().await
+    }
+
+    pub fn request_blocking(&mut self, req: Req) -> Option<Resp> {
+        self.requests.blocking_send(req).ok()?;
+        self.responses.blocking_recv()
+    }
+}
+
+pub fn request_response_channel<Req, Resp>() -> (
+    RequestResponseServerChannel<Req, Resp>,
+    RequestResponseClientChannel<Req, Resp>,
+) {
+    let (request_tx, request_rx) = mpsc::channel(1);
+    let (response_tx, response_rx) = mpsc::channel(1);
+    (
+        RequestResponseServerChannel {
+            requests: request_rx,
+            responses: response_tx,
+        },
+        RequestResponseClientChannel {
+            requests: request_tx,
+            responses: response_rx,
+        },
+    )
+}
 
 pub fn panic_to_string(panic: Box<dyn Any + Send>) -> String {
     if let Some(s) = panic.downcast_ref::<&'static str>() {
@@ -51,22 +97,41 @@ pub fn find_network_interface(ip: IpAddr) -> Aes67Vsc2Result<NetworkInterface> {
     Err(Aes67Vsc2Error::Other(format!("no NIC with IP {ip} exists")))
 }
 
-pub struct AverageCalculationBuffer {
-    buffer: Box<[i64]>,
+pub trait GetAverage<T> {
+    fn average(&self) -> T;
+}
+
+impl GetAverage<i64> for Box<[i64]> {
+    fn average(&self) -> i64 {
+        self.iter().sum::<i64>() / self.len() as i64
+    }
+}
+
+impl GetAverage<u64> for Box<[u64]> {
+    fn average(&self) -> u64 {
+        self.iter().sum::<u64>() / self.len() as u64
+    }
+}
+
+pub struct AverageCalculationBuffer<N> {
+    buffer: Box<[N]>,
     cursor: usize,
 }
 
-impl AverageCalculationBuffer {
-    pub fn new(buffer: Box<[i64]>) -> Self {
+impl<N> AverageCalculationBuffer<N>
+where
+    Box<[N]>: GetAverage<N>,
+{
+    pub fn new(buffer: Box<[N]>) -> Self {
         Self { buffer, cursor: 0 }
     }
 
-    pub fn update(&mut self, value: i64) -> Option<i64> {
+    pub fn update(&mut self, value: N) -> Option<N> {
         self.buffer[self.cursor] = value;
         self.cursor += 1;
         if self.cursor >= self.buffer.len() {
             self.cursor = 0;
-            let average = self.buffer.iter().sum::<i64>() / self.buffer.len() as i64;
+            let average = self.buffer.average();
             Some(average)
         } else {
             None

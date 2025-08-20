@@ -54,15 +54,17 @@ pub struct ReceiverConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RxDescriptor {
     pub id: String,
     pub session_name: String,
     pub session_id: u64,
     pub session_version: u64,
+    #[deprecated = "packet time should not be assumed based on SDP but taken from actual packet size"]
     pub packet_time: MilliSeconds,
     pub link_offset: MilliSeconds,
     pub origin_ip: IpAddr,
-    pub rtp_offset: f32,
+    pub rtp_offset: u32,
     pub audio_format: AudioFormat,
     pub channel_labels: Vec<Option<String>>,
 }
@@ -221,6 +223,7 @@ impl RxDescriptor {
         )
     }
 
+    #[deprecated = "packet time should not be assumed based on SDP but taken from actual packet size"]
     pub fn frames_per_packet(&self) -> usize {
         formats::frames_per_packet(self.audio_format.sample_rate, self.packet_time)
     }
@@ -229,6 +232,11 @@ impl RxDescriptor {
         formats::frames_per_packet(self.audio_format.sample_rate, 1.0)
     }
 
+    pub(crate) fn frames_per_link_offset(&self, link_offset: MilliSeconds) -> usize {
+        formats::frames_per_packet(self.audio_format.sample_rate, link_offset)
+    }
+
+    #[deprecated = "packet time should not be assumed based on SDP but taken from actual packet size"]
     pub fn samples_per_packet(&self) -> usize {
         formats::samples_per_packet(
             self.audio_format.frame_format.channels,
@@ -237,6 +245,7 @@ impl RxDescriptor {
         )
     }
 
+    #[deprecated = "packet time should not be assumed based on SDP but taken from actual packet size"]
     pub fn rtp_payload_size(&self) -> usize {
         formats::rtp_payload_size(
             self.audio_format.sample_rate,
@@ -246,6 +255,7 @@ impl RxDescriptor {
         )
     }
 
+    #[deprecated = "packet time should not be assumed based on SDP but taken from actual packet size"]
     pub fn rtp_packet_size(&self) -> usize {
         formats::rtp_packet_size(
             self.audio_format.sample_rate,

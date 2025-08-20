@@ -17,31 +17,14 @@
 
 use crate::{error::Aes67Vsc2Result, receiver::config::RxDescriptor};
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
-use std::{fmt::Display, net::SocketAddr};
+use std::net::SocketAddr;
 use tokio::sync::oneshot;
 use tracing::instrument;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ReceiverInfo {
-    pub shmem_address: String,
-    pub descriptor: RxDescriptor,
-}
-
-impl Display for ReceiverInfo {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            serde_yaml::to_string(self).unwrap_or_else(|_| "<invalid yaml>".to_owned())
-        )
-    }
-}
 #[derive(Debug)]
 pub enum ReceiverApiMessage {
     Stop,
-    GetInfo(oneshot::Sender<ReceiverInfo>),
+    GetInfo(oneshot::Sender<RxDescriptor>),
 }
 
 #[derive(Debug, Clone)]
@@ -84,7 +67,7 @@ impl ReceiverApi {
     }
 
     #[instrument(ret, err)]
-    pub async fn info(&self) -> Aes67Vsc2Result<ReceiverInfo> {
+    pub async fn info(&self) -> Aes67Vsc2Result<RxDescriptor> {
         let body = self
             .reqwest_client
             .get(format!("{}/info", self.url))

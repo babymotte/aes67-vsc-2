@@ -26,9 +26,10 @@ use sdp::{
 };
 use socket2::{Domain, Protocol as SockProto, SockAddr, Socket, TcpKeepalive, Type};
 use std::{
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, UdpSocket},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener},
     time::Duration,
 };
+use tokio::net::UdpSocket;
 use tracing::{info, instrument};
 
 #[instrument]
@@ -166,6 +167,22 @@ pub fn create_rx_socket(sdp: &SessionDescription, local_ip: IpAddr) -> Aes67Vsc2
             "Cannot receive IPv6 stream when bound to local IPv4 address".to_owned(),
         ))?,
     };
+    socket.set_nonblocking(true)?;
+
+    Ok(UdpSocket::from_std(socket.into())?)
+}
+
+#[instrument]
+pub fn create_tx_socket(local_ip: IpAddr, port: u16) -> Aes67Vsc2Result<std::net::UdpSocket> {
+    let socket = match local_ip {
+        IpAddr::V4(_) => Socket::new(Domain::IPV4, Type::DGRAM, Some(SockProto::UDP)),
+        IpAddr::V6(_) => Socket::new(Domain::IPV6, Type::DGRAM, Some(SockProto::UDP)),
+    }?;
+    let socket_addr = SockAddr::from(SocketAddr::new(local_ip, port));
+    socket.bind(&socket_addr)?;
+    socket.set_broadcast(true)?;
+    socket.set_reuse_address(true)?;
+    // socket.set_nonblocking(true)?;
 
     Ok(socket.into())
 }
@@ -194,7 +211,6 @@ pub fn create_ipv4_rx_socket(
     let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(SockProto::UDP))?;
 
     socket.set_reuse_address(true)?;
-    socket.set_read_timeout(Some(Duration::from_millis(250)))?;
 
     if ip_addr.is_multicast() {
         socket.join_multicast_v4(&ip_addr, &local_ip)?;

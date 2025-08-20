@@ -21,7 +21,8 @@ use aes67_vsc_2::{
     playout::jack::start_jack_playout,
     receiver::{config::RxDescriptor, start_receiver},
     telemetry,
-    time::{MediaClock, StatimePtpMediaClock, SystemMediaClock},
+    time::{MediaClock, SystemMediaClock},
+    utils::request_response_channel,
     worterbuch::start_worterbuch,
 };
 use chrono::{DateTime, Local};
@@ -51,16 +52,25 @@ async fn main() -> Result<()> {
 
     Toplevel::new(move |s| async move {
         s.start(SubsystemBuilder::new("aes67-vsc-2", move |s| async move {
-            let wb = start_worterbuch(&s, config.clone()).await?;
+            let wb = start_worterbuch(&s, config.clone()).await.ok();
             let descriptor = RxDescriptor::try_from(&config)?;
+
+            let (req_serv, req_client) = request_response_channel();
 
             // let ptp_clock =
             //     StatimePtpMediaClock::new(&config, descriptor.audio_format, wb.clone()).await?;
             let system_clock = SystemMediaClock::new(descriptor.audio_format);
             let compensate_clock_drift = false;
 
-            let receiver_api =
-                start_receiver(&s, config.clone(), false, wb.clone(), system_clock.clone()).await?;
+            let receiver_api = start_receiver(
+                &s,
+                config.clone(),
+                false,
+                wb.clone(),
+                system_clock.clone(),
+                req_serv,
+            )
+            .await?;
             info!("Receiver API running at {}", receiver_api.url());
 
             let playout_api = start_jack_playout(
@@ -70,6 +80,7 @@ async fn main() -> Result<()> {
                 wb.clone(),
                 system_clock.clone(),
                 compensate_clock_drift,
+                req_client,
             )
             .await?;
             info!("Playout API running at {}", playout_api.url());

@@ -16,23 +16,22 @@
  */
 
 use crate::{
-    buffer::{AudioBufferRef, open_audio_buffer},
+    buffer::AudioBufferPointer,
     config::Config,
     error::Aes67Vsc2Result,
-    formats::SampleReader,
     playout::{
         api::{PlayoutApi, PlayoutApiMessage},
         webserver::start_webserver,
     },
-    receiver::{api::ReceiverApi, config::RxDescriptor},
+    receiver::{AudioDataRequest, DataState, api::ReceiverApi, config::RxDescriptor},
     time::MediaClock,
-    utils::{AverageCalculationBuffer, set_realtime_priority},
+    utils::{AverageCalculationBuffer, RequestResponseClientChannel, set_realtime_priority},
 };
 use jack::{
     AudioOut, Client, ClientOptions, Control, NotificationHandler, Port, ProcessScope,
     contrib::ClosureProcessHandler,
 };
-use std::{net::SocketAddr, thread};
+use std::{net::SocketAddr, u64};
 use tokio::{
     select,
     sync::{mpsc, oneshot},
@@ -41,19 +40,28 @@ use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
 use tracing::{error, info, instrument, warn};
 use worterbuch_client::Worterbuch;
 
-#[instrument(skip(subsys, wb, clock))]
+#[instrument(skip(subsys, wb, clock, requests))]
 pub async fn start_jack_playout<C: MediaClock>(
     subsys: &SubsystemHandle,
     config: Config,
     use_tls: bool,
-    wb: Worterbuch,
+    wb: Option<Worterbuch>,
     clock: C,
     compensate_clock_drift: bool,
+    requests: RequestResponseClientChannel<AudioDataRequest, DataState>,
 ) -> Aes67Vsc2Result<PlayoutApi> {
     let id = config.app.instance.name.clone();
     let (ready_tx, ready_rx) = oneshot::channel();
     subsys.start(SubsystemBuilder::new(format!("receiver-{id}"), move |s| {
-        run(s, config, ready_tx, wb, clock, compensate_clock_drift)
+        run(
+            s,
+            config,
+            ready_tx,
+            wb,
+            clock,
+            compensate_clock_drift,
+            requests,
+        )
     }));
     let api_address = ready_rx.await?;
     info!("Receiver '{id}' started successfully.");
@@ -64,9 +72,10 @@ async fn run<C: MediaClock>(
     subsys: SubsystemHandle,
     config: Config,
     ready_tx: oneshot::Sender<SocketAddr>,
-    wb: Worterbuch,
+    wb: Option<Worterbuch>,
     clock: C,
     compensate_clock_drift: bool,
+    requests: RequestResponseClientChannel<AudioDataRequest, DataState>,
 ) -> Aes67Vsc2Result<()> {
     let (api_tx, api_rx) = mpsc::channel(1024);
     PlayoutActor::start(
@@ -76,6 +85,7 @@ async fn run<C: MediaClock>(
         wb,
         clock,
         compensate_clock_drift,
+        requests,
     )
     .await?;
     start_webserver(&subsys, config, api_tx, ready_tx);
@@ -90,14 +100,15 @@ struct PlayoutActor {
 }
 
 impl PlayoutActor {
-    #[instrument(skip(subsys, api_rx, _wb, clock))]
+    #[instrument(skip(subsys, api_rx, _wb, clock, requests))]
     async fn start<C: MediaClock>(
         subsys: &SubsystemHandle,
         api_rx: mpsc::Receiver<PlayoutApiMessage>,
         config: Config,
-        _wb: Worterbuch,
+        _wb: Option<Worterbuch>,
         clock: C,
         compensate_clock_drift: bool,
+        requests: RequestResponseClientChannel<AudioDataRequest, DataState>,
     ) -> Aes67Vsc2Result<()> {
         let playout_config = config.playout_config.clone().expect("no playout config");
         let id: String = config.app.instance.name.clone();
@@ -110,7 +121,7 @@ impl PlayoutActor {
                 api_rx,
                 config,
             }
-            .run(clock, compensate_clock_drift)
+            .run(clock, compensate_clock_drift, requests)
             .await
         }));
 
@@ -121,6 +132,7 @@ impl PlayoutActor {
         mut self,
         clock: C,
         compensate_clock_drift: bool,
+        requests: RequestResponseClientChannel<AudioDataRequest, DataState>,
     ) -> Aes67Vsc2Result<()> {
         info!(
             "Receiver actor '{}' started.",
@@ -135,31 +147,19 @@ impl PlayoutActor {
 
         let receiver_api = ReceiverApi::with_url(playout_config.receiver.to_owned());
         let receiver_info = receiver_api.info().await?;
-        info!("Got receiver info:\n{receiver_info}");
-
-        let (buffer_ref_tx, buffer_ref_rx) = oneshot::channel();
-        let (buffer_ref_drop_tx, buffer_ref_drop_rx) = oneshot::channel();
-        let rinf = receiver_info.clone();
-        thread::spawn(move || match open_audio_buffer(rinf) {
-            Ok(buffer) => {
-                let buffer_ref = buffer.get_ref();
-                buffer_ref_tx.send(Ok(buffer_ref)).ok();
-                buffer_ref_drop_rx.blocking_recv().ok();
-                drop(buffer);
-            }
-            Err(e) => _ = buffer_ref_tx.send(Err(e)),
-        });
-
-        let audio_buffer_ref = buffer_ref_rx.await??;
+        info!(
+            "Got receiver info:\n{}",
+            serde_yaml::to_string(&receiver_info)?
+        );
 
         // TODO evaluate client status
-        let (client, _status) =
-            Client::new(&self.config.instance_name(), ClientOptions::default())?;
+        let (client, status) = Client::new(&self.config.instance_name(), ClientOptions::default())?;
+
+        info!("JACK client created with status {status:?}");
 
         let mut out_ports = vec![];
 
         for label in receiver_info
-            .descriptor
             .channel_labels
             .iter()
             .enumerate()
@@ -168,16 +168,15 @@ impl PlayoutActor {
             out_ports.push(client.register_port(&label, AudioOut::default())?);
         }
 
-        let desc = receiver_info.descriptor;
+        let desc = receiver_info;
         let drift_calculator_buffer_len = playout_config.clock_drift_compensation_interval as usize
             * desc.audio_format.sample_rate
             / client.buffer_size() as usize;
-        let drift_calculator_buffer = vec![0; drift_calculator_buffer_len];
+        let drift_calculator_buffer = vec![0i64; drift_calculator_buffer_len];
 
         let notification_handler = TracingNotificationHandler;
         let process_handler_state = ProcessHandlerState {
             out_ports,
-            audio_buffer_ref,
             desc,
             clock,
             jack_media_clock: None,
@@ -185,6 +184,8 @@ impl PlayoutActor {
             drift_slew: 0,
             thread_prio_set: false,
             compensate_clock_drift,
+            jack_clock_offset: u64::MAX,
+            requests,
         };
         let process_handler =
             ClosureProcessHandler::with_state(process_handler_state, process, buffer_change);
@@ -212,7 +213,6 @@ impl PlayoutActor {
             error!("Error deactivating JACK client: {e}");
         }
 
-        buffer_ref_drop_tx.send(()).ok();
         self.stop();
 
         info!(
@@ -242,14 +242,15 @@ impl PlayoutActor {
 
 struct ProcessHandlerState<C: MediaClock> {
     out_ports: Vec<Port<AudioOut>>,
-    audio_buffer_ref: AudioBufferRef,
     desc: RxDescriptor,
     clock: C,
     jack_media_clock: Option<u64>,
-    drift_calculator: AverageCalculationBuffer,
+    drift_calculator: AverageCalculationBuffer<i64>,
     drift_slew: i64,
     thread_prio_set: bool,
     compensate_clock_drift: bool,
+    jack_clock_offset: u64,
+    requests: RequestResponseClientChannel<AudioDataRequest, DataState>,
 }
 
 impl<C: MediaClock> ProcessHandlerState<C> {
@@ -339,19 +340,24 @@ fn process<C: MediaClock>(
     _: &Client,
     ps: &ProcessScope,
 ) -> Control {
+    let current_media_time = state.clock.current_media_time();
+    let relative_jack_media_time = ps.last_frame_time() as u64;
+    // TODO get offset from JACK API instead of finding it experimentally
+
+    let current_jack_clock_offset = current_media_time - relative_jack_media_time;
+    if current_jack_clock_offset < state.jack_clock_offset {
+        state.jack_clock_offset = current_jack_clock_offset;
+        info!("JACK clock offset updated: {current_jack_clock_offset}");
+    }
+    let absolute_jack_media_time = state.jack_clock_offset + relative_jack_media_time;
+
     if !state.thread_prio_set {
         set_realtime_priority();
         state.thread_prio_set = true;
     }
 
-    let jack_buffer_len = state
-        .out_ports
-        .iter_mut()
-        .next()
-        .map(|p| p.as_mut_slice(ps).len())
-        .unwrap_or(0) as u64;
+    let jack_buffer_len = ps.n_frames() as u64;
 
-    let current_media_time = state.clock.current_media_time();
     let jack_media_time = state.jack_media_clock.unwrap_or(current_media_time);
 
     let link_offset = state.desc.link_offset;
@@ -388,35 +394,33 @@ fn process<C: MediaClock>(
 
     state.jack_media_clock = Some(next_media_time);
 
-    let ingress_time = jack_media_time - link_offset_frames;
-    let playout_time = ingress_time - jack_buffer_len;
-
-    let buffer = state.audio_buffer_ref.buffer();
+    let ingress_time = absolute_jack_media_time - link_offset_frames;
 
     for (port_nr, port) in state.out_ports.iter_mut().enumerate() {
+        let connected = port.connected_count().unwrap_or(0) != 0;
+
         let output_buffer = port.as_mut_slice(ps);
+        if !connected {
+            output_buffer.fill(0.0);
+            continue;
+        }
 
-        let bytes_per_buffer_sample = state
-            .desc
-            .audio_format
-            .frame_format
-            .sample_format
-            .bytes_per_sample();
-        let bytes_per_buffer_frame = state.desc.audio_format.frame_format.bytes_per_frame();
-        let sample_format = state.desc.audio_format.frame_format.sample_format;
-        let frames_per_buffer = buffer.len() / bytes_per_buffer_frame;
-
-        let frame_start = (playout_time % frames_per_buffer as u64) as usize;
-
-        for (frame, sample) in output_buffer.iter_mut().enumerate() {
-            let buffer_frame_index = (frame_start + frame) % frames_per_buffer;
-
-            let sample_index_in_frame = port_nr * bytes_per_buffer_sample;
-            let sample_start = buffer_frame_index * bytes_per_buffer_frame + sample_index_in_frame;
-            let sample_end = sample_start + bytes_per_buffer_sample;
-            let buf = &buffer[sample_start..sample_end];
-
-            *sample = sample_format.read_sample(buf);
+        'request: loop {
+            let now = state.clock.current_media_time();
+            if now > ingress_time + output_buffer.len() as u64 {
+                // the entire buffer should already have been played out by JACK, no need to keep waiting
+                output_buffer.fill(0.0);
+                break 'request;
+            }
+            match state.requests.request_blocking(AudioDataRequest {
+                buffer: AudioBufferPointer::from_slice(&output_buffer),
+                channel: port_nr,
+                ingress_time,
+            }) {
+                Some(DataState::Ready) => break 'request,
+                Some(DataState::Wait) => continue 'request,
+                None => return Control::Quit,
+            }
         }
     }
 
