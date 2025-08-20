@@ -17,13 +17,12 @@
 
 use aes67_vsc_2::{
     config::Config,
-    error::Aes67Vsc2Error,
+    error::{Aes67Vsc2Error, Aes67Vsc2Result},
     playout::jack::start_jack_playout,
     receiver::{config::RxDescriptor, start_receiver},
     telemetry,
     time::{MediaClock, SystemMediaClock},
     utils::request_response_channel,
-    worterbuch::start_worterbuch,
 };
 use chrono::{DateTime, Local};
 use miette::Result;
@@ -52,7 +51,7 @@ async fn main() -> Result<()> {
 
     Toplevel::new(move |s| async move {
         s.start(SubsystemBuilder::new("aes67-vsc-2", move |s| async move {
-            let wb = start_worterbuch(&s, config.clone()).await.ok();
+            // let wb = start_worterbuch(&s, config.clone()).await.ok();
             let descriptor = RxDescriptor::try_from(&config)?;
 
             let (req_serv, req_client) = request_response_channel();
@@ -66,7 +65,8 @@ async fn main() -> Result<()> {
                 &s,
                 config.clone(),
                 false,
-                wb.clone(),
+                // wb.clone(),
+                None,
                 system_clock.clone(),
                 req_serv,
             )
@@ -77,7 +77,8 @@ async fn main() -> Result<()> {
                 &s,
                 config.clone(),
                 false,
-                wb.clone(),
+                // wb.clone(),
+                None,
                 system_clock.clone(),
                 compensate_clock_drift,
                 req_client,
@@ -95,7 +96,7 @@ async fn main() -> Result<()> {
                 ));
                 loop {
                     select! {
-                        _ = interval.tick() => print_time(&system_clock),
+                        _ = interval.tick() => print_time(&system_clock)?,
                         _ = s.on_shutdown_requested() => break,
                     }
                 }
@@ -113,9 +114,10 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-fn print_time<C: MediaClock>(ptp_clock: &C) {
-    let ptp_time = ptp_clock.current_ptp_time_millis();
+fn print_time<C: MediaClock>(ptp_clock: &C) -> Aes67Vsc2Result<()> {
+    let ptp_time = ptp_clock.current_ptp_time_millis()?;
     info!("PTP time: {}", datetime(ptp_time),);
+    Ok(())
 }
 
 fn datetime(now: u64) -> DateTime<Local> {

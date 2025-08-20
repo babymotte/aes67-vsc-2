@@ -26,10 +26,9 @@ use sdp::{
 };
 use socket2::{Domain, Protocol as SockProto, SockAddr, Socket, TcpKeepalive, Type};
 use std::{
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, UdpSocket},
     time::Duration,
 };
-use tokio::net::UdpSocket;
 use tracing::{info, instrument};
 
 #[instrument]
@@ -167,9 +166,9 @@ pub fn create_rx_socket(sdp: &SessionDescription, local_ip: IpAddr) -> Aes67Vsc2
             "Cannot receive IPv6 stream when bound to local IPv4 address".to_owned(),
         ))?,
     };
-    socket.set_nonblocking(true)?;
+    socket.set_read_timeout(Some(Duration::from_micros(10)))?;
 
-    Ok(UdpSocket::from_std(socket.into())?)
+    Ok(socket.into())
 }
 
 #[instrument]

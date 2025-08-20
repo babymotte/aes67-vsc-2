@@ -46,11 +46,14 @@ use crate::{
     utils::{AverageCalculationBuffer, RequestResponseServerChannel, set_realtime_priority},
 };
 use rtp_rs::{RtpReader, Seq};
-use std::net::SocketAddr;
+use std::{io::ErrorKind, net::SocketAddr, thread, u32};
 use tokio::{
     runtime::{self},
     select,
-    sync::{mpsc, oneshot},
+    sync::{
+        mpsc::{self, error::TryRecvError},
+        oneshot::{self, error::RecvError},
+    },
     task::{JoinError, JoinHandle, spawn_blocking},
 };
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
@@ -107,7 +110,7 @@ struct ReceiverActor {
     subsys: SubsystemHandle,
     config: Config,
     api_rx: mpsc::Receiver<ReceiverApiMessage>,
-    rx_thread: JoinHandle<Aes67Vsc2Result<()>>,
+    rx_thread: oneshot::Receiver<Aes67Vsc2Result<()>>,
     rx_cancellation_token: oneshot::Sender<()>,
     desc: RxDescriptor,
 }
@@ -123,11 +126,14 @@ impl ReceiverActor {
         data_requests: RequestResponseServerChannel<AudioDataRequest, DataState>,
     ) -> Aes67Vsc2Result<()> {
         let (rx_cancellation_token, rxct) = oneshot::channel();
+        let (rx_stopped, rx_thread) = oneshot::channel();
+
         let cfg = config.clone();
         let rx_config = cfg.receiver_config.clone().expect("no receiver config");
 
         let descriptor = RxDescriptor::try_from(&config)?;
         let desc = descriptor.clone();
+        let desc_rx = desc.clone();
 
         let delay_calculation_interval = config
             .playout_config
@@ -139,34 +145,28 @@ impl ReceiverActor {
                 as usize;
         let packet_buffer_len = desc.audio_format.bytes_per_buffer(rx_config.buffer_time);
 
-        let rx_thread_future = RxThread {
-            config: cfg,
-            rx_cancellation_token: rxct,
-            rx_config,
-            desc: desc.clone(),
-            last_sequence_number: None,
-            last_timestamp: None,
-            timestamp_offset: None,
-            clock,
-            delay_buffer: AverageCalculationBuffer::new(
-                vec![0i64; delay_calculation_buffer_len].into(),
-            ),
-            rtp_packet_buffer: vec![0; packet_buffer_len].into(),
-            data_requests,
-            latest_received_media_time: 0,
-        }
-        .run();
-
-        let rx_thread = spawn_blocking(|| {
-            let rx_thread_runtime = runtime::Builder::new_current_thread()
-                .enable_all()
-                .thread_name("rx-thread")
-                .build()?;
-            // TODO set priority
-            rx_thread_runtime.block_on(rx_thread_future)?;
-
-            Ok::<(), Aes67Vsc2Error>(())
-        });
+        thread::Builder::new()
+            .name(format!("{}-receiver-thread", config.instance_name()))
+            .spawn(move || {
+                let res = RxThread {
+                    config: cfg,
+                    rx_cancellation_token: rxct,
+                    rx_config,
+                    desc: desc_rx,
+                    last_sequence_number: None,
+                    last_timestamp: None,
+                    timestamp_offset: None,
+                    clock,
+                    delay_buffer: AverageCalculationBuffer::new(
+                        vec![0i64; delay_calculation_buffer_len].into(),
+                    ),
+                    rtp_packet_buffer: vec![0; packet_buffer_len].into(),
+                    data_requests,
+                    latest_received_ingress_timestamp: 0,
+                }
+                .run();
+                rx_stopped.send(res).ok();
+            })?;
 
         subsys.start(SubsystemBuilder::new("actor", |s| async move {
             ReceiverActor {
@@ -233,11 +233,11 @@ impl ReceiverActor {
     }
 
     #[instrument(skip(self, term))]
-    fn rx_thread_terminated(&self, term: Result<Aes67Vsc2Result<()>, JoinError>) {
+    fn rx_thread_terminated(&self, term: Result<Aes67Vsc2Result<()>, RecvError>) {
         match term {
             Ok(Ok(_)) => info!("RX thread terminated normally."),
             Ok(Err(e)) => error!("RX thread terminated with error: {e:?}"),
-            Err(e) => error!("Error waiting for RX thread to terminate: {e}"),
+            Err(_) => error!("The RX thread crashed."),
         }
     }
 }
@@ -254,11 +254,11 @@ struct RxThread<C: MediaClock> {
     delay_buffer: AverageCalculationBuffer<i64>,
     rtp_packet_buffer: Box<[u8]>,
     data_requests: RequestResponseServerChannel<AudioDataRequest, DataState>,
-    latest_received_media_time: u64,
+    latest_received_ingress_timestamp: u64,
 }
 
 impl<C: MediaClock> RxThread<C> {
-    async fn run(mut self) -> Aes67Vsc2Result<()> {
+    fn run(mut self) -> Aes67Vsc2Result<()> {
         set_realtime_priority();
 
         let socket = create_rx_socket(&self.rx_config.session, self.config.interface_ip)?;
@@ -266,17 +266,29 @@ impl<C: MediaClock> RxThread<C> {
         let mut receive_buffer = [0; 65_535];
 
         loop {
-            select! {
-                Ok((len, addr)) = socket.recv_from(&mut receive_buffer) => self.rtp_data_received(&receive_buffer[..len], addr),
-                Some(req) = self.data_requests.on_request() => if !self.data_requested(req) {
-                    info!("Playout closed.");
-                    break
-                },
-                _ = &mut self.rx_cancellation_token => {
-                    info!("Cancellation token caused RX thread to stop.");
-                    break
-                },
-                else => break,
+            match socket.recv_from(&mut receive_buffer) {
+                Ok((len, addr)) => self.rtp_data_received(&receive_buffer[..len], addr)?,
+                Err(e) => {
+                    if e.kind() != ErrorKind::WouldBlock {
+                        return Err(Aes67Vsc2Error::from(e));
+                    }
+                }
+            }
+
+            match self.data_requests.try_on_request() {
+                Ok(req) => {
+                    if !self.data_requested(req) {
+                        info!("Playout closed.");
+                        break;
+                    }
+                }
+                Err(TryRecvError::Disconnected) => break,
+                Err(TryRecvError::Empty) => { /* nothing to see here, move along */ }
+            }
+
+            if self.rx_cancellation_token.try_recv().is_ok() {
+                info!("Cancellation token caused RX thread to stop.");
+                break;
             }
         }
 
@@ -285,13 +297,13 @@ impl<C: MediaClock> RxThread<C> {
         Ok(())
     }
 
-    fn rtp_data_received(&mut self, data: &[u8], addr: SocketAddr) {
+    fn rtp_data_received(&mut self, data: &[u8], addr: SocketAddr) -> Aes67Vsc2Result<()> {
         if addr.ip() == self.desc.origin_ip {
             let rtp = match RtpReader::new(data) {
                 Ok(it) => it,
                 Err(e) => {
                     warn!("received malformed rtp packet: {e:?}");
-                    return;
+                    return Ok(());
                 }
             };
 
@@ -324,7 +336,7 @@ impl<C: MediaClock> RxThread<C> {
                         warn!(
                             "timestamp of out-of-order packet is not consistent with sequence id, discarding it"
                         );
-                        return;
+                        return Ok(());
                     }
 
                     // TODO check AES67 spec for exact rules how to handle this kind of situation
@@ -344,7 +356,7 @@ impl<C: MediaClock> RxThread<C> {
             if ts_wrapped {
                 info!("RTP timestamp wrapped");
                 if let Some(previous_offset) = self.timestamp_offset {
-                    let new_offset = previous_offset + 2u64.pow(32);
+                    let new_offset = previous_offset + u32::MAX as u64;
                     info!("Updating RTP timestamp offset from {previous_offset} to {new_offset}");
                     self.timestamp_offset = Some(new_offset);
                 } else {
@@ -355,23 +367,30 @@ impl<C: MediaClock> RxThread<C> {
             self.last_sequence_number = Some(seq);
             self.last_timestamp = Some(ts);
 
-            if let &Some(offset) = &self.timestamp_offset {
-                let media_time = self.clock.current_media_time();
-                let delay = media_time as i64 - (rtp.timestamp() as i64 + offset as i64);
+            if let Some(ingress_timestamp) = self.unwrapped_timestamp(&rtp) {
+                let media_time = self.clock.current_media_time()?;
+                let delay = media_time as i64 - ingress_timestamp as i64;
                 if let Some(average) = self.delay_buffer.update(delay) {
                     let micros = (average * 1_000_000) / self.desc.audio_format.sample_rate as i64;
                     let packets = average as f32 / self.desc.frames_per_packet() as f32;
                     info!("Network delay: {average} frames / {micros} µs / {packets:.1} packets");
                 }
-                if media_time > self.latest_received_media_time {
-                    self.latest_received_media_time = media_time;
+                if ingress_timestamp > self.latest_received_ingress_timestamp {
+                    self.latest_received_ingress_timestamp = ingress_timestamp;
                 }
                 let mut buffer = AudioBuffer::new(&mut self.rtp_packet_buffer, &self.desc);
-                buffer.insert(rtp, offset);
+                buffer.insert(rtp.payload(), ingress_timestamp);
             }
         } else {
             warn!("Received packet from wrong sender: {addr}");
         }
+
+        Ok(())
+    }
+
+    fn unwrapped_timestamp(&self, rtp: &RtpReader) -> Option<u64> {
+        self.timestamp_offset
+            .map(|ts_offset| ts_offset + rtp.timestamp() as u64 - self.desc.rtp_offset as u64)
     }
 
     fn data_requested(&self, req: AudioDataRequest) -> bool {
@@ -388,7 +407,7 @@ impl<C: MediaClock> RxThread<C> {
         let frame_start = (req.ingress_time % frames_per_buffer as u64) as usize;
 
         let data_ready =
-            req.ingress_time + req.buffer.len() as u64 <= self.latest_received_media_time;
+            req.ingress_time + req.buffer.len() as u64 <= self.latest_received_ingress_timestamp;
 
         if data_ready {
             let output_buffer = req.buffer.buffer_mut::<f32>();
@@ -411,13 +430,20 @@ impl<C: MediaClock> RxThread<C> {
     }
 
     #[instrument(skip(self))]
-    fn calibrate_timestamp_offset(&mut self, rtp_timestamp: u32, timestamp_wrapped: bool) {
+    fn calibrate_timestamp_offset(
+        &mut self,
+        rtp_timestamp: u32,
+        timestamp_wrapped: bool,
+    ) -> Aes67Vsc2Result<()> {
         info!("Calibrating timestamp offset at RTP timestamp {rtp_timestamp}");
 
-        let media_time = self.clock.current_media_time();
-        let timestamp_wrap = 2u64.pow(32);
+        let media_time = self.clock.current_media_time()?;
+        let timestamp_wrap = u32::MAX as u64;
         let timestamp_wraps = media_time / timestamp_wrap;
         let timestamp_modulo = media_time % timestamp_wrap;
+
+        info!("Sender timestamp has wrapped {timestamp_wraps} times");
+
         let diff = rtp_timestamp as i128 - timestamp_modulo as i128;
         if diff.abs() >= timestamp_modulo as i128 {
             warn!("calibrating timestamp offset close to wrap, calibration may be inaccurate");
@@ -440,5 +466,7 @@ impl<C: MediaClock> RxThread<C> {
         }
 
         self.timestamp_offset = Some(offset);
+
+        Ok(())
     }
 }

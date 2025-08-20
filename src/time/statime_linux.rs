@@ -44,17 +44,17 @@ use tokio::{
 use tracing::{error, info, trace};
 use worterbuch_client::{Worterbuch, topic};
 
-use crate::time::system_time;
+use crate::{error::Aes67Vsc2Result, time::system_time};
 
 pub type PtpClock = SharedClock<OverlayClock<LinuxClock>>;
 
-pub fn current_offset(clock: &PtpClock) -> i64 {
+pub fn current_offset(clock: &PtpClock) -> Aes67Vsc2Result<i64> {
     let ptp_time = clock.now();
-    let system_time = system_time();
+    let system_time = system_time()?;
 
     let diff_s = ptp_time.secs() as i64 - system_time.tv_sec;
     let diff_ns = ptp_time.subsec_nanos() as i64 - system_time.tv_nsec;
-    diff_s * Duration::from_secs(1).as_nanos() as i64 + diff_ns
+    Ok(diff_s * Duration::from_secs(1).as_nanos() as i64 + diff_ns)
 }
 
 pin_project_lite::pin_project! {

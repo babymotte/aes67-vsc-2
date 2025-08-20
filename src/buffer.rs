@@ -81,17 +81,8 @@ impl<'a, 'b> AudioBuffer<'a, 'b> {
         Self { buf, desc }
     }
 
-    pub fn insert(&mut self, rtp: RtpReader, timestamp_offset: u64) {
-        let payload = rtp.payload();
-
+    pub fn insert(&mut self, payload: &[u8], ingress_timestamp: u64) {
         let bpf = self.desc.bytes_per_frame();
-        let ingress_timestamp =
-        // wrapped ingress timestamp including random offset
-        rtp.timestamp() as u64
-        // subtract random timestamp offset from SDP to get the actual wrapped ingress timestamp
-        - self.desc.rtp_offset as u64
-        // add calibrated timestamp offset to transform it into the unwrapped ingress media clock time
-        + timestamp_offset;
         let frames_in_buffer = (self.buf.len() / bpf) as u64;
         let frame_index = ingress_timestamp % frames_in_buffer;
         let byte_index = frame_index as usize * bpf;

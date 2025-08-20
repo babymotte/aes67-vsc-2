@@ -22,7 +22,7 @@ use thread_priority::{
     RealtimeThreadSchedulePolicy, ThreadPriority, ThreadSchedulePolicy,
     set_thread_priority_and_policy, thread_native_id,
 };
-use tokio::sync::mpsc;
+use tokio::sync::mpsc::{self, error::TryRecvError};
 use tracing::{info, warn};
 
 pub struct RequestResponseServerChannel<Req, Resp> {
@@ -33,6 +33,10 @@ pub struct RequestResponseServerChannel<Req, Resp> {
 impl<Req, Resp> RequestResponseServerChannel<Req, Resp> {
     pub async fn on_request(&mut self) -> Option<Req> {
         self.requests.recv().await
+    }
+
+    pub fn try_on_request(&mut self) -> Result<Req, TryRecvError> {
+        self.requests.try_recv()
     }
 
     pub fn respond(&self, resp: Resp) -> bool {

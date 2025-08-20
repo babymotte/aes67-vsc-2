@@ -1,10 +1,27 @@
+/*
+ *  Copyright (C) 2025 Michael Bachmann
+ *
+ *  This program is free software: you can redistribute it and/or modify
+ *  it under the terms of the GNU Affero General Public License as published by
+ *  the Free Software Foundation, either version 3 of the License, or
+ *  (at your option) any later version.
+ *
+ *  This program is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *  GNU Affero General Public License for more details.
+ *
+ *  You should have received a copy of the GNU Affero General Public License
+ *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 use aes67_vsc_2::{
     buffer::AudioBufferPointer,
     error::Aes67Vsc2Result,
     formats::{AudioFormat, FrameFormat, MilliSeconds, SampleFormat, SampleWriter},
     sender::start_sender,
     time::{MediaClock, SystemMediaClock},
-    utils::{RequestResponseServerChannel, request_response_channel},
+    utils::{AverageCalculationBuffer, RequestResponseServerChannel, request_response_channel},
 };
 use miette::Result;
 use rtp_rs::Seq;
@@ -32,9 +49,11 @@ async fn main() -> Result<()> {
     };
     let ptime = 1.0;
 
+    let clock = SystemMediaClock::new(audio_format.clone());
+
     Toplevel::new(move |s| async move {
         s.start(SubsystemBuilder::new("aes67-vsc-2", move |s| async move {
-            run(s, local_ip, target_address, audio_format, ptime).await
+            run(s, clock, local_ip, target_address, audio_format, ptime).await
         }));
     })
     .catch_signals()
@@ -44,8 +63,9 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn run(
+async fn run<C: MediaClock>(
     subsys: SubsystemHandle,
+    clock: C,
     local_ip: IpAddr,
     target_address: SocketAddr,
     audio_format: AudioFormat,
@@ -55,7 +75,6 @@ async fn run(
 
     start_sender(&subsys, rrc, local_ip, 0, target_address).await?;
 
-    let clock = SystemMediaClock::new(audio_format.clone());
     let mut player = Player::new(clock, audio_format, rrs, ptime);
 
     loop {
@@ -77,6 +96,7 @@ struct Player<C: MediaClock> {
     rrs: RequestResponseServerChannel<AudioBufferPointer, (Seq, u64)>,
     interval: Interval,
     pos: u64,
+    clock_drift_calculator: AverageCalculationBuffer<i64>,
 }
 
 impl<C: MediaClock> Player<C> {
@@ -95,6 +115,9 @@ impl<C: MediaClock> Player<C> {
             rrs,
             interval,
             pos: 0,
+            clock_drift_calculator: AverageCalculationBuffer::new(
+                vec![0i64; f32::round(1000.0 / ptime) as usize].into(),
+            ),
         }
     }
 
@@ -112,7 +135,17 @@ impl<C: MediaClock> Player<C> {
         audio_buffer: AudioBufferPointer,
     ) -> Aes67Vsc2Result<(Seq, u64)> {
         if self.time == 0 {
-            self.time = self.clock.current_media_time();
+            self.time = self.clock.current_media_time()?;
+        } else {
+            if let Some(delay) = self
+                .clock_drift_calculator
+                .update(self.clock.current_media_time()? as i64 - self.time as i64)
+            {
+                eprintln!("ingress delay: {delay}");
+                if delay < 0 {
+                    self.time = (self.time as i64 + delay).max(0) as u64
+                }
+            }
         }
 
         let buffer = audio_buffer.buffer_mut();

@@ -1,0 +1,33 @@
+app:
+  name: AES67-VSC-2 Receiver
+  instance:
+    name: thinkpad-p14s/2
+telemetry:
+  endpoint: !grpc http://127.0.0.1:4317
+interfaceIp: 192.168.178.39
+playoutConfig:
+  webserver:
+    bindAddress: 127.0.0.1
+    port: 32003
+  receiver: http://127.0.0.1:32002
+  clockDriftCompensationInterval: 3
+receiverConfig:
+  webserver:
+    bindAddress: 127.0.0.1
+    port: 32002
+  session: |
+    v=0
+    o=- 10943522194 10943522194 IN IP4 192.168.178.39
+    s=AES67-VSC : 2
+    i=2 channels: Left, Right
+    c=IN IP4 239.69.232.56/32
+    t=0 0
+    a=keywds:AES67-VSC
+    a=recvonly
+    m=audio 5004 RTP/AVP 97
+    a=rtpmap:97 L24/48000/2
+    a=ptime:1
+    a=ts-refclk:ptp=IEEE1588-2008:00-1D-C1-FF-FE-0E-10-C4:0
+    a=mediaclk:direct=0
+  linkOffset: 2.0
+  bufferTime: 100

@@ -19,12 +19,12 @@ mod statime_linux;
 
 use crate::{
     config::Config,
-    error::Aes67Vsc2Result,
+    error::{Aes67Vsc2Error, Aes67Vsc2Result},
     formats::{AudioFormat, FramesPerSecond, MilliSeconds, frames_per_link_offset_buffer},
     time::statime_linux::{PtpClock, statime_linux},
     utils::find_network_interface,
 };
-use libc::{CLOCK_TAI, clock_gettime, timespec};
+use libc::{CLOCK_REALTIME, clock_gettime, timespec};
 use statime::Clock;
 use std::{
     cmp::Ordering,
@@ -233,7 +233,7 @@ impl RemoteMediaClock {
         })
     }
 
-    pub fn media_time(&self) -> MediaClockTimestamp {
+    pub fn media_time(&self) -> Aes67Vsc2Result<MediaClockTimestamp> {
         media_time(
             self.offset.load(std::sync::atomic::Ordering::Acquire),
             self.sample_rate,
@@ -268,39 +268,45 @@ async fn read_offset(
     }
 }
 
-pub fn media_time(offset: i64, sample_rate: FramesPerSecond) -> MediaClockTimestamp {
-    let timestamp = wrapped_media_time(sample_rate, offset);
-    MediaClockTimestamp {
+pub fn media_time(
+    offset: i64,
+    sample_rate: FramesPerSecond,
+) -> Aes67Vsc2Result<MediaClockTimestamp> {
+    let timestamp = wrapped_media_time(sample_rate, offset)?;
+    Ok(MediaClockTimestamp {
         timestamp,
         sample_rate,
-    }
+    })
 }
 
-fn wrapped_media_time(sample_rate: FramesPerSecond, offset: i64) -> u32 {
-    wrap_u128(raw_media_time(sample_rate, offset))
+fn wrapped_media_time(sample_rate: FramesPerSecond, offset: i64) -> Aes67Vsc2Result<u32> {
+    Ok(wrap_u128(raw_media_time(sample_rate, offset)?))
 }
 
-fn raw_media_time(sample_rate: FramesPerSecond, offset: i64) -> u128 {
-    let now = system_time();
+fn raw_media_time(sample_rate: FramesPerSecond, offset: i64) -> Aes67Vsc2Result<u128> {
+    let now = system_time()?;
     let nanos =
         (now.tv_sec * Duration::from_secs(1).as_nanos() as i64 + now.tv_nsec + offset) as u128;
-    (nanos * sample_rate as u128) / std::time::Duration::from_secs(1).as_nanos()
+    Ok((nanos * sample_rate as u128) / std::time::Duration::from_secs(1).as_nanos())
 }
 
-pub fn system_time() -> timespec {
+pub fn system_time() -> Aes67Vsc2Result<timespec> {
     let mut tp = timespec {
         tv_sec: 0,
         tv_nsec: 0,
     };
-    if unsafe { clock_gettime(CLOCK_TAI, &mut tp) } == -1 {
-        // TODO handle error
+    if unsafe { clock_gettime(CLOCK_REALTIME, &mut tp) } == -1 {
+        Err(Aes67Vsc2Error::Other(
+            "could not get system time".to_owned(),
+        ))
+    } else {
+        Ok(tp)
     }
-    tp
 }
 
 pub trait MediaClock: Clone + Send + 'static {
-    fn current_media_time(&self) -> u64;
-    fn current_ptp_time_millis(&self) -> u64;
+    fn current_media_time(&self) -> Aes67Vsc2Result<u64>;
+    fn current_ptp_time_millis(&self) -> Aes67Vsc2Result<u64>;
 }
 
 #[derive(Clone)]
@@ -315,18 +321,18 @@ impl SystemMediaClock {
 }
 
 impl MediaClock for SystemMediaClock {
-    fn current_media_time(&self) -> u64 {
-        let ptp_time = system_time();
-        media_time_from_ptp(
+    fn current_media_time(&self) -> Aes67Vsc2Result<u64> {
+        let ptp_time = system_time()?;
+        Ok(media_time_from_ptp(
             ptp_time.tv_sec as u64,
             ptp_time.tv_nsec as u64,
             &self.audio_format,
-        )
+        ))
     }
 
-    fn current_ptp_time_millis(&self) -> u64 {
-        let ptp_time = system_time();
-        ptp_time.tv_sec as u64 * 1_000 + ptp_time.tv_nsec as u64 / 1_000_000
+    fn current_ptp_time_millis(&self) -> Aes67Vsc2Result<u64> {
+        let ptp_time = system_time()?;
+        Ok(ptp_time.tv_sec as u64 * 1_000 + ptp_time.tv_nsec as u64 / 1_000_000)
     }
 }
 
@@ -354,18 +360,18 @@ impl StatimePtpMediaClock {
 }
 
 impl MediaClock for StatimePtpMediaClock {
-    fn current_media_time(&self) -> u64 {
+    fn current_media_time(&self) -> Aes67Vsc2Result<u64> {
         let ptp_time = self.statime_ptp_clock.now();
-        media_time_from_ptp(
+        Ok(media_time_from_ptp(
             ptp_time.secs(),
             ptp_time.subsec_nanos() as u64,
             &self.audio_format,
-        )
+        ))
     }
 
-    fn current_ptp_time_millis(&self) -> u64 {
+    fn current_ptp_time_millis(&self) -> Aes67Vsc2Result<u64> {
         let ptp_time = self.statime_ptp_clock.now();
-        ptp_time.secs() as u64 * 1_000 + ptp_time.subsec_nanos() as u64 / 1_000_000
+        Ok(ptp_time.secs() as u64 * 1_000 + ptp_time.subsec_nanos() as u64 / 1_000_000)
     }
 }
 

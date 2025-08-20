@@ -15,12 +15,15 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+mod session_manager;
+
 use crate::{
     buffer::AudioBufferPointer,
     config::Config,
     error::Aes67Vsc2Result,
     playout::{
         api::{PlayoutApi, PlayoutApiMessage},
+        jack::session_manager::start_session_manager,
         webserver::start_webserver,
     },
     receiver::{AudioDataRequest, DataState, api::ReceiverApi, config::RxDescriptor},
@@ -37,7 +40,7 @@ use tokio::{
     sync::{mpsc, oneshot},
 };
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
-use tracing::{error, info, instrument, warn};
+use tracing::{info, instrument, warn};
 use worterbuch_client::Worterbuch;
 
 #[instrument(skip(subsys, wb, clock, requests))]
@@ -174,7 +177,8 @@ impl PlayoutActor {
             / client.buffer_size() as usize;
         let drift_calculator_buffer = vec![0i64; drift_calculator_buffer_len];
 
-        let notification_handler = TracingNotificationHandler;
+        let (tx, notifications) = mpsc::channel(1024);
+        let notification_handler = SessionManagerNotificationHandler { tx };
         let process_handler_state = ProcessHandlerState {
             out_ports,
             desc,
@@ -190,15 +194,8 @@ impl PlayoutActor {
         let process_handler =
             ClosureProcessHandler::with_state(process_handler_state, process, buffer_change);
 
-        // TODO set buffer size?
         let active_client = client.activate_async(notification_handler, process_handler)?;
-
-        // TODO connect ports
-
-        // TODO get shared memory pointers from used receivers
-        // TODO get media clock
-        // TODO check if JACK and receiver audio format are compatible
-        // TODO play out audio from shared memory
+        start_session_manager(&self.subsys, active_client, notifications);
 
         loop {
             select! {
@@ -208,9 +205,6 @@ impl PlayoutActor {
                 _ = self.subsys.on_shutdown_requested() => break,
                 else => break,
             }
-        }
-        if let Err(e) = active_client.deactivate() {
-            error!("Error deactivating JACK client: {e}");
         }
 
         self.stop();
@@ -263,65 +257,93 @@ impl<C: MediaClock> ProcessHandlerState<C> {
     }
 }
 
-struct TracingNotificationHandler;
+pub enum Notification {
+    ThreadInit,
+    Shutdown(jack::ClientStatus, String),
+    SampleRate(jack::Frames),
+    ClientRegistration(String, bool),
+    PortRegistration(jack::PortId, bool),
+    PortRename(jack::PortId, String, String),
+    PortConnected(jack::PortId, jack::PortId, bool),
+    GraphReorder,
+    XRun,
+}
 
-impl NotificationHandler for TracingNotificationHandler {
+struct SessionManagerNotificationHandler {
+    tx: mpsc::Sender<Notification>,
+}
+
+impl NotificationHandler for SessionManagerNotificationHandler {
     fn thread_init(&self, _: &Client) {
-        info!("JACK thread initialized");
+        self.tx.try_send(Notification::ThreadInit).ok();
     }
 
-    unsafe fn shutdown(&mut self, _status: jack::ClientStatus, reason: &str) {
-        info!("JACK thread shutting down: {reason}");
+    unsafe fn shutdown(&mut self, status: jack::ClientStatus, reason: &str) {
+        self.tx
+            .try_send(Notification::Shutdown(status, reason.to_owned()))
+            .ok();
     }
 
     fn sample_rate(&mut self, _: &Client, srate: jack::Frames) -> Control {
-        info!("JACK sample rate changed to {srate} Hz");
+        self.tx.try_send(Notification::SampleRate(srate)).ok();
         Control::Continue
     }
 
     fn client_registration(&mut self, _: &Client, name: &str, is_registered: bool) {
-        info!("JACK client '{name}' registered: {is_registered}")
+        self.tx
+            .try_send(Notification::ClientRegistration(
+                name.to_owned(),
+                is_registered,
+            ))
+            .ok();
     }
 
-    fn port_registration(&mut self, _: &Client, _port_id: jack::PortId, _is_registered: bool) {
-        // TODO check if we should be sending to a newly connected port and establish a connection if necessary
+    fn port_registration(&mut self, _: &Client, port_id: jack::PortId, is_registered: bool) {
+        self.tx
+            .try_send(Notification::PortRegistration(port_id, is_registered))
+            .ok();
     }
 
     fn port_rename(
         &mut self,
         _: &Client,
-        _port_id: jack::PortId,
-        _old_name: &str,
-        _new_name: &str,
+        port_id: jack::PortId,
+        old_name: &str,
+        new_name: &str,
     ) -> Control {
+        self.tx
+            .try_send(Notification::PortRename(
+                port_id,
+                old_name.to_owned(),
+                new_name.to_owned(),
+            ))
+            .ok();
         Control::Continue
     }
 
     fn ports_connected(
         &mut self,
-        client: &Client,
+        _: &Client,
         port_id_a: jack::PortId,
         port_id_b: jack::PortId,
         are_connected: bool,
     ) {
-        if let Some(port) = client.port_by_id(port_id_a) {
-            if client.is_mine(&port) {
-                if are_connected {
-                    info!("JACK ports connected: {port_id_a} -> {port_id_b}")
-                } else {
-                    info!("JACK ports disconnected: {port_id_a} -/> {port_id_b}")
-                }
-                // TODO store ports connections and restore them on startup
-            }
-        }
+        self.tx
+            .try_send(Notification::PortConnected(
+                port_id_a,
+                port_id_b,
+                are_connected,
+            ))
+            .ok();
     }
 
     fn graph_reorder(&mut self, _: &Client) -> Control {
+        self.tx.try_send(Notification::GraphReorder).ok();
         Control::Continue
     }
 
     fn xrun(&mut self, _: &Client) -> Control {
-        warn!("JACK buffer over-/underrun");
+        self.tx.try_send(Notification::XRun).ok();
         Control::Continue
     }
 }
@@ -337,12 +359,19 @@ fn buffer_change<C: MediaClock>(
 
 fn process<C: MediaClock>(
     state: &mut ProcessHandlerState<C>,
-    _: &Client,
+    client: &Client,
     ps: &ProcessScope,
 ) -> Control {
-    let current_media_time = state.clock.current_media_time();
+    let Ok(current_media_time) = state.clock.current_media_time() else {
+        return Control::Quit;
+    };
     let relative_jack_media_time = ps.last_frame_time() as u64;
     // TODO get offset from JACK API instead of finding it experimentally
+
+    info!(
+        "client.frames_to_time(ps.last_frame_time()): {}",
+        client.frames_to_time(ps.last_frame_time())
+    );
 
     let current_jack_clock_offset = current_media_time - relative_jack_media_time;
     if current_jack_clock_offset < state.jack_clock_offset {
@@ -406,12 +435,7 @@ fn process<C: MediaClock>(
         }
 
         'request: loop {
-            let now = state.clock.current_media_time();
-            if now > ingress_time + output_buffer.len() as u64 {
-                // the entire buffer should already have been played out by JACK, no need to keep waiting
-                output_buffer.fill(0.0);
-                break 'request;
-            }
+            // TODO make sure we have not already missed the deadline
             match state.requests.request_blocking(AudioDataRequest {
                 buffer: AudioBufferPointer::from_slice(&output_buffer),
                 channel: port_nr,
