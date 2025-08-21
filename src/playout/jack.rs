@@ -27,7 +27,7 @@ use crate::{
         webserver::start_webserver,
     },
     receiver::{AudioDataRequest, DataState, api::ReceiverApi, config::RxDescriptor},
-    time::MediaClock,
+    time::{MediaClock, wallclock_monotonic_offset_nanos},
     utils::{AverageCalculationBuffer, RequestResponseClientChannel, set_realtime_priority},
 };
 use jack::{
@@ -40,7 +40,7 @@ use tokio::{
     sync::{mpsc, oneshot},
 };
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
-use tracing::{info, instrument, warn};
+use tracing::{error, info, instrument, warn};
 use worterbuch_client::Worterbuch;
 
 #[instrument(skip(subsys, wb, clock, requests))]
@@ -53,6 +53,7 @@ pub async fn start_jack_playout<C: MediaClock>(
     compensate_clock_drift: bool,
     requests: RequestResponseClientChannel<AudioDataRequest, DataState>,
 ) -> Aes67Vsc2Result<PlayoutApi> {
+    jack::set_logger(jack::LoggerType::Log);
     let id = config.app.instance.name.clone();
     let (ready_tx, ready_rx) = oneshot::channel();
     subsys.start(SubsystemBuilder::new(format!("receiver-{id}"), move |s| {
@@ -172,10 +173,11 @@ impl PlayoutActor {
         }
 
         let desc = receiver_info;
-        let drift_calculator_buffer_len = playout_config.clock_drift_compensation_interval as usize
-            * desc.audio_format.sample_rate
-            / client.buffer_size() as usize;
-        let drift_calculator_buffer = vec![0i64; drift_calculator_buffer_len];
+
+        let wallclock_offset_usec = (wallclock_monotonic_offset_nanos()? / 1_000) as u64;
+
+        let jack_media_clock_offset_calculator_buffer_len =
+            client.sample_rate() / client.buffer_size() as usize;
 
         let (tx, notifications) = mpsc::channel(1024);
         let notification_handler = SessionManagerNotificationHandler { tx };
@@ -183,13 +185,15 @@ impl PlayoutActor {
             out_ports,
             desc,
             clock,
-            jack_media_clock: None,
-            drift_calculator: AverageCalculationBuffer::new(drift_calculator_buffer.into()),
-            drift_slew: 0,
             thread_prio_set: false,
-            compensate_clock_drift,
             jack_clock_offset: u64::MAX,
             requests,
+            wallclock_offset_usec,
+            jack_media_clock_offset_calculator: AverageCalculationBuffer::new(
+                vec![0u64; jack_media_clock_offset_calculator_buffer_len].into(),
+            ),
+            jack_media_clock_offset: 0,
+            warmup_counter: 0,
         };
         let process_handler =
             ClosureProcessHandler::with_state(process_handler_state, process, buffer_change);
@@ -238,23 +242,13 @@ struct ProcessHandlerState<C: MediaClock> {
     out_ports: Vec<Port<AudioOut>>,
     desc: RxDescriptor,
     clock: C,
-    jack_media_clock: Option<u64>,
-    drift_calculator: AverageCalculationBuffer<i64>,
-    drift_slew: i64,
     thread_prio_set: bool,
-    compensate_clock_drift: bool,
     jack_clock_offset: u64,
     requests: RequestResponseClientChannel<AudioDataRequest, DataState>,
-}
-
-impl<C: MediaClock> ProcessHandlerState<C> {
-    pub fn slew(&mut self, jack_media_time: u64) -> u64 {
-        if self.drift_slew != 0 {
-            info!("JACK clock slew {} frames", self.drift_slew);
-        }
-        self.drift_slew -= self.drift_slew.signum();
-        (jack_media_time as i64 + self.drift_slew.signum()) as u64
-    }
+    wallclock_offset_usec: u64,
+    jack_media_clock_offset_calculator: AverageCalculationBuffer<u64>,
+    jack_media_clock_offset: u64,
+    warmup_counter: u64,
 }
 
 pub enum Notification {
@@ -362,68 +356,48 @@ fn process<C: MediaClock>(
     client: &Client,
     ps: &ProcessScope,
 ) -> Control {
-    let Ok(current_media_time) = state.clock.current_media_time() else {
-        return Control::Quit;
-    };
-    let relative_jack_media_time = ps.last_frame_time() as u64;
-    // TODO get offset from JACK API instead of finding it experimentally
-
-    info!(
-        "client.frames_to_time(ps.last_frame_time()): {}",
-        client.frames_to_time(ps.last_frame_time())
-    );
-
-    let current_jack_clock_offset = current_media_time - relative_jack_media_time;
-    if current_jack_clock_offset < state.jack_clock_offset {
-        state.jack_clock_offset = current_jack_clock_offset;
-        info!("JACK clock offset updated: {current_jack_clock_offset}");
+    if state.warmup_counter < 100 {
+        state.warmup_counter += 1;
+        return Control::Continue;
     }
-    let absolute_jack_media_time = state.jack_clock_offset + relative_jack_media_time;
 
     if !state.thread_prio_set {
         set_realtime_priority();
         state.thread_prio_set = true;
     }
 
-    let jack_buffer_len = ps.n_frames() as u64;
-
-    let jack_media_time = state.jack_media_clock.unwrap_or(current_media_time);
-
-    let link_offset = state.desc.link_offset;
-    let link_offset_frames = f32::floor(link_offset * state.desc.frames_per_ms() as f32) as u64;
-
-    let current_drift = jack_media_time as i64 - current_media_time as i64;
-
-    let next_media_time = if state.compensate_clock_drift {
-        if let Some(drift) = state.drift_calculator.update(current_drift) {
-            // we got a new average drift, let's see if we need to compensate
-            if drift.unsigned_abs() > link_offset_frames / 2 {
-                warn!(
-                    "JACK media clock if too far off ({drift} frames), resetting it to ptp media clock"
-                );
-                state.drift_slew = 0;
-                current_media_time
-            } else {
-                if drift != 0 {
-                    warn!(
-                        "Current JACK clock drift: {} frames / {} µs",
-                        drift,
-                        (drift * 1_000_000) / state.desc.audio_format.sample_rate as i64
-                    );
-                }
-                state.drift_slew = -drift;
-                state.slew(jack_media_time)
-            }
-        } else {
-            state.slew(jack_media_time)
+    if state.jack_media_clock_offset == 0 {
+        let cycle_start_monotonic_usec = client.frames_to_time(ps.last_frame_time());
+        let cycle_start_wallclock_usec = cycle_start_monotonic_usec + state.wallclock_offset_usec;
+        let cycle_start_media_time =
+            (cycle_start_wallclock_usec as f64 * client.sample_rate() as f64 / 1_000_000.0).round()
+                as u64;
+        let offset = cycle_start_media_time - ps.last_frame_time() as u64;
+        if let Some(offset) = state.jack_media_clock_offset_calculator.update(offset) {
+            info!("Clock calibration done, JACK media clock offset is {offset}");
+            state.jack_media_clock_offset = offset;
         }
+        return Control::Continue;
+    }
+
+    let media_time = state.jack_media_clock_offset + ps.last_frame_time() as u64;
+
+    let Ok(current_media_time) = state.clock.current_media_time() else {
+        error!("Could not get system media time!");
+        return Control::Quit;
+    };
+    if current_media_time > media_time {
+        let diff = current_media_time - media_time;
+        let diff_usec = (diff as f64 * 1_000_000.0 / client.sample_rate() as f64).round() as u64;
+        // warn!(
+        //     "JACK clock is behind media clock by {diff} frames / {diff_usec} µs (expected to be ahead)!",
+        // );
+        // return Control::Quit;
     } else {
-        jack_media_time
-    } + jack_buffer_len;
-
-    state.jack_media_clock = Some(next_media_time);
-
-    let ingress_time = absolute_jack_media_time - link_offset_frames;
+        let diff = media_time - current_media_time;
+        let diff_usec = (diff as f64 * 1_000_000.0 / client.sample_rate() as f64).round() as u64;
+        // warn!("JACK clock is ahead of media clock by {diff} frames / {diff_usec} µs (expected).",);
+    }
 
     for (port_nr, port) in state.out_ports.iter_mut().enumerate() {
         let connected = port.connected_count().unwrap_or(0) != 0;
@@ -435,12 +409,15 @@ fn process<C: MediaClock>(
         }
 
         'request: loop {
-            // TODO make sure we have not already missed the deadline
             match state.requests.request_blocking(AudioDataRequest {
                 buffer: AudioBufferPointer::from_slice(&output_buffer),
                 channel: port_nr,
-                ingress_time,
+                playout_time: media_time,
             }) {
+                Some(DataState::Missed) => {
+                    warn!("Did not get data from receiver in time!");
+                    break 'request;
+                }
                 Some(DataState::Ready) => break 'request,
                 Some(DataState::Wait) => continue 'request,
                 None => return Control::Quit,

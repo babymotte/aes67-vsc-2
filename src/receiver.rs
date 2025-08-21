@@ -48,13 +48,11 @@ use crate::{
 use rtp_rs::{RtpReader, Seq};
 use std::{io::ErrorKind, net::SocketAddr, thread, u32};
 use tokio::{
-    runtime::{self},
     select,
     sync::{
         mpsc::{self, error::TryRecvError},
         oneshot::{self, error::RecvError},
     },
-    task::{JoinError, JoinHandle, spawn_blocking},
 };
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
 use tracing::{error, info, instrument, warn};
@@ -64,12 +62,13 @@ use worterbuch_client::Worterbuch;
 pub enum DataState {
     Ready,
     Wait,
+    Missed,
 }
 
 pub struct AudioDataRequest {
     pub buffer: AudioBufferPointer,
     pub channel: usize,
-    pub ingress_time: u64,
+    pub playout_time: u64,
 }
 
 #[instrument(skip(subsys, wb, clock, data_requests))]
@@ -141,8 +140,7 @@ impl ReceiverActor {
             .map(|c| c.clock_drift_compensation_interval)
             .unwrap_or(1);
         let delay_calculation_buffer_len =
-            f32::floor(delay_calculation_interval as f32 * 1_000.0 / descriptor.packet_time)
-                as usize;
+            (delay_calculation_interval as f32 * 1_000.0 / descriptor.packet_time).round() as usize;
         let packet_buffer_len = desc.audio_format.bytes_per_buffer(rx_config.buffer_time);
 
         thread::Builder::new()
@@ -158,11 +156,12 @@ impl ReceiverActor {
                     timestamp_offset: None,
                     clock,
                     delay_buffer: AverageCalculationBuffer::new(
-                        vec![0i64; delay_calculation_buffer_len].into(),
+                        vec![0; delay_calculation_buffer_len].into(),
                     ),
                     rtp_packet_buffer: vec![0; packet_buffer_len].into(),
                     data_requests,
-                    latest_received_ingress_timestamp: 0,
+                    latest_received_playout_time: 0,
+                    strict_checks_disabled: true,
                 }
                 .run();
                 rx_stopped.send(res).ok();
@@ -254,7 +253,8 @@ struct RxThread<C: MediaClock> {
     delay_buffer: AverageCalculationBuffer<i64>,
     rtp_packet_buffer: Box<[u8]>,
     data_requests: RequestResponseServerChannel<AudioDataRequest, DataState>,
-    latest_received_ingress_timestamp: u64,
+    latest_received_playout_time: u64,
+    strict_checks_disabled: bool,
 }
 
 impl<C: MediaClock> RxThread<C> {
@@ -266,8 +266,12 @@ impl<C: MediaClock> RxThread<C> {
         let mut receive_buffer = [0; 65_535];
 
         loop {
-            match socket.recv_from(&mut receive_buffer) {
-                Ok((len, addr)) => self.rtp_data_received(&receive_buffer[..len], addr)?,
+            let recv = socket.recv_from(&mut receive_buffer);
+            let media_time_at_reception = self.clock.current_media_time()?;
+            match recv {
+                Ok((len, addr)) => {
+                    self.rtp_data_received(&receive_buffer[..len], addr, media_time_at_reception)?
+                }
                 Err(e) => {
                     if e.kind() != ErrorKind::WouldBlock {
                         return Err(Aes67Vsc2Error::from(e));
@@ -275,9 +279,11 @@ impl<C: MediaClock> RxThread<C> {
                 }
             }
 
-            match self.data_requests.try_on_request() {
+            let recv = self.data_requests.try_on_request();
+            let media_time_at_reception = self.clock.current_media_time()?;
+            match recv {
                 Ok(req) => {
-                    if !self.data_requested(req) {
+                    if !self.data_requested(req, media_time_at_reception)? {
                         info!("Playout closed.");
                         break;
                     }
@@ -297,92 +303,116 @@ impl<C: MediaClock> RxThread<C> {
         Ok(())
     }
 
-    fn rtp_data_received(&mut self, data: &[u8], addr: SocketAddr) -> Aes67Vsc2Result<()> {
-        if addr.ip() == self.desc.origin_ip {
-            let rtp = match RtpReader::new(data) {
-                Ok(it) => it,
-                Err(e) => {
-                    warn!("received malformed rtp packet: {e:?}");
+    fn rtp_data_received(
+        &mut self,
+        data: &[u8],
+        addr: SocketAddr,
+        media_time_at_reception: u64,
+    ) -> Aes67Vsc2Result<()> {
+        if addr.ip() != self.desc.origin_ip {
+            warn!(
+                "Received packet from wrong sender: {} (expected {})",
+                addr, self.desc.origin_ip
+            );
+            return Ok(());
+        }
+
+        let rtp = match RtpReader::new(data) {
+            Ok(it) => it,
+            Err(e) => {
+                warn!("received malformed rtp packet: {e:?}");
+                return Ok(());
+            }
+        };
+
+        let seq = rtp.sequence_number();
+        let ts = rtp.timestamp();
+
+        let mut ts_wrapped = false;
+        let mut seq_wrapped = false;
+
+        if let (Some(last_ts), Some(last_seq)) = (self.last_timestamp, self.last_sequence_number) {
+            let expected_seq = last_seq.next();
+            let expected_ts = last_ts.wrapping_add(self.desc.frames_per_packet() as u32);
+            if seq != expected_seq {
+                warn!(
+                    "inconsistent sequence number: {} (last was {})",
+                    u16::from(seq),
+                    u16::from(last_seq)
+                );
+
+                let diff = seq - expected_seq;
+                let consistent_ts =
+                    expected_ts as i64 + self.desc.frames_per_packet() as i64 * diff as i64;
+                if consistent_ts == ts as i64 {
+                    info!(
+                        "timestamp of out-of-order packet is consistent with sequence id, queuing it for playout"
+                    );
+                } else {
+                    warn!(
+                        "timestamp of out-of-order packet is not consistent with sequence id, discarding it"
+                    );
                     return Ok(());
                 }
-            };
 
-            let seq = rtp.sequence_number();
-            let ts = rtp.timestamp();
-
-            let mut ts_wrapped = false;
-            let mut seq_wrapped = false;
-
-            if let (Some(last_ts), Some(last_seq)) =
-                (self.last_timestamp, self.last_sequence_number)
-            {
-                let expected_seq = last_seq.next();
-                let expected_ts = last_ts.wrapping_add(self.desc.frames_per_packet() as u32);
-                if seq != expected_seq {
-                    warn!(
-                        "inconsistent sequence number: {} (last was {})",
-                        u16::from(seq),
-                        u16::from(last_seq)
-                    );
-
-                    let diff = seq - expected_seq;
-                    let consistent_ts =
-                        expected_ts as i64 + self.desc.frames_per_packet() as i64 * diff as i64;
-                    if consistent_ts == ts as i64 {
-                        info!(
-                            "timestamp of out-of-order packet is consistent with sequence id, queuing it for playout"
-                        );
-                    } else {
-                        warn!(
-                            "timestamp of out-of-order packet is not consistent with sequence id, discarding it"
-                        );
-                        return Ok(());
-                    }
-
-                    // TODO check AES67 spec for exact rules how to handle this kind of situation
-                    // TODO track late packets
-                }
-
-                ts_wrapped = ts < last_ts;
-                seq_wrapped = u16::from(seq) < u16::from(last_seq);
+                // TODO check AES67 spec for exact rules how to handle this kind of situation
+                // TODO track late packets
             }
 
-            // TODO track late packets
+            ts_wrapped = ts < last_ts;
+            seq_wrapped = u16::from(seq) < u16::from(last_seq);
+        }
 
-            if seq_wrapped || self.timestamp_offset.is_none() {
-                self.calibrate_timestamp_offset(ts, ts_wrapped);
+        // TODO track late packets
+
+        if seq_wrapped || self.timestamp_offset.is_none() {
+            self.calibrate_timestamp_offset(ts, ts_wrapped)?;
+        }
+
+        if ts_wrapped {
+            info!("RTP timestamp wrapped");
+            if let Some(previous_offset) = self.timestamp_offset {
+                let new_offset = previous_offset + u32::MAX as u64;
+                info!("Updating RTP timestamp offset from {previous_offset} to {new_offset}");
+                self.timestamp_offset = Some(new_offset);
+            } else {
+                self.calibrate_timestamp_offset(ts, ts_wrapped)?;
             }
+        }
 
-            if ts_wrapped {
-                info!("RTP timestamp wrapped");
-                if let Some(previous_offset) = self.timestamp_offset {
-                    let new_offset = previous_offset + u32::MAX as u64;
-                    info!("Updating RTP timestamp offset from {previous_offset} to {new_offset}");
-                    self.timestamp_offset = Some(new_offset);
-                } else {
-                    self.calibrate_timestamp_offset(ts, ts_wrapped);
-                }
+        self.last_sequence_number = Some(seq);
+        self.last_timestamp = Some(ts);
+
+        if let Some(ingress_timestamp) = self.unwrapped_timestamp(&rtp) {
+            let playout_time = ingress_timestamp + self.desc.frames_in_link_offset() as u64;
+            if !self.strict_checks_disabled && media_time_at_reception > playout_time {
+                warn!(
+                    "Packet {} is late for playout, dropping it.",
+                    u16::from(seq)
+                );
+                return Ok(());
             }
-
-            self.last_sequence_number = Some(seq);
-            self.last_timestamp = Some(ts);
-
-            if let Some(ingress_timestamp) = self.unwrapped_timestamp(&rtp) {
-                let media_time = self.clock.current_media_time()?;
-                let delay = media_time as i64 - ingress_timestamp as i64;
-                if let Some(average) = self.delay_buffer.update(delay) {
-                    let micros = (average * 1_000_000) / self.desc.audio_format.sample_rate as i64;
-                    let packets = average as f32 / self.desc.frames_per_packet() as f32;
-                    info!("Network delay: {average} frames / {micros} µs / {packets:.1} packets");
-                }
-                if ingress_timestamp > self.latest_received_ingress_timestamp {
-                    self.latest_received_ingress_timestamp = ingress_timestamp;
-                }
-                let mut buffer = AudioBuffer::new(&mut self.rtp_packet_buffer, &self.desc);
-                buffer.insert(rtp.payload(), ingress_timestamp);
+            if !self.strict_checks_disabled && ingress_timestamp > media_time_at_reception {
+                let diff = ingress_timestamp - media_time_at_reception;
+                let diff_usec =
+                    (diff as f64 * 1_000_000.0 / self.desc.audio_format.sample_rate as f64) as u64;
+                warn!(
+                    "Packet {} was received {diff} frames / {diff_usec} µs before it was sent, sender and receiver clocks must be out of sync.",
+                    u16::from(seq)
+                );
+                return Ok(());
             }
-        } else {
-            warn!("Received packet from wrong sender: {addr}");
+            let delay = media_time_at_reception as i64 - ingress_timestamp as i64;
+            if let Some(average) = self.delay_buffer.update(delay) {
+                let micros = (average * 1_000_000) / self.desc.audio_format.sample_rate as i64;
+                let packets = average as f32 / self.desc.frames_per_packet() as f32;
+                info!("Network delay: {average} frames / {micros} µs / {packets:.1} packets");
+            }
+            if playout_time > self.latest_received_playout_time {
+                self.latest_received_playout_time = playout_time;
+            }
+            let mut buffer = AudioBuffer::new(&mut self.rtp_packet_buffer, &self.desc);
+            buffer.insert(rtp.payload(), playout_time);
         }
 
         Ok(())
@@ -393,7 +423,15 @@ impl<C: MediaClock> RxThread<C> {
             .map(|ts_offset| ts_offset + rtp.timestamp() as u64 - self.desc.rtp_offset as u64)
     }
 
-    fn data_requested(&self, req: AudioDataRequest) -> bool {
+    fn data_requested(
+        &self,
+        req: AudioDataRequest,
+        media_time_at_reception: u64,
+    ) -> Aes67Vsc2Result<bool> {
+        if !self.strict_checks_disabled && media_time_at_reception > req.playout_time {
+            return Ok(self.data_requests.respond(DataState::Missed));
+        }
+
         let bytes_per_buffer_sample: usize = self
             .desc
             .audio_format
@@ -404,10 +442,9 @@ impl<C: MediaClock> RxThread<C> {
         let sample_format = self.desc.audio_format.frame_format.sample_format;
         let frames_per_buffer = self.rtp_packet_buffer.len() / bytes_per_buffer_frame;
 
-        let frame_start = (req.ingress_time % frames_per_buffer as u64) as usize;
+        let frame_start = (req.playout_time % frames_per_buffer as u64) as usize;
 
-        let data_ready =
-            req.ingress_time + req.buffer.len() as u64 <= self.latest_received_ingress_timestamp;
+        let data_ready = req.playout_time <= self.latest_received_playout_time;
 
         if data_ready {
             let output_buffer = req.buffer.buffer_mut::<f32>();
@@ -423,9 +460,9 @@ impl<C: MediaClock> RxThread<C> {
 
                 *sample = sample_format.read_sample(buf);
             }
-            self.data_requests.respond(DataState::Ready)
+            Ok(self.data_requests.respond(DataState::Ready))
         } else {
-            self.data_requests.respond(DataState::Wait)
+            Ok(self.data_requests.respond(DataState::Wait))
         }
     }
 

@@ -269,7 +269,7 @@ pub fn bytes_per_frame(channels: usize, sample_format: SampleFormat) -> usize {
 
 #[deprecated = "actual packet size is different for 44.1 kHz, this needs to be hard coded based on an enum"]
 pub fn frames_per_packet(sample_rate: FramesPerSecond, packet_time: MilliSeconds) -> usize {
-    f32::ceil((sample_rate as f32 * packet_time) / 1000.0) as usize
+    ((sample_rate as f32 * packet_time) / 1000.0).round() as usize
 }
 
 pub fn samples_per_packet(
@@ -281,14 +281,14 @@ pub fn samples_per_packet(
 }
 
 pub fn packets_in_link_offset(link_offset: MilliSeconds, packet_time: MilliSeconds) -> usize {
-    f32::ceil(link_offset / packet_time) as usize
+    (link_offset / packet_time).round() as usize
 }
 
 pub fn frames_per_link_offset_buffer(
     link_offset: MilliSeconds,
     sample_rate: FramesPerSecond,
 ) -> usize {
-    f32::ceil((sample_rate as f32 * link_offset) / Duration::from_secs(1).as_millis() as f32)
+    ((sample_rate as f32 * link_offset) / Duration::from_secs(1).as_millis() as f32).round()
         as usize
 }
 
@@ -340,7 +340,7 @@ pub fn rtp_buffer_size(
 }
 
 pub fn to_link_offset(samples: usize, sample_rate: FramesPerSecond) -> usize {
-    f32::ceil((samples as f32 * 1000.0) / sample_rate as f32) as usize
+    ((samples as f32 * 1000.0) / sample_rate as f32).round() as usize
 }
 
 #[cfg(test)]

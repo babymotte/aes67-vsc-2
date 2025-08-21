@@ -18,6 +18,7 @@
 use crate::{
     buffer::AudioBufferPointer,
     error::{Aes67Vsc2Result, WrappedRtpPacketBuildError},
+    formats::{AudioFormat, MilliSeconds},
     socket::create_tx_socket,
     utils::RequestResponseClientChannel,
 };
@@ -32,6 +33,8 @@ pub async fn start_sender(
     local_ip: IpAddr,
     port: u16,
     target_address: SocketAddr,
+    audio_format: AudioFormat,
+    ptime: MilliSeconds,
 ) -> Aes67Vsc2Result<()> {
     let socket = create_tx_socket(local_ip, port)?;
 
@@ -43,7 +46,7 @@ pub async fn start_sender(
             target_address,
             rtp_buffer: [0u8; 1500],
         }
-        .run()
+        .run(audio_format, ptime)
         .await
     }));
 
@@ -59,9 +62,10 @@ struct SenderActor {
 }
 
 impl SenderActor {
-    async fn run(mut self) -> Aes67Vsc2Result<()> {
-        // TODO adjust buffer size based on audio format
-        let audio_buffer = vec![0u8; 288];
+    async fn run(mut self, audio_format: AudioFormat, ptime: MilliSeconds) -> Aes67Vsc2Result<()> {
+        let buffer_len = audio_format.bytes_per_buffer(ptime);
+        eprintln!("send buffer len: {buffer_len}");
+        let audio_buffer = vec![0u8; buffer_len];
 
         loop {
             let audio_buffer_ptr = AudioBufferPointer::from_slice(&audio_buffer[..]);
@@ -79,7 +83,7 @@ impl SenderActor {
         let len = RtpPacketBuilder::new()
             .payload_type(97)
             .sequence(seq)
-            .timestamp((ingress_time % u32::MAX as u64) as u32)
+            .timestamp(((ingress_time) % u32::MAX as u64) as u32)
             .payload(buf)
             .build_into(&mut self.rtp_buffer)
             .map_err(WrappedRtpPacketBuildError)?;

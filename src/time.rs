@@ -24,7 +24,7 @@ use crate::{
     time::statime_linux::{PtpClock, statime_linux},
     utils::find_network_interface,
 };
-use libc::{CLOCK_REALTIME, clock_gettime, timespec};
+use libc::{CLOCK_MONOTONIC, CLOCK_REALTIME, CLOCK_TAI, clock_gettime, clockid_t, timespec};
 use statime::Clock;
 use std::{
     cmp::Ordering,
@@ -37,6 +37,10 @@ use std::{
 use tokio::{io::AsyncReadExt, net::TcpStream, spawn, sync::mpsc, time::sleep};
 use tracing::{error, info};
 use worterbuch_client::Worterbuch;
+
+// TODO which of these is correct?
+const WALL_CLOCK: clockid_t = CLOCK_TAI;
+// const WALL_CLOCK: clockid_t = CLOCK_REALTIME;
 
 #[derive(Debug, Clone, Copy)]
 pub struct MediaClockTimestamp {
@@ -290,12 +294,68 @@ fn raw_media_time(sample_rate: FramesPerSecond, offset: i64) -> Aes67Vsc2Result<
     Ok((nanos * sample_rate as u128) / std::time::Duration::from_secs(1).as_nanos())
 }
 
+pub fn wallclock_monotonic_offset_nanos() -> Aes67Vsc2Result<u128> {
+    let mut tp_wall = timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    let mut tp_mono = timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+
+    let res_mono = unsafe { clock_gettime(CLOCK_MONOTONIC, &mut tp_mono) };
+    let res_wall = unsafe { clock_gettime(WALL_CLOCK, &mut tp_wall) };
+
+    if res_wall == -1 {
+        return Err(Aes67Vsc2Error::Other(
+            "could not get system time".to_owned(),
+        ));
+    }
+
+    if res_mono == -1 {
+        return Err(Aes67Vsc2Error::Other(
+            "could not get monotonic time".to_owned(),
+        ));
+    }
+
+    Ok(tp_wall.as_nanos() - tp_mono.as_nanos())
+}
+
+pub trait SystemTime {
+    fn as_nanos(&self) -> u128;
+    fn as_micros(&self) -> u64;
+    fn as_millis(&self) -> u64;
+}
+
+impl SystemTime for timespec {
+    fn as_nanos(&self) -> u128 {
+        self.tv_sec as u128 * 1_000_000_000 + self.tv_nsec as u128
+    }
+
+    fn as_micros(&self) -> u64 {
+        self.tv_sec as u64 * 1_000_000 + self.tv_nsec as u64 / 1_000
+    }
+
+    fn as_millis(&self) -> u64 {
+        self.tv_sec as u64 * 1_000 + self.tv_nsec as u64 / 1_000_000
+    }
+}
+
 pub fn system_time() -> Aes67Vsc2Result<timespec> {
+    system_time_for_clock_id(WALL_CLOCK)
+}
+
+pub fn system_time_monotonic() -> Aes67Vsc2Result<timespec> {
+    system_time_for_clock_id(CLOCK_MONOTONIC)
+}
+
+fn system_time_for_clock_id(clock_id: clockid_t) -> Aes67Vsc2Result<timespec> {
     let mut tp = timespec {
         tv_sec: 0,
         tv_nsec: 0,
     };
-    if unsafe { clock_gettime(CLOCK_REALTIME, &mut tp) } == -1 {
+    if unsafe { clock_gettime(clock_id, &mut tp) } == -1 {
         Err(Aes67Vsc2Error::Other(
             "could not get system time".to_owned(),
         ))

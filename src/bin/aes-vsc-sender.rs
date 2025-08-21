@@ -73,7 +73,16 @@ async fn run<C: MediaClock>(
 ) -> Aes67Vsc2Result<()> {
     let (rrs, rrc) = request_response_channel();
 
-    start_sender(&subsys, rrc, local_ip, 0, target_address).await?;
+    start_sender(
+        &subsys,
+        rrc,
+        local_ip,
+        0,
+        target_address,
+        audio_format,
+        ptime,
+    )
+    .await?;
 
     let mut player = Player::new(clock, audio_format, rrs, ptime);
 
@@ -116,7 +125,7 @@ impl<C: MediaClock> Player<C> {
             interval,
             pos: 0,
             clock_drift_calculator: AverageCalculationBuffer::new(
-                vec![0i64; f32::round(1000.0 / ptime) as usize].into(),
+                vec![0i64; (1000.0 / ptime).round() as usize].into(),
             ),
         }
     }

@@ -15,21 +15,12 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{
-    config::Config,
-    error::Aes67Vsc2Result,
-    formats::{AudioFormat, BufferFormat},
-    receiver::config::RxDescriptor,
-};
-use rtp_rs::RtpReader;
+use crate::{formats::BufferFormat, receiver::config::RxDescriptor};
 use serde::{Deserialize, Serialize};
-use shared_memory::{Shmem, ShmemConf};
 use std::{
     fmt::Debug,
     slice::{from_raw_parts, from_raw_parts_mut},
 };
-use tokio::sync::oneshot;
-use tracing::{info, instrument, warn};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BufferConfig {
@@ -81,10 +72,10 @@ impl<'a, 'b> AudioBuffer<'a, 'b> {
         Self { buf, desc }
     }
 
-    pub fn insert(&mut self, payload: &[u8], ingress_timestamp: u64) {
+    pub fn insert(&mut self, payload: &[u8], playout_time: u64) {
         let bpf = self.desc.bytes_per_frame();
         let frames_in_buffer = (self.buf.len() / bpf) as u64;
-        let frame_index = ingress_timestamp % frames_in_buffer;
+        let frame_index = playout_time % frames_in_buffer;
         let byte_index = frame_index as usize * bpf;
         let end_index = byte_index + payload.len();
 

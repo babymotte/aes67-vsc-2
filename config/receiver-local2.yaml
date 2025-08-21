@@ -29,5 +29,5 @@ receiverConfig:
     a=ptime:1
     a=ts-refclk:ptp=IEEE1588-2008:00-1D-C1-FF-FE-0E-10-C4:0
     a=mediaclk:direct=0
-  linkOffset: 2.0
-  bufferTime: 100
+  linkOffset: 4.0
+  bufferTime: 1000.0
