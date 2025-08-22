@@ -19,292 +19,212 @@
 //! Once started it uses the provided configuration to open a datagram socket and, if applicable, joins a multicast group tp receive RTP data.
 //! RTP data is decoded and written to the appropriate frame of a shared memory buffer based on the receiver's current PTP media clock.
 
-// TODO
-// - receiver fills RTP packets into receiver buffer and keeps track of sequence IDs to make sure packets are ordered correctly
-// - receiver keeps track of newest sequence number to decide if playout is ready for a specific media time
-// - playout system sends receiver signal with a mapping of receiver channels to playout buffers
-// - receiver waits for data to be ready for playout
-// - receiver fills playout buffer (converting RTP audio data to playout system sample format) according to mapping
-// - receiver sends signal back to playout system that bufferes are filled
-// - receiver reports any late packets
 pub mod api;
 pub mod config;
-pub mod webserver;
 
 use crate::{
-    buffer::{AudioBufferPointer, FloatingPointAudioBuffer},
-    config::Config,
+    buffer::FloatingPointAudioBuffer,
     error::{Aes67Vsc2Error, Aes67Vsc2Result},
     receiver::{
-        api::{ReceiverApi, ReceiverApiMessage},
+        api::{AudioDataRequest, DataState, ReceiverApi, ReceiverApiMessage},
         config::{ReceiverConfig, RxDescriptor},
-        webserver::start_webserver,
     },
     socket::create_rx_socket,
     time::MediaClock,
-    utils::{AverageCalculationBuffer, RequestResponseServerChannel, set_realtime_priority},
+    utils::{AverageCalculationBuffer, set_realtime_priority},
 };
 use rtp_rs::{RtpReader, Seq};
-use std::{io::ErrorKind, net::SocketAddr, thread, u32};
+use std::{net::SocketAddr, thread, time::Duration, u32};
 use tokio::{
+    net::UdpSocket,
     runtime, select,
     sync::{
-        mpsc::{self, error::TryRecvError},
-        oneshot::{self, error::RecvError},
+        mpsc::{self},
+        oneshot::{self},
     },
 };
-use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
+use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle, Toplevel};
 use tracing::{error, info, instrument, warn};
 use worterbuch_client::Worterbuch;
 
-#[derive(Debug, PartialEq)]
-pub enum DataState {
-    Ready,
-    Wait,
-    InvalidChannelNumber,
-    Missed,
-}
-
-pub struct AudioDataRequest {
-    pub buffer: AudioBufferPointer,
-    pub channel: usize,
-    pub playout_time: u64,
-}
-
-#[instrument(skip(subsys, wb, clock, data_requests))]
+#[instrument(skip(wb, clock))]
 pub async fn start_receiver<C: MediaClock>(
-    subsys: &SubsystemHandle,
-    config: Config,
-    use_tls: bool,
+    id: String,
+    config: ReceiverConfig,
     wb: Option<Worterbuch>,
     clock: C,
-    data_requests: RequestResponseServerChannel<AudioDataRequest, DataState>,
 ) -> Aes67Vsc2Result<ReceiverApi> {
-    let id = config.app.instance.name.clone();
-    let (ready_tx, ready_rx) = oneshot::channel();
-    subsys.start(SubsystemBuilder::new(format!("receiver-{id}"), |s| {
-        run(s, config, ready_tx, wb, clock, data_requests)
-    }));
-    let api_address = ready_rx.await?;
-    info!("Receiver '{id}' started successfully.");
-    Ok(ReceiverApi::with_socket_addr(api_address, use_tls))
+    let receiver_id = id.clone();
+    let (result_tx, result_rx) = oneshot::channel();
+    let (api_tx, api_rx) = mpsc::channel(1024);
+    let desc = RxDescriptor::try_from(&config)?;
+    let socket = create_rx_socket(&config.session, config.interface_ip)?;
+    thread::Builder::new().name(id.clone()).spawn(move || {
+        set_realtime_priority();
+
+        let runtime = match runtime::Builder::new_current_thread().enable_all().build() {
+            Ok(it) => it,
+            Err(e) => {
+                result_tx.send(Err(Aes67Vsc2Error::from(e))).ok();
+                return;
+            }
+        };
+        let receiver_future = Receiver::start(id, desc, config, wb, clock, api_rx, socket);
+        result_tx.send(Ok(())).ok();
+        runtime.block_on(receiver_future);
+    })?;
+
+    result_rx.await??;
+    info!("Receiver '{receiver_id}' started successfully.");
+    Ok(ReceiverApi::new(api_tx))
 }
 
-async fn run<C: MediaClock>(
+struct Receiver<C: MediaClock> {
+    id: String,
     subsys: SubsystemHandle,
-    config: Config,
-    ready_tx: oneshot::Sender<SocketAddr>,
+    config: ReceiverConfig,
+    desc: RxDescriptor,
     wb: Option<Worterbuch>,
     clock: C,
-    data_requests: RequestResponseServerChannel<AudioDataRequest, DataState>,
-) -> Aes67Vsc2Result<()> {
-    let (api_tx, api_rx) = mpsc::channel(1024);
-    ReceiverActor::start(&subsys, api_rx, config.clone(), wb, clock, data_requests).await?;
-    start_webserver(&subsys, config, api_tx, ready_tx);
-
-    Ok(())
-}
-
-struct ReceiverActor {
-    subsys: SubsystemHandle,
-    config: Config,
     api_rx: mpsc::Receiver<ReceiverApiMessage>,
-    rx_thread: oneshot::Receiver<Aes67Vsc2Result<()>>,
-    rx_cancellation_token: oneshot::Sender<()>,
-    desc: RxDescriptor,
+    last_timestamp: Option<u32>,
+    last_sequence_number: Option<Seq>,
+    timestamp_offset: Option<u64>,
+    delay_buffer: AverageCalculationBuffer<i64>,
+    rtp_packet_buffer: FloatingPointAudioBuffer,
+    latest_received_playout_time: u64,
+    strict_checks_disabled: bool,
+    measured_link_offset: AverageCalculationBuffer<u64>,
+    socket: UdpSocket,
 }
 
-impl ReceiverActor {
-    #[instrument(skip(subsys, api_rx, _wb, clock, data_requests))]
-    async fn start<C: MediaClock>(
-        subsys: &SubsystemHandle,
-        api_rx: mpsc::Receiver<ReceiverApiMessage>,
-        config: Config,
-        _wb: Option<Worterbuch>,
+impl<C: MediaClock> Receiver<C> {
+    async fn start(
+        id: String,
+        desc: RxDescriptor,
+        config: ReceiverConfig,
+        wb: Option<Worterbuch>,
         clock: C,
-        data_requests: RequestResponseServerChannel<AudioDataRequest, DataState>,
-    ) -> Aes67Vsc2Result<()> {
-        let (rx_cancellation_token, rxct) = oneshot::channel();
-        let (rx_stopped, rx_thread) = oneshot::channel();
+        api_rx: mpsc::Receiver<ReceiverApiMessage>,
+        socket: UdpSocket,
+    ) {
+        let recv_id = id.clone();
 
-        let cfg = config.clone();
-        let rx_config = cfg.receiver_config.clone().expect("no receiver config");
-
-        let descriptor = RxDescriptor::try_from(&config)?;
-        let desc = descriptor.clone();
-        let desc_rx = desc.clone();
-
-        let delay_calculation_interval = config
-            .playout_config
-            .as_ref()
-            .map(|c| c.clock_drift_compensation_interval)
-            .unwrap_or(1);
+        let delay_calculation_interval = config.delay_calculation_interval.unwrap_or(1);
         let delay_calculation_buffer_len =
-            (delay_calculation_interval as f32 * 1_000.0 / descriptor.packet_time).round() as usize;
-        let packet_buffer_len = desc.audio_format.frames_in_buffer(rx_config.buffer_time);
+            (delay_calculation_interval as f32 * 1_000.0 / desc.packet_time).round() as usize;
+        let desc_rx = desc.clone();
+        let packet_buffer_len = desc.audio_format.frames_in_buffer(config.buffer_time);
         let measured_link_offset_buffer = vec![0; 1000].into();
 
-        thread::Builder::new()
-            .name(format!("{}-receiver-thread", config.instance_name()))
-            .spawn(
-                move || match runtime::Builder::new_current_thread().enable_all().build() {
-                    Ok(runtime) => {
-                        let receiver = async {
-                            RxThread {
-                                config: cfg,
-                                rx_cancellation_token: rxct,
-                                rx_config,
-                                desc: desc_rx.clone(),
-                                last_sequence_number: None,
-                                last_timestamp: None,
-                                timestamp_offset: None,
-                                clock,
-                                delay_buffer: AverageCalculationBuffer::new(
-                                    vec![0; delay_calculation_buffer_len].into(),
-                                ),
-                                rtp_packet_buffer: FloatingPointAudioBuffer::new(
-                                    vec![0f32; packet_buffer_len].into(),
-                                    desc_rx,
-                                ),
-                                data_requests,
-                                latest_received_playout_time: 0,
-                                strict_checks_disabled: true,
-                                measured_link_offset: AverageCalculationBuffer::new(
-                                    measured_link_offset_buffer,
-                                ),
-                            }
-                            .run()
-                            .await
-                        };
-                        let res = runtime.block_on(receiver);
-                        rx_stopped.send(res).ok();
-                    }
-                    Err(e) => {
-                        rx_stopped.send(Err(e.into())).ok();
-                    }
-                },
-            )?;
-
-        subsys.start(SubsystemBuilder::new("actor", |s| async move {
-            ReceiverActor {
+        let subsystem_name = id.clone();
+        let subsystem = move |s: SubsystemHandle| async move {
+            Receiver {
+                id,
                 subsys: s,
-                api_rx,
-                config,
-                rx_thread,
-                rx_cancellation_token,
                 desc,
+                config,
+                wb,
+                clock,
+                api_rx,
+                last_sequence_number: None,
+                last_timestamp: None,
+                timestamp_offset: None,
+                delay_buffer: AverageCalculationBuffer::new(
+                    vec![0; delay_calculation_buffer_len].into(),
+                ),
+                rtp_packet_buffer: FloatingPointAudioBuffer::new(
+                    vec![0f32; packet_buffer_len].into(),
+                    desc_rx,
+                ),
+                latest_received_playout_time: 0,
+                strict_checks_disabled: true,
+                measured_link_offset: AverageCalculationBuffer::new(measured_link_offset_buffer),
+                socket,
             }
             .run()
             .await
-        }));
-
-        Ok(())
+        };
+        if let Err(e) = Toplevel::new(|s| async move {
+            s.start(SubsystemBuilder::new(subsystem_name, subsystem));
+        })
+        .handle_shutdown_requests(Duration::from_secs(1))
+        .await
+        {
+            error!("Receiver '{recv_id}' subsystem failed to shut down: {e}");
+        }
     }
 
     async fn run(mut self) -> Aes67Vsc2Result<()> {
-        info!(
-            "Receiver actor '{}' started.",
-            self.config.app.instance.name
-        );
+        let mut receive_buffer = [0; 65_535];
+
+        info!("Receiver '{}' started.", self.id);
 
         loop {
             select! {
-                Some(api_msg) = self.api_rx.recv() => if !self.process_api_message(api_msg).await {
-                    break;
+                Ok((len, addr)) = self.socket.recv_from(&mut receive_buffer) => {
+                    let time = self.clock.current_media_time()?;
+                    self.rtp_data_received(&receive_buffer[..len], addr, time)?;
                 },
-                term = &mut self.rx_thread => {
-                    self.rx_thread_terminated(term);
-                    break;
+                Some(api_msg) = self.api_rx.recv() => {
+                    let media_time_at_reception = self.clock.current_media_time()?;
+                    self.handle_api_message(api_msg,media_time_at_reception).await?;
                 },
                 _ = self.subsys.on_shutdown_requested() => break,
                 else => break,
             }
         }
 
-        self.stop().await;
+        info!("Receiver '{}' stopped.", self.id);
 
         Ok(())
     }
 
-    #[instrument(skip(self))]
-    async fn process_api_message(&mut self, api_msg: ReceiverApiMessage) -> bool {
-        info!("Received API message: {api_msg:?}");
-
+    async fn handle_api_message(
+        &mut self,
+        api_msg: ReceiverApiMessage,
+        time: u64,
+    ) -> Aes67Vsc2Result<()> {
         match api_msg {
-            ReceiverApiMessage::Stop => return false,
-            ReceiverApiMessage::GetInfo(sender) => _ = sender.send(self.desc.clone()),
+            ReceiverApiMessage::GetInfo(tx) => _ = tx.send(self.desc.clone()),
+            ReceiverApiMessage::DataRequest(req, tx) => self.send_audio(req, tx, time).await,
+            ReceiverApiMessage::Stop => self.subsys.request_shutdown(),
+        }
+        Ok(())
+    }
+
+    async fn send_audio(&mut self, req: AudioDataRequest, tx: mpsc::Sender<DataState>, time: u64) {
+        if !self.strict_checks_disabled && time > req.playout_time {
+            tx.send(DataState::Missed).await.ok();
+            return;
         }
 
-        true
-    }
+        let data_ready = req.playout_time <= self.latest_received_playout_time;
+        if !data_ready {
+            tx.send(DataState::Wait).await.ok();
+            return;
+        } else {
+            if let Some(measured_link_offset) = self
+                .measured_link_offset
+                .update(self.latest_received_playout_time - req.playout_time)
+            {
+                let link_offset_ms = measured_link_offset as f32
+                    / self.desc.audio_format.sample_rate as f32
+                    * 1_000.0;
 
-    #[instrument(skip(self))]
-    async fn stop(self) {
-        self.rx_cancellation_token.send(()).ok();
-        self.subsys.request_shutdown();
-
-        info!(
-            "Receiver actor '{}' stopped.",
-            self.config.app.instance.name
-        );
-    }
-
-    #[instrument(skip(self, term))]
-    fn rx_thread_terminated(&self, term: Result<Aes67Vsc2Result<()>, RecvError>) {
-        match term {
-            Ok(Ok(_)) => info!("RX thread terminated normally."),
-            Ok(Err(e)) => error!("RX thread terminated with error: {e:?}"),
-            Err(_) => error!("The RX thread crashed."),
-        }
-    }
-}
-
-struct RxThread<C: MediaClock> {
-    config: Config,
-    rx_config: ReceiverConfig,
-    rx_cancellation_token: oneshot::Receiver<()>,
-    desc: RxDescriptor,
-    last_timestamp: Option<u32>,
-    last_sequence_number: Option<Seq>,
-    timestamp_offset: Option<u64>,
-    clock: C,
-    delay_buffer: AverageCalculationBuffer<i64>,
-    rtp_packet_buffer: FloatingPointAudioBuffer,
-    data_requests: RequestResponseServerChannel<AudioDataRequest, DataState>,
-    latest_received_playout_time: u64,
-    strict_checks_disabled: bool,
-    measured_link_offset: AverageCalculationBuffer<u64>,
-}
-
-impl<C: MediaClock> RxThread<C> {
-    async fn run(mut self) -> Aes67Vsc2Result<()> {
-        set_realtime_priority();
-
-        let socket = create_rx_socket(&self.rx_config.session, self.config.interface_ip)?;
-
-        let mut receive_buffer = [0; 65_535];
-
-        loop {
-            select! {
-                Ok((len, addr)) = socket.recv_from(&mut receive_buffer) => {
-                    let media_time_at_reception = self.clock.current_media_time()?;
-                    self.rtp_data_received(&receive_buffer[..len], addr, media_time_at_reception)?;
-                },
-                Some(req) = self.data_requests.on_request() => {
-                    let media_time_at_reception = self.clock.current_media_time()?;
-                    if !self.data_requested(req, media_time_at_reception)? {
-                        info!("Playout closed.");
-                        break;
-                    }
-                },
-                _ = &mut self.rx_cancellation_token => break,
-                else => break,
+                if link_offset_ms < self.desc.link_offset {
+                    info!(
+                        "measured minimum link offset: {measured_link_offset} frames / {link_offset_ms:.1} ms"
+                    );
+                } else {
+                    warn!(
+                        "measured minimum  link offset: {measured_link_offset} frames / {link_offset_ms:.1} ms"
+                    );
+                }
             }
         }
 
-        info!("RX thread stopped.");
-
-        Ok(())
+        tx.send(self.rtp_packet_buffer.read(req)).await.ok();
     }
 
     fn rtp_data_received(
@@ -425,42 +345,6 @@ impl<C: MediaClock> RxThread<C> {
     fn unwrapped_timestamp(&self, rtp: &RtpReader) -> Option<u64> {
         self.timestamp_offset
             .map(|ts_offset| ts_offset + rtp.timestamp() as u64 - self.desc.rtp_offset as u64)
-    }
-
-    fn data_requested(
-        &mut self,
-        req: AudioDataRequest,
-        media_time_at_reception: u64,
-    ) -> Aes67Vsc2Result<bool> {
-        if !self.strict_checks_disabled && media_time_at_reception > req.playout_time {
-            return Ok(self.data_requests.respond(DataState::Missed));
-        }
-
-        let data_ready = req.playout_time <= self.latest_received_playout_time;
-        if !data_ready {
-            return Ok(self.data_requests.respond(DataState::Wait));
-        } else {
-            if let Some(measured_link_offset) = self
-                .measured_link_offset
-                .update(self.latest_received_playout_time - req.playout_time)
-            {
-                let link_offset_ms = measured_link_offset as f32
-                    / self.desc.audio_format.sample_rate as f32
-                    * 1_000.0;
-
-                if link_offset_ms < self.desc.link_offset {
-                    info!(
-                        "measured minimum link offset: {measured_link_offset} frames / {link_offset_ms:.1} ms"
-                    );
-                } else {
-                    warn!(
-                        "measured minimum  link offset: {measured_link_offset} frames / {link_offset_ms:.1} ms"
-                    );
-                }
-            }
-        }
-
-        Ok(self.data_requests.respond(self.rtp_packet_buffer.read(req)))
     }
 
     #[instrument(skip(self))]

@@ -17,7 +17,10 @@
 
 use crate::{
     formats::{BufferFormat, SampleReader},
-    receiver::{AudioDataRequest, DataState, config::RxDescriptor},
+    receiver::{
+        api::{AudioDataRequest, DataState},
+        config::RxDescriptor,
+    },
 };
 use serde::{Deserialize, Serialize};
 use std::{

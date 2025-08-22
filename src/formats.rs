@@ -23,7 +23,8 @@ pub type Seconds = u32;
 pub type MilliSeconds = f32;
 pub type NanoSeconds = u128;
 pub type Frames = u64;
-pub type FramesPerSecond = usize;
+pub type FramesPerSecond = u32;
+pub type BitDepth = u8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
 pub struct BufferFormat {
@@ -123,7 +124,21 @@ impl FromStr for SampleFormat {
         match s {
             "L16" => Ok(SampleFormat::L24),
             "L24" => Ok(SampleFormat::L24),
-            other => Err(Aes67Vsc2Error::UnknownSampleFormat(other.to_owned())),
+            other => Err(Aes67Vsc2Error::UnsupportedSampleFormat(other.to_owned())),
+        }
+    }
+}
+
+impl TryFrom<BitDepth> for SampleFormat {
+    type Error = Aes67Vsc2Error;
+
+    fn try_from(value: BitDepth) -> Result<Self, Self::Error> {
+        match value {
+            16 => Ok(SampleFormat::L16),
+            24 => Ok(SampleFormat::L24),
+            _ => Err(Aes67Vsc2Error::UnsupportedSampleFormat(format!(
+                "unsupported bit depth: {value}"
+            ))),
         }
     }
 }

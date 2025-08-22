@@ -26,7 +26,10 @@ use crate::{
         jack::session_manager::start_session_manager,
         webserver::start_webserver,
     },
-    receiver::{AudioDataRequest, DataState, api::ReceiverApi, config::RxDescriptor},
+    receiver::{
+        api::{AudioDataRequest, DataState, ReceiverApi},
+        config::RxDescriptor,
+    },
     time::{MediaClock, wallclock_monotonic_offset_nanos},
     utils::{AverageCalculationBuffer, RequestResponseClientChannel, set_realtime_priority},
 };
@@ -52,6 +55,7 @@ pub async fn start_jack_playout<C: MediaClock>(
     clock: C,
     compensate_clock_drift: bool,
     requests: RequestResponseClientChannel<AudioDataRequest, DataState>,
+    receiver_api: ReceiverApi,
 ) -> Aes67Vsc2Result<PlayoutApi> {
     jack::set_logger(jack::LoggerType::Log);
     let id = config.app.instance.name.clone();
@@ -65,6 +69,7 @@ pub async fn start_jack_playout<C: MediaClock>(
             clock,
             compensate_clock_drift,
             requests,
+            receiver_api,
         )
     }));
     let api_address = ready_rx.await?;
@@ -80,6 +85,7 @@ async fn run<C: MediaClock>(
     clock: C,
     compensate_clock_drift: bool,
     requests: RequestResponseClientChannel<AudioDataRequest, DataState>,
+    receiver_api: ReceiverApi,
 ) -> Aes67Vsc2Result<()> {
     let (api_tx, api_rx) = mpsc::channel(1024);
     PlayoutActor::start(
@@ -90,6 +96,7 @@ async fn run<C: MediaClock>(
         clock,
         compensate_clock_drift,
         requests,
+        receiver_api,
     )
     .await?;
     start_webserver(&subsys, config, api_tx, ready_tx);
@@ -113,6 +120,7 @@ impl PlayoutActor {
         clock: C,
         compensate_clock_drift: bool,
         requests: RequestResponseClientChannel<AudioDataRequest, DataState>,
+        receiver_api: ReceiverApi,
     ) -> Aes67Vsc2Result<()> {
         let playout_config = config.playout_config.clone().expect("no playout config");
         let id: String = config.app.instance.name.clone();
@@ -125,7 +133,7 @@ impl PlayoutActor {
                 api_rx,
                 config,
             }
-            .run(clock, compensate_clock_drift, requests)
+            .run(clock, compensate_clock_drift, requests, receiver_api)
             .await
         }));
 
@@ -137,6 +145,7 @@ impl PlayoutActor {
         clock: C,
         compensate_clock_drift: bool,
         requests: RequestResponseClientChannel<AudioDataRequest, DataState>,
+        receiver_api: ReceiverApi,
     ) -> Aes67Vsc2Result<()> {
         info!(
             "Receiver actor '{}' started.",
@@ -149,7 +158,6 @@ impl PlayoutActor {
             .as_ref()
             .expect("no playout config");
 
-        let receiver_api = ReceiverApi::with_url(playout_config.receiver.to_owned());
         let receiver_info = receiver_api.info().await?;
         info!(
             "Got receiver info:\n{}",

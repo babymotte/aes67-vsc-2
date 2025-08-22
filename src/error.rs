@@ -20,12 +20,32 @@ use miette::Diagnostic;
 use opentelemetry_otlp::ExporterBuildError;
 use rtp_rs::{RtpPacketBuildError, RtpReaderError};
 use shared_memory::ShmemError;
-use std::{fmt::Display, io};
+use std::{fmt::Display, io, net::AddrParseError};
 use thiserror::Error;
 use tokio::sync::oneshot;
 use tracing_subscriber::{filter::ParseError, util::TryInitError};
 use worterbuch_client::ConnectionError;
 
+pub enum ErrorCode {
+    WorterbuchError = 0x10,
+    IoError = 0x11,
+    YamlError = 0x12,
+    TryInitError = 0x13,
+    TraceError = 0x14,
+    ParseError = 0x15,
+    ApiError = 0x16,
+    UnknownSampleFormat = 0x17,
+    InvalidSdp = 0x18,
+    InvalidIp = 0x19,
+    JsonSerdeError = 0x1A,
+    SharedMemoryError = 0x1B,
+    InvalidRtpData = 0x1C,
+    RtpPacketBuildError = 0x1D,
+    JackError = 0x1E,
+    Other = 0x1F,
+}
+
+// TODO split into receiver error, sender error, etc and remove any unused error variants
 #[derive(Error, Debug, Diagnostic)]
 pub enum Aes67Vsc2Error {
     #[error("Worterbuch error: {0}")]
@@ -43,11 +63,11 @@ pub enum Aes67Vsc2Error {
     #[error("API error.")]
     ApiError(#[from] oneshot::error::RecvError),
     #[error("Unknown smaple format: {0}")]
-    UnknownSampleFormat(String),
+    UnsupportedSampleFormat(String),
     #[error("Invalid SDP: {0}")]
     InvalidSdp(String),
-    #[error("HTTP request error: {0}")]
-    HttpRequestError(#[from] reqwest::Error),
+    #[error("Invalid IP address: {0}")]
+    InvalidIp(#[from] AddrParseError),
     #[error("JSON serde error: {0}")]
     JsonSerdeError(#[from] serde_json::Error),
     #[error("Shared memory error: {0}")]
@@ -60,6 +80,29 @@ pub enum Aes67Vsc2Error {
     JackError(#[from] jack::Error),
     #[error("General error: {0}")]
     Other(String),
+}
+
+impl Aes67Vsc2Error {
+    pub fn error_code(&self) -> u8 {
+        match self {
+            Aes67Vsc2Error::WorterbuchError(_) => ErrorCode::WorterbuchError as u8,
+            Aes67Vsc2Error::IoError(_) => ErrorCode::IoError as u8,
+            Aes67Vsc2Error::YamlError(_) => ErrorCode::YamlError as u8,
+            Aes67Vsc2Error::TryInitError(_) => ErrorCode::TryInitError as u8,
+            Aes67Vsc2Error::TraceError(_) => ErrorCode::TraceError as u8,
+            Aes67Vsc2Error::ParseError(_) => ErrorCode::ParseError as u8,
+            Aes67Vsc2Error::ApiError(_) => ErrorCode::ApiError as u8,
+            Aes67Vsc2Error::UnsupportedSampleFormat(_) => ErrorCode::UnknownSampleFormat as u8,
+            Aes67Vsc2Error::InvalidSdp(_) => ErrorCode::InvalidSdp as u8,
+            Aes67Vsc2Error::InvalidIp(_) => ErrorCode::InvalidIp as u8,
+            Aes67Vsc2Error::JsonSerdeError(_) => ErrorCode::JsonSerdeError as u8,
+            Aes67Vsc2Error::SharedMemoryError(_) => ErrorCode::SharedMemoryError as u8,
+            Aes67Vsc2Error::InvalidRtpData(_) => ErrorCode::InvalidRtpData as u8,
+            Aes67Vsc2Error::RtpPacketBuildError(_) => ErrorCode::RtpPacketBuildError as u8,
+            Aes67Vsc2Error::JackError(_) => ErrorCode::JackError as u8,
+            Aes67Vsc2Error::Other(_) => ErrorCode::Other as u8,
+        }
+    }
 }
 
 #[derive(Error, Debug, Diagnostic)]

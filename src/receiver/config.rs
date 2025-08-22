@@ -16,9 +16,8 @@
  */
 
 use crate::{
-    config::{Config, WebServerConfig},
     error::{Aes67Vsc2Error, Aes67Vsc2Result},
-    formats::{self, AudioFormat, FrameFormat, MilliSeconds},
+    formats::{self, AudioFormat, FrameFormat, MilliSeconds, Seconds},
 };
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -42,8 +41,7 @@ lazy_static! {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReceiverConfig {
-    #[serde(default = "WebServerConfig::default")]
-    pub webserver: WebServerConfig,
+    pub id: String,
     #[serde(
         deserialize_with = "crate::serde::deserialize_sdp",
         serialize_with = "crate::serde::serialize_sdp"
@@ -51,6 +49,9 @@ pub struct ReceiverConfig {
     pub session: SessionDescription,
     pub link_offset: MilliSeconds,
     pub buffer_time: MilliSeconds,
+    #[serde(default)]
+    pub delay_calculation_interval: Option<Seconds>,
+    pub interface_ip: IpAddr,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -69,14 +70,10 @@ pub struct RxDescriptor {
     pub channel_labels: Vec<Option<String>>,
 }
 
-impl TryFrom<&Config> for RxDescriptor {
+impl TryFrom<&ReceiverConfig> for RxDescriptor {
     type Error = Aes67Vsc2Error;
-    fn try_from(cfg: &Config) -> Aes67Vsc2Result<Self> {
-        let rx_config = cfg
-            .receiver_config
-            .as_ref()
-            .ok_or_else(|| Aes67Vsc2Error::Other("no receiver config".to_owned()))?;
-        let id = cfg.app.instance.name.clone();
+    fn try_from(rx_config: &ReceiverConfig) -> Aes67Vsc2Result<Self> {
+        let id = rx_config.id.to_owned();
         let descriptor = RxDescriptor::new(id, &rx_config.session, rx_config.link_offset)?;
         Ok(descriptor)
     }

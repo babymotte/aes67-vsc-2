@@ -15,66 +15,51 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{error::Aes67Vsc2Result, receiver::config::RxDescriptor};
-use reqwest::Client;
-use std::net::SocketAddr;
-use tokio::sync::oneshot;
+use crate::{buffer::AudioBufferPointer, error::Aes67Vsc2Result, receiver::config::RxDescriptor};
+use tokio::sync::{mpsc, oneshot};
 use tracing::instrument;
+
+#[derive(Debug, PartialEq)]
+pub enum DataState {
+    Ready,
+    Wait,
+    InvalidChannelNumber,
+    Missed,
+}
+
+#[derive(Debug)]
+pub struct AudioDataRequest {
+    pub buffer: AudioBufferPointer,
+    pub channel: usize,
+    pub playout_time: u64,
+}
 
 #[derive(Debug)]
 pub enum ReceiverApiMessage {
-    Stop,
     GetInfo(oneshot::Sender<RxDescriptor>),
+    DataRequest(AudioDataRequest, mpsc::Sender<DataState>),
+    Stop,
 }
 
 #[derive(Debug, Clone)]
 pub struct ReceiverApi {
-    url: String,
-    reqwest_client: Client,
+    api_tx: mpsc::Sender<ReceiverApiMessage>,
 }
 
 impl ReceiverApi {
-    pub fn with_socket_addr(addr: SocketAddr, use_tls: bool) -> Self {
-        let schema = if use_tls { "https" } else { "http" };
-        let url = format!("{schema}://{addr}");
-        ReceiverApi {
-            url,
-            reqwest_client: Client::new(),
-        }
+    pub fn new(api_tx: mpsc::Sender<ReceiverApiMessage>) -> Self {
+        Self { api_tx }
     }
 
-    pub fn with_url(url: String) -> Self {
-        ReceiverApi {
-            url,
-            reqwest_client: Client::new(),
-        }
-    }
-
-    pub fn url(&self) -> &str {
-        &self.url
-    }
-
-    #[instrument(ret, err)]
-    pub async fn stop(&self) -> Aes67Vsc2Result<bool> {
-        let body = self
-            .reqwest_client
-            .post(format!("{}/stop", self.url))
-            .send()
-            .await?
-            .text()
-            .await?;
-        Ok(serde_json::from_str(&body)?)
+    #[instrument]
+    pub async fn stop(&self) {
+        self.api_tx.send(ReceiverApiMessage::Stop).await.ok();
     }
 
     #[instrument(ret, err)]
     pub async fn info(&self) -> Aes67Vsc2Result<RxDescriptor> {
-        let body = self
-            .reqwest_client
-            .get(format!("{}/info", self.url))
-            .send()
-            .await?
-            .text()
-            .await?;
-        Ok(serde_json::from_str(&body)?)
+        let (tx, rx) = oneshot::channel();
+        self.api_tx.send(ReceiverApiMessage::GetInfo(tx)).await.ok();
+        Ok(rx.await?)
     }
 }
