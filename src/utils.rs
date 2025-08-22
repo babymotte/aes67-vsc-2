@@ -17,7 +17,13 @@
 
 use crate::error::{Aes67Vsc2Error, Aes67Vsc2Result};
 use pnet::datalink::{self, NetworkInterface};
-use std::{any::Any, net::IpAddr};
+use std::{
+    any::Any,
+    fmt::Debug,
+    iter::Sum,
+    net::IpAddr,
+    ops::{Add, Div},
+};
 use thread_priority::{
     RealtimeThreadSchedulePolicy, ThreadPriority, ThreadSchedulePolicy,
     set_thread_priority_and_policy, thread_native_id,
@@ -105,15 +111,15 @@ pub trait GetAverage<T> {
     fn average(&self) -> T;
 }
 
-impl GetAverage<i64> for Box<[i64]> {
-    fn average(&self) -> i64 {
-        self.iter().sum::<i64>() / self.len() as i64
-    }
-}
-
-impl GetAverage<u64> for Box<[u64]> {
-    fn average(&self) -> u64 {
-        self.iter().sum::<u64>() / self.len() as u64
+impl<N, S> GetAverage<N> for S
+where
+    N: Copy + TryFrom<usize, Error: Debug> + Add + Div<Output = N> + Sum<N>,
+    S: AsRef<[N]>,
+{
+    fn average(&self) -> N {
+        let slice = self.as_ref();
+        slice.iter().map(ToOwned::to_owned).sum::<N>()
+            / N::try_from(slice.len()).expect("cannot cast slice length to value type")
     }
 }
 

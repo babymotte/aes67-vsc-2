@@ -15,7 +15,10 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{formats::BufferFormat, receiver::config::RxDescriptor};
+use crate::{
+    formats::{BufferFormat, SampleReader},
+    receiver::{AudioDataRequest, DataState, config::RxDescriptor},
+};
 use serde::{Deserialize, Serialize};
 use std::{
     fmt::Debug,
@@ -92,5 +95,69 @@ impl<'a, 'b> AudioBuffer<'a, 'b> {
             self.buf[byte_index..].copy_from_slice(&payload[..pivot]);
             self.buf[..modulo].copy_from_slice(&payload[pivot..]);
         }
+    }
+}
+
+pub struct FloatingPointAudioBuffer {
+    buf: Box<[f32]>,
+    desc: RxDescriptor,
+}
+
+impl FloatingPointAudioBuffer {
+    pub fn new(buf: Box<[f32]>, desc: RxDescriptor) -> Self {
+        if buf.len() % desc.audio_format.frame_format.channels != 0 {
+            panic!("buffer length must be a multiple of the number of channels")
+        }
+        Self { buf, desc }
+    }
+
+    pub fn insert(&mut self, payload: &[u8], playout_time: u64) {
+        let sample_format = &self.desc.audio_format.frame_format.sample_format;
+        let channels = self.desc.audio_format.frame_format.channels;
+        let chunk_size = self.buf.len() / channels;
+        let channel_partitions = self.buf.chunks_mut(chunk_size);
+
+        let bytes_per_input_sample: usize = self
+            .desc
+            .audio_format
+            .frame_format
+            .sample_format
+            .bytes_per_sample();
+
+        for (channel_index, output_buffer) in channel_partitions.enumerate() {
+            for (offset, sample) in payload
+                .chunks(bytes_per_input_sample)
+                .skip(channel_index)
+                .step_by(channels)
+                .enumerate()
+            {
+                let index = ((playout_time + offset as u64) % output_buffer.len() as u64) as usize;
+                output_buffer[index] = sample_format.read_sample(sample);
+            }
+        }
+    }
+
+    pub fn read(&self, req: AudioDataRequest) -> DataState {
+        let output_buffer = req.buffer.buffer_mut::<f32>();
+
+        let channels = self.desc.audio_format.frame_format.channels;
+        let chunk_size = self.buf.len() / channels;
+        let channel_partitions = self.buf.chunks(chunk_size);
+
+        let Some(rtp_buffer) = channel_partitions.skip(req.channel).next() else {
+            return DataState::InvalidChannelNumber;
+        };
+
+        let start_index = (req.playout_time % rtp_buffer.len() as u64) as usize;
+        let end_index: usize = start_index + output_buffer.len();
+        if end_index <= rtp_buffer.len() {
+            output_buffer.copy_from_slice(&rtp_buffer[start_index..end_index]);
+        } else {
+            let remainder = end_index - rtp_buffer.len();
+            let pivot = output_buffer.len() - remainder;
+            output_buffer[..pivot].copy_from_slice(&rtp_buffer[start_index..]);
+            output_buffer[pivot..].copy_from_slice(&rtp_buffer[..remainder]);
+        }
+        DataState::Ready
     }
 }

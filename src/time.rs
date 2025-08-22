@@ -20,11 +20,11 @@ mod statime_linux;
 use crate::{
     config::Config,
     error::{Aes67Vsc2Error, Aes67Vsc2Result},
-    formats::{AudioFormat, FramesPerSecond, MilliSeconds, frames_per_link_offset_buffer},
+    formats::{AudioFormat, FramesPerSecond, MilliSeconds, frames_in_buffer},
     time::statime_linux::{PtpClock, statime_linux},
     utils::find_network_interface,
 };
-use libc::{CLOCK_MONOTONIC, CLOCK_REALTIME, CLOCK_TAI, clock_gettime, clockid_t, timespec};
+use libc::{CLOCK_MONOTONIC, CLOCK_TAI, clock_gettime, clockid_t, timespec};
 use statime::Clock;
 use std::{
     cmp::Ordering,
@@ -38,9 +38,7 @@ use tokio::{io::AsyncReadExt, net::TcpStream, spawn, sync::mpsc, time::sleep};
 use tracing::{error, info};
 use worterbuch_client::Worterbuch;
 
-// TODO which of these is correct?
 const WALL_CLOCK: clockid_t = CLOCK_TAI;
-// const WALL_CLOCK: clockid_t = CLOCK_REALTIME;
 
 #[derive(Debug, Clone, Copy)]
 pub struct MediaClockTimestamp {
@@ -89,8 +87,7 @@ impl MediaClockTimestamp {
 
     pub fn playout_time(&self, link_offset: MilliSeconds) -> MediaClockTimestamp {
         let timestamp = wrap_u64(
-            self.timestamp as u64
-                + frames_per_link_offset_buffer(link_offset, self.sample_rate) as u64,
+            self.timestamp as u64 + frames_in_buffer(link_offset, self.sample_rate) as u64,
         );
         self.jump_to(timestamp)
     }

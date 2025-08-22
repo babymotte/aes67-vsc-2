@@ -63,11 +63,11 @@ impl AudioFormat {
     }
 
     pub fn samples_per_link_offset_buffer(&self, link_offset: MilliSeconds) -> usize {
-        self.frame_format.channels * self.frames_per_link_offset_buffer(link_offset)
+        self.frame_format.channels * self.frames_in_buffer(link_offset)
     }
 
-    pub fn frames_per_link_offset_buffer(&self, link_offset: MilliSeconds) -> usize {
-        frames_per_link_offset_buffer(link_offset, self.sample_rate)
+    pub fn frames_in_buffer(&self, buffer_time: MilliSeconds) -> usize {
+        frames_in_buffer(buffer_time, self.sample_rate)
     }
 }
 
@@ -284,11 +284,8 @@ pub fn packets_in_link_offset(link_offset: MilliSeconds, packet_time: MilliSecon
     (link_offset / packet_time).round() as usize
 }
 
-pub fn frames_per_link_offset_buffer(
-    link_offset: MilliSeconds,
-    sample_rate: FramesPerSecond,
-) -> usize {
-    ((sample_rate as f32 * link_offset) / Duration::from_secs(1).as_millis() as f32).round()
+pub fn frames_in_buffer(buffer_time: MilliSeconds, sample_rate: FramesPerSecond) -> usize {
+    ((sample_rate as f32 * buffer_time) / Duration::from_secs(1).as_millis() as f32).round()
         as usize
 }
 
@@ -325,7 +322,7 @@ pub fn samples_per_link_offset_buffer(
     link_offset: MilliSeconds,
     sample_rate: FramesPerSecond,
 ) -> usize {
-    channels * frames_per_link_offset_buffer(link_offset, sample_rate)
+    channels * frames_in_buffer(link_offset, sample_rate)
 }
 
 pub fn rtp_buffer_size(
@@ -349,6 +346,6 @@ mod test {
 
     #[test]
     fn frames_per_link_offset_buffer_works() {
-        assert_eq!(192, frames_per_link_offset_buffer(4.0, 48_000));
+        assert_eq!(192, frames_in_buffer(4.0, 48_000));
     }
 }

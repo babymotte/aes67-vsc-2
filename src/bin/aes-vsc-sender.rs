@@ -172,7 +172,7 @@ impl<C: MediaClock> Player<C> {
 
         for frame_buf in buffer.chunks_mut(chunk_size) {
             // TODO parameterize frequencey
-            let frequency = 440.0;
+            let frequency = 220.0;
             // TODO parameterize volume
             let vol = 0.5;
 

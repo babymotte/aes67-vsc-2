@@ -1,10 +1,10 @@
 use crate::{error::Aes67Vsc2Result, playout::jack::Notification};
+use dirs::config_local_dir;
 use jack::{AsyncClient, Client, NotificationHandler, ProcessHandler};
 use miette::{Context, IntoDiagnostic, Result, miette};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, hash_map::Entry},
-    env::home_dir,
     path::PathBuf,
 };
 use tokio::{fs, select, sync::mpsc};
@@ -238,11 +238,7 @@ async fn save_client_config(client: &Client, config: ClientConfig) -> Result<()>
 #[instrument(skip(client))]
 fn client_config_file_path(client: &Client) -> Option<PathBuf> {
     let client_name = client.name();
-    home_dir().map(|dir| {
-        dir.join(".config")
-            .join("aes67-vsc")
-            .join(format!("{client_name}.yaml"))
-    })
+    config_local_dir().map(|dir| dir.join("aes67-vsc").join(format!("{client_name}.yaml")))
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

@@ -32,10 +32,9 @@ pub mod config;
 pub mod webserver;
 
 use crate::{
-    buffer::{AudioBuffer, AudioBufferPointer},
+    buffer::{AudioBufferPointer, FloatingPointAudioBuffer},
     config::Config,
     error::{Aes67Vsc2Error, Aes67Vsc2Result},
-    formats::SampleReader,
     receiver::{
         api::{ReceiverApi, ReceiverApiMessage},
         config::{ReceiverConfig, RxDescriptor},
@@ -48,7 +47,7 @@ use crate::{
 use rtp_rs::{RtpReader, Seq};
 use std::{io::ErrorKind, net::SocketAddr, thread, u32};
 use tokio::{
-    select,
+    runtime, select,
     sync::{
         mpsc::{self, error::TryRecvError},
         oneshot::{self, error::RecvError},
@@ -62,6 +61,7 @@ use worterbuch_client::Worterbuch;
 pub enum DataState {
     Ready,
     Wait,
+    InvalidChannelNumber,
     Missed,
 }
 
@@ -141,31 +141,49 @@ impl ReceiverActor {
             .unwrap_or(1);
         let delay_calculation_buffer_len =
             (delay_calculation_interval as f32 * 1_000.0 / descriptor.packet_time).round() as usize;
-        let packet_buffer_len = desc.audio_format.bytes_per_buffer(rx_config.buffer_time);
+        let packet_buffer_len = desc.audio_format.frames_in_buffer(rx_config.buffer_time);
+        let measured_link_offset_buffer = vec![0; 1000].into();
 
         thread::Builder::new()
             .name(format!("{}-receiver-thread", config.instance_name()))
-            .spawn(move || {
-                let res = RxThread {
-                    config: cfg,
-                    rx_cancellation_token: rxct,
-                    rx_config,
-                    desc: desc_rx,
-                    last_sequence_number: None,
-                    last_timestamp: None,
-                    timestamp_offset: None,
-                    clock,
-                    delay_buffer: AverageCalculationBuffer::new(
-                        vec![0; delay_calculation_buffer_len].into(),
-                    ),
-                    rtp_packet_buffer: vec![0; packet_buffer_len].into(),
-                    data_requests,
-                    latest_received_playout_time: 0,
-                    strict_checks_disabled: true,
-                }
-                .run();
-                rx_stopped.send(res).ok();
-            })?;
+            .spawn(
+                move || match runtime::Builder::new_current_thread().enable_all().build() {
+                    Ok(runtime) => {
+                        let receiver = async {
+                            RxThread {
+                                config: cfg,
+                                rx_cancellation_token: rxct,
+                                rx_config,
+                                desc: desc_rx.clone(),
+                                last_sequence_number: None,
+                                last_timestamp: None,
+                                timestamp_offset: None,
+                                clock,
+                                delay_buffer: AverageCalculationBuffer::new(
+                                    vec![0; delay_calculation_buffer_len].into(),
+                                ),
+                                rtp_packet_buffer: FloatingPointAudioBuffer::new(
+                                    vec![0f32; packet_buffer_len].into(),
+                                    desc_rx,
+                                ),
+                                data_requests,
+                                latest_received_playout_time: 0,
+                                strict_checks_disabled: true,
+                                measured_link_offset: AverageCalculationBuffer::new(
+                                    measured_link_offset_buffer,
+                                ),
+                            }
+                            .run()
+                            .await
+                        };
+                        let res = runtime.block_on(receiver);
+                        rx_stopped.send(res).ok();
+                    }
+                    Err(e) => {
+                        rx_stopped.send(Err(e.into())).ok();
+                    }
+                },
+            )?;
 
         subsys.start(SubsystemBuilder::new("actor", |s| async move {
             ReceiverActor {
@@ -251,14 +269,15 @@ struct RxThread<C: MediaClock> {
     timestamp_offset: Option<u64>,
     clock: C,
     delay_buffer: AverageCalculationBuffer<i64>,
-    rtp_packet_buffer: Box<[u8]>,
+    rtp_packet_buffer: FloatingPointAudioBuffer,
     data_requests: RequestResponseServerChannel<AudioDataRequest, DataState>,
     latest_received_playout_time: u64,
     strict_checks_disabled: bool,
+    measured_link_offset: AverageCalculationBuffer<u64>,
 }
 
 impl<C: MediaClock> RxThread<C> {
-    fn run(mut self) -> Aes67Vsc2Result<()> {
+    async fn run(mut self) -> Aes67Vsc2Result<()> {
         set_realtime_priority();
 
         let socket = create_rx_socket(&self.rx_config.session, self.config.interface_ip)?;
@@ -266,35 +285,20 @@ impl<C: MediaClock> RxThread<C> {
         let mut receive_buffer = [0; 65_535];
 
         loop {
-            let recv = socket.recv_from(&mut receive_buffer);
-            let media_time_at_reception = self.clock.current_media_time()?;
-            match recv {
-                Ok((len, addr)) => {
-                    self.rtp_data_received(&receive_buffer[..len], addr, media_time_at_reception)?
-                }
-                Err(e) => {
-                    if e.kind() != ErrorKind::WouldBlock {
-                        return Err(Aes67Vsc2Error::from(e));
-                    }
-                }
-            }
-
-            let recv = self.data_requests.try_on_request();
-            let media_time_at_reception = self.clock.current_media_time()?;
-            match recv {
-                Ok(req) => {
+            select! {
+                Ok((len, addr)) = socket.recv_from(&mut receive_buffer) => {
+                    let media_time_at_reception = self.clock.current_media_time()?;
+                    self.rtp_data_received(&receive_buffer[..len], addr, media_time_at_reception)?;
+                },
+                Some(req) = self.data_requests.on_request() => {
+                    let media_time_at_reception = self.clock.current_media_time()?;
                     if !self.data_requested(req, media_time_at_reception)? {
                         info!("Playout closed.");
                         break;
                     }
-                }
-                Err(TryRecvError::Disconnected) => break,
-                Err(TryRecvError::Empty) => { /* nothing to see here, move along */ }
-            }
-
-            if self.rx_cancellation_token.try_recv().is_ok() {
-                info!("Cancellation token caused RX thread to stop.");
-                break;
+                },
+                _ = &mut self.rx_cancellation_token => break,
+                else => break,
             }
         }
 
@@ -411,8 +415,8 @@ impl<C: MediaClock> RxThread<C> {
             if playout_time > self.latest_received_playout_time {
                 self.latest_received_playout_time = playout_time;
             }
-            let mut buffer = AudioBuffer::new(&mut self.rtp_packet_buffer, &self.desc);
-            buffer.insert(rtp.payload(), playout_time);
+
+            self.rtp_packet_buffer.insert(rtp.payload(), playout_time);
         }
 
         Ok(())
@@ -424,7 +428,7 @@ impl<C: MediaClock> RxThread<C> {
     }
 
     fn data_requested(
-        &self,
+        &mut self,
         req: AudioDataRequest,
         media_time_at_reception: u64,
     ) -> Aes67Vsc2Result<bool> {
@@ -432,38 +436,31 @@ impl<C: MediaClock> RxThread<C> {
             return Ok(self.data_requests.respond(DataState::Missed));
         }
 
-        let bytes_per_buffer_sample: usize = self
-            .desc
-            .audio_format
-            .frame_format
-            .sample_format
-            .bytes_per_sample();
-        let bytes_per_buffer_frame = self.desc.audio_format.frame_format.bytes_per_frame();
-        let sample_format = self.desc.audio_format.frame_format.sample_format;
-        let frames_per_buffer = self.rtp_packet_buffer.len() / bytes_per_buffer_frame;
-
-        let frame_start = (req.playout_time % frames_per_buffer as u64) as usize;
-
         let data_ready = req.playout_time <= self.latest_received_playout_time;
-
-        if data_ready {
-            let output_buffer = req.buffer.buffer_mut::<f32>();
-
-            for (frame, sample) in output_buffer.iter_mut().enumerate() {
-                let buffer_frame_index = (frame_start + frame) % frames_per_buffer;
-
-                let sample_index_in_frame = req.channel * bytes_per_buffer_sample;
-                let sample_start =
-                    buffer_frame_index * bytes_per_buffer_frame + sample_index_in_frame;
-                let sample_end = sample_start + bytes_per_buffer_sample;
-                let buf = &self.rtp_packet_buffer[sample_start..sample_end];
-
-                *sample = sample_format.read_sample(buf);
-            }
-            Ok(self.data_requests.respond(DataState::Ready))
+        if !data_ready {
+            return Ok(self.data_requests.respond(DataState::Wait));
         } else {
-            Ok(self.data_requests.respond(DataState::Wait))
+            if let Some(measured_link_offset) = self
+                .measured_link_offset
+                .update(self.latest_received_playout_time - req.playout_time)
+            {
+                let link_offset_ms = measured_link_offset as f32
+                    / self.desc.audio_format.sample_rate as f32
+                    * 1_000.0;
+
+                if link_offset_ms < self.desc.link_offset {
+                    info!(
+                        "measured minimum link offset: {measured_link_offset} frames / {link_offset_ms:.1} ms"
+                    );
+                } else {
+                    warn!(
+                        "measured minimum  link offset: {measured_link_offset} frames / {link_offset_ms:.1} ms"
+                    );
+                }
+            }
         }
+
+        Ok(self.data_requests.respond(self.rtp_packet_buffer.read(req)))
     }
 
     #[instrument(skip(self))]

@@ -174,26 +174,33 @@ impl PlayoutActor {
 
         let desc = receiver_info;
 
-        let wallclock_offset_usec = (wallclock_monotonic_offset_nanos()? / 1_000) as u64;
-
-        let jack_media_clock_offset_calculator_buffer_len =
-            client.sample_rate() / client.buffer_size() as usize;
+        let buffer_size = 10 * client.buffer_size() as usize;
+        let audio_buffer = Some(vec![0.0; buffer_size].into());
+        let wallclock_offset_buffer =
+            vec![0; 2 * client.sample_rate() / client.buffer_size() as usize].into();
+        let clock_lag_buffer =
+            vec![0; 2 * client.sample_rate() / client.buffer_size() as usize].into();
 
         let (tx, notifications) = mpsc::channel(1024);
         let notification_handler = SessionManagerNotificationHandler { tx };
         let process_handler_state = ProcessHandlerState {
             out_ports,
+            audio_buffer,
             desc,
             clock,
             thread_prio_set: false,
             jack_clock_offset: u64::MAX,
             requests,
-            wallclock_offset_usec,
-            jack_media_clock_offset_calculator: AverageCalculationBuffer::new(
-                vec![0u64; jack_media_clock_offset_calculator_buffer_len].into(),
-            ),
-            jack_media_clock_offset: 0,
+            jack_media_clock_offset: None,
             warmup_counter: 0,
+            wallclock_offset_calculator: AverageCalculationBuffer::new(wallclock_offset_buffer),
+            clock_lag_calculator: AverageCalculationBuffer::new(clock_lag_buffer),
+            waiting_for_data: false,
+            no_data: false,
+            clock_calibrated_at: 0,
+            frame_counter: 0,
+            clock_drift: 0,
+            clock_drift_slew: 0,
         };
         let process_handler =
             ClosureProcessHandler::with_state(process_handler_state, process, buffer_change);
@@ -240,15 +247,22 @@ impl PlayoutActor {
 
 struct ProcessHandlerState<C: MediaClock> {
     out_ports: Vec<Port<AudioOut>>,
+    audio_buffer: Option<Box<[f32]>>,
     desc: RxDescriptor,
     clock: C,
     thread_prio_set: bool,
     jack_clock_offset: u64,
     requests: RequestResponseClientChannel<AudioDataRequest, DataState>,
-    wallclock_offset_usec: u64,
-    jack_media_clock_offset_calculator: AverageCalculationBuffer<u64>,
-    jack_media_clock_offset: u64,
+    jack_media_clock_offset: Option<u64>,
     warmup_counter: u64,
+    wallclock_offset_calculator: AverageCalculationBuffer<u64>,
+    clock_lag_calculator: AverageCalculationBuffer<i64>,
+    waiting_for_data: bool,
+    no_data: bool,
+    clock_calibrated_at: u64,
+    frame_counter: u64,
+    clock_drift: i64,
+    clock_drift_slew: i64,
 }
 
 pub enum Notification {
@@ -344,10 +358,11 @@ impl NotificationHandler for SessionManagerNotificationHandler {
 
 fn buffer_change<C: MediaClock>(
     _: &mut ProcessHandlerState<C>,
-    _: &Client,
+    client: &Client,
     buffer_len: jack::Frames,
 ) -> Control {
-    info!("JACK buffer size changed to {buffer_len} frames");
+    let buffer_ms = buffer_len as f32 * 1_000.0 / client.sample_rate() as f32;
+    info!("JACK buffer size changed to {buffer_len} frames / {buffer_ms:.1} ms");
     Control::Continue
 }
 
@@ -356,47 +371,113 @@ fn process<C: MediaClock>(
     client: &Client,
     ps: &ProcessScope,
 ) -> Control {
-    if state.warmup_counter < 100 {
-        state.warmup_counter += 1;
-        return Control::Continue;
-    }
-
     if !state.thread_prio_set {
-        set_realtime_priority();
         state.thread_prio_set = true;
+        set_realtime_priority();
     }
 
-    if state.jack_media_clock_offset == 0 {
-        let cycle_start_monotonic_usec = client.frames_to_time(ps.last_frame_time());
-        let cycle_start_wallclock_usec = cycle_start_monotonic_usec + state.wallclock_offset_usec;
+    let Ok(system_media_time) = state.clock.current_media_time() else {
+        error!("Could not get system media time!");
+        silence(state, ps);
+        return Control::Quit;
+    };
+
+    let Ok(cycle_times) = ps.cycle_times() else {
+        silence(state, ps);
+        return Control::Continue;
+    };
+    let current_frames = cycle_times.current_frames as u64;
+
+    if let Some(wallclock_offset_usec) = state
+        .wallclock_offset_calculator
+        .update((wallclock_monotonic_offset_nanos().unwrap() / 1_000) as u64)
+    {
+        let cycle_start_monotonic_usec = cycle_times.current_usecs;
+        let cycle_start_wallclock_usec = cycle_start_monotonic_usec + wallclock_offset_usec;
         let cycle_start_media_time =
             (cycle_start_wallclock_usec as f64 * client.sample_rate() as f64 / 1_000_000.0).round()
                 as u64;
-        let offset = cycle_start_media_time - ps.last_frame_time() as u64;
-        if let Some(offset) = state.jack_media_clock_offset_calculator.update(offset) {
-            info!("Clock calibration done, JACK media clock offset is {offset}");
-            state.jack_media_clock_offset = offset;
+        let offset = cycle_start_media_time - current_frames;
+        // info!("Calibrating clock, current JACK media clock offset is {offset}");
+        match state.jack_media_clock_offset {
+            Some(o) if o != offset => {
+                let drift = o as i64 - offset as i64;
+                if drift != state.clock_drift {
+                    state.clock_drift_slew += drift - state.clock_drift;
+                }
+            }
+            None => {
+                state.jack_media_clock_offset = Some(offset);
+                state.clock_calibrated_at = current_frames;
+                state.frame_counter = current_frames;
+                info!(
+                    "JACK media clock was calibrated at media time {} and JACK frame {} to an offset of {}",
+                    cycle_start_media_time, state.clock_calibrated_at, offset
+                );
+            }
+            _ => {}
         }
-        return Control::Continue;
     }
 
-    let media_time = state.jack_media_clock_offset + ps.last_frame_time() as u64;
+    if state.clock_drift_slew != 0 {
+        let signum = state.clock_drift_slew.signum();
+        state.clock_drift += signum;
+        state.clock_drift_slew -= signum;
+        warn!("JACK clock drift adjusted: {}", state.clock_drift);
+    }
 
-    let Ok(current_media_time) = state.clock.current_media_time() else {
-        error!("Could not get system media time!");
-        return Control::Quit;
+    // if state.warmup_counter < 2 * client.sample_rate() as u64 {
+    //     state.warmup_counter += ps.n_frames() as u64;
+    //     silence(state, ps);
+    //     return Control::Continue;
+    // }
+
+    let Some(jack_media_clock_offset) = state.jack_media_clock_offset else {
+        silence(state, ps);
+        return Control::Continue;
     };
-    if current_media_time > media_time {
-        let diff = current_media_time - media_time;
-        let diff_usec = (diff as f64 * 1_000_000.0 / client.sample_rate() as f64).round() as u64;
-        // warn!(
-        //     "JACK clock is behind media clock by {diff} frames / {diff_usec} µs (expected to be ahead)!",
-        // );
-        // return Control::Quit;
-    } else {
-        let diff = media_time - current_media_time;
-        let diff_usec = (diff as f64 * 1_000_000.0 / client.sample_rate() as f64).round() as u64;
-        // warn!("JACK clock is ahead of media clock by {diff} frames / {diff_usec} µs (expected).",);
+
+    if current_frames < state.frame_counter {
+        if state.frame_counter % u32::MAX as u64 == current_frames {
+            warn!("JACK frame counter wrap detected!");
+            state.frame_counter = current_frames;
+            // TODO do we need to handle this?
+        } else {
+            warn!("JACK frame counter inconsistent, counter decreased!");
+            state.frame_counter = current_frames + ps.n_frames() as u64;
+            silence(state, ps);
+            return Control::Continue;
+            // TODO how to handle this?
+        }
+    } else if current_frames > state.frame_counter {
+        let skipped = cycle_times.current_frames as u64 - state.frame_counter;
+        warn!("Detected {skipped} skipped frames, probably due to an xrun.");
+        state.frame_counter = current_frames + ps.n_frames() as u64;
+        silence(state, ps);
+        return Control::Continue;
+        // TODO do we need to handle this?
+    }
+    state.frame_counter += ps.n_frames() as u64;
+
+    let jack_media_time = (jack_media_clock_offset as i128 + ps.last_frame_time() as i128
+        - state.clock_drift as i128) as u64;
+
+    // jack_media_time media time is supposed to be ahead of system media time since it needs to pre-fetch data so it can be played out in time
+    let jack_clock_lag = system_media_time as i64 - jack_media_time as i64;
+    if let Some(lag) = state.clock_lag_calculator.update(jack_clock_lag) {
+        if lag > 0 {
+            let lag_usec = (lag as f64 * 1_000_000.0 / client.sample_rate() as f64).round() as u64;
+            warn!(
+                "JACK media clock is behind system media clock by {lag} frames / {lag_usec} µs (expected to be ahead)!",
+            );
+        } else {
+            let ahead = -lag;
+            let ahead_usec =
+                (ahead as f64 * 1_000_000.0 / client.sample_rate() as f64).round() as u64;
+            info!(
+                "JACK media clock is ahead of system media clock by {ahead} frames / {ahead_usec} µs.",
+            );
+        }
     }
 
     for (port_nr, port) in state.out_ports.iter_mut().enumerate() {
@@ -409,21 +490,61 @@ fn process<C: MediaClock>(
         }
 
         'request: loop {
+            let Ok(current_system_media_time) = state.clock.current_media_time() else {
+                error!("Could not get system media time!");
+                output_buffer.fill(0.0);
+                break 'request;
+            };
+            if current_system_media_time > jack_media_time + 20 * ps.n_frames() as u64 {
+                if !state.no_data {
+                    warn!("Did not get data from receiver in time!");
+                    state.no_data = true;
+                }
+                output_buffer.fill(0.0);
+                break 'request;
+            }
             match state.requests.request_blocking(AudioDataRequest {
                 buffer: AudioBufferPointer::from_slice(&output_buffer),
                 channel: port_nr,
-                playout_time: media_time,
+                playout_time: jack_media_time,
             }) {
                 Some(DataState::Missed) => {
-                    warn!("Did not get data from receiver in time!");
+                    if !state.no_data {
+                        warn!("Receiver thinks playout is already late.");
+                        state.no_data = true;
+                    }
+                    output_buffer.fill(0.0);
                     break 'request;
                 }
-                Some(DataState::Ready) => break 'request,
-                Some(DataState::Wait) => continue 'request,
+                Some(DataState::Ready) => {
+                    state.no_data = false;
+                    state.waiting_for_data = false;
+                    break 'request;
+                }
+                Some(DataState::InvalidChannelNumber) => {
+                    error!("Channel mismatch between JACK and receiver!");
+                    return Control::Quit;
+                }
+                Some(DataState::Wait) => {
+                    if !state.waiting_for_data {
+                        warn!(
+                            "Waiting for data for port {} to become available @ media time {}",
+                            port_nr, jack_media_time
+                        );
+                        state.waiting_for_data = true;
+                    }
+                    continue 'request;
+                }
                 None => return Control::Quit,
             }
         }
     }
 
     Control::Continue
+}
+
+fn silence<C: MediaClock>(state: &mut ProcessHandlerState<C>, ps: &ProcessScope) {
+    for port in &mut state.out_ports {
+        port.as_mut_slice(ps).fill(0.0);
+    }
 }

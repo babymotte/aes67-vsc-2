@@ -9,6 +9,8 @@ license = "AGPL-3.0-or-later"
 axum = "0.8.1"
 chrono = "0.4.41"
 clap = { version = "4.5.44", features = ["derive", "env"] }
+crossbeam = "0.8.4"
+dirs = "6.0.0"
 gethostname = "1.0.0"
 hex = "0.4.3"
 jack = "0.13.3"
