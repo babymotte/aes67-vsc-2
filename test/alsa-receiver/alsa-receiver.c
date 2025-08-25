@@ -1,5 +1,7 @@
 #include <alsa/asoundlib.h>
 #include <math.h>
+#include <pthread.h>
+#include <sched.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -45,8 +47,32 @@ uint64_t current_media_time()
     return (uint64_t)round(media_time_d);
 }
 
+int set_thread_prio()
+{
+    struct sched_param param;
+    int policy = SCHED_FIFO; // Or SCHED_RR for round-robin
+
+    // Set the priority (range depends on policy)
+    param.sched_priority = 99; // 1..99 for FIFO/RR (99 = highest)
+
+    pthread_t this_thread = pthread_self();
+    if (pthread_setschedparam(this_thread, policy, &param) != 0)
+    {
+        fprintf(stderr, "failed to set thread prio\n");
+        perror("pthread_setschedparam");
+        return 1;
+    }
+
+    fprintf(stderr, "thread prio successfully set\n");
+
+    return 0;
+}
+
 int main(int argc, char *argv[])
 {
+
+    set_thread_prio();
+
     snd_pcm_hw_params_t *params;
     int dir;
     int rc;
