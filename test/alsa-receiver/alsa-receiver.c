@@ -12,15 +12,15 @@
 // TODO read config from file / return audio format from receiver after parsing SDP
 // TODO should SDP be parsed in host or library?
 static const unsigned int SAMPLE_RATE = 48000;
-static const unsigned int CYCLE_TIME = 480; // this should be half the frames that fit into the link offset or less
+static const unsigned int CYCLE_TIME = 96; // this should be half the frames that fit into the link offset or less
 static const unsigned int CHANNELS = 2;
 static const char SDP[] = "v=0\r\no=- 10943522194 10943522206 IN IP4 192.168.178.97\r\ns=AVIO-Bluetooth : 2\r\ni=2 channels: Left, Right\r\nc=IN IP4 239.69.232.56/32\r\nt=0 0\r\na=keywds:Dante\r\na=recvonly\r\nm=audio 5004 RTP/AVP 97\r\na=rtpmap:97 L24/48000/2\r\na=ptime:1\r\na=ts-refclk:ptp=IEEE1588-2008:00-1D-C1-FF-FE-0E-10-C4:0\r\na=mediaclk:direct=0\r\n";
 
 Aes67VscReceiverConfig_t receiver_config = {
     id : "alsa-1",
     sdp : SDP,
-    link_offset : 20.0,
-    buffer_time : 100.0,
+    link_offset : 4.0,
+    buffer_time : 20.0,
     interface_ip : "192.168.178.39"
 };
 
@@ -71,7 +71,7 @@ int set_thread_prio()
 int main(int argc, char *argv[])
 {
 
-    set_thread_prio();
+    // set_thread_prio();
 
     snd_pcm_hw_params_t *params;
     int dir;

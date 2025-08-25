@@ -62,7 +62,7 @@ pub async fn start_receiver<C: MediaClock>(
     let desc = RxDescriptor::try_from(&config)?;
     let socket = create_rx_socket(&config.session, config.interface_ip)?;
     thread::Builder::new().name(id.clone()).spawn(move || {
-        set_realtime_priority();
+        // set_realtime_priority();
 
         let runtime = match runtime::Builder::new_current_thread().enable_all().build() {
             Ok(it) => it,
