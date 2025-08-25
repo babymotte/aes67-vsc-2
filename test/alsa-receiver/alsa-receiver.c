@@ -10,17 +10,14 @@
 // TODO read config from file / return audio format from receiver after parsing SDP
 // TODO should SDP be parsed in host or library?
 static const unsigned int SAMPLE_RATE = 48000;
-static const unsigned int CYCLE_TIME = 192; // this should be half the frames that fit into the link offset
+static const unsigned int CYCLE_TIME = 480; // this should be half the frames that fit into the link offset or less
 static const unsigned int CHANNELS = 2;
-// local testing sender
-// static const char SDP[] = "v=0\no=- 10943522194 10943522194 IN IP4 192.168.178.39\ns=AES67-VSC : 2\ni=2 channels: Left, Right\nc=IN IP4 239.69.232.56/32\nt=0 0\na=keywds:AES67-VSC\na=recvonly\nm=audio 5004 RTP/AVP 97\na=rtpmap:97 L24/48000/2\na=ptime:1\na=ts-refclk:ptp=IEEE1588-2008:00-1D-C1-FF-FE-0E-10-C4:0\na=mediaclk:direct=0";
-// AVIO bluetooth
-static const char SDP[] = "v=0\no=- 10943522194 10943522194 IN IP4 192.168.178.97\ns=AVIO-Bluetooth : 2\ni=2 channels: Left, Right\nc=IN IP4 239.69.232.56/32\nt=0 0\na=keywds:Dante\na=recvonly\nm=audio 5004 RTP/AVP 97\na=rtpmap:97 L24/48000/2\na=ptime:1\na=ts-refclk:ptp=IEEE1588-2008:00-1D-C1-FF-FE-0E-10-C4:0\na=mediaclk:direct=0";
+static const char SDP[] = "v=0\r\no=- 10943522194 10943522206 IN IP4 192.168.178.97\r\ns=AVIO-Bluetooth : 2\r\ni=2 channels: Left, Right\r\nc=IN IP4 239.69.232.56/32\r\nt=0 0\r\na=keywds:Dante\r\na=recvonly\r\nm=audio 5004 RTP/AVP 97\r\na=rtpmap:97 L24/48000/2\r\na=ptime:1\r\na=ts-refclk:ptp=IEEE1588-2008:00-1D-C1-FF-FE-0E-10-C4:0\r\na=mediaclk:direct=0\r\n";
 
 Aes67VscReceiverConfig_t receiver_config = {
     id : "alsa-1",
     sdp : SDP,
-    link_offset : 8.0,
+    link_offset : 20.0,
     buffer_time : 100.0,
     interface_ip : "192.168.178.39"
 };
@@ -39,6 +36,15 @@ void int_handler(int dummy)
     }
 }
 
+uint64_t current_media_time()
+{
+    struct timespec now;
+    clock_gettime(CLOCK_TAI, &now);
+    double now_d = (double)now.tv_sec + (double)now.tv_nsec / 1000000000.0;
+    double media_time_d = now_d * SAMPLE_RATE;
+    return (uint64_t)round(media_time_d);
+}
+
 int main(int argc, char *argv[])
 {
     snd_pcm_hw_params_t *params;
@@ -48,6 +54,15 @@ int main(int argc, char *argv[])
     // Catch Ctrl-C to exit cleanly
     signal(SIGINT, int_handler);
     signal(SIGTERM, int_handler);
+
+    int32_t maybe_receiver = aes67_vsc_create_receiver("alsa-1", &receiver_config);
+    if (maybe_receiver < 0)
+    {
+        int err = -maybe_receiver;
+        fprintf(stderr, "Error creating receiver: %d\n", err);
+        return err;
+    }
+    uint32_t receiver = (uint32_t)maybe_receiver;
 
     // Open default PCM device
     rc = snd_pcm_open(&pcm_handle, "default", SND_PCM_STREAM_PLAYBACK, 0);
@@ -81,31 +96,16 @@ int main(int argc, char *argv[])
     // Prepare audio interface
     snd_pcm_prepare(pcm_handle);
 
+    // create playout buffer
     uint64_t buffer_len = CYCLE_TIME * CHANNELS;
     float buffer[buffer_len];
-    for (int i = 0; i < buffer_len; i++) {
+    for (int i = 0; i < buffer_len; i++)
+    {
         buffer[i] = 0.0;
     }
 
-    int32_t maybe_receiver = aes67_vsc_create_receiver("alsa-1", &receiver_config);
-    if (maybe_receiver < 0) {
-        int err = -maybe_receiver;
-        fprintf(stderr, "Error creating receiver: %d\n", err);
-        return err;
-    }
-    uint32_t receiver = (uint32_t) maybe_receiver;
+    uint64_t media_time = current_media_time();
 
-    struct timespec now = {
-        tv_sec:0,
-        tv_nsec:0,
-    };
-
-    clock_gettime(CLOCK_TAI, &now);
-    double now_d = (double) now.tv_sec + (double) now.tv_nsec / 1000000000.0;
-    double media_time_d = now_d * SAMPLE_RATE;
-    uint64_t media_time = (uint64_t) round(media_time_d);
-
-    // Play sine wave indefinitely
     while (keep_running)
     {
 
@@ -127,9 +127,19 @@ int main(int argc, char *argv[])
         media_time += CYCLE_TIME;
 
         // pre-fetch data for next cycle
-        uint8_t res = aes67_vsc_receive(receiver, media_time, (size_t) buffer, buffer_len);
-        if (res != 0) {        
-            for (int i = 0; i < buffer_len; i++) {
+        uint8_t res = aes67_vsc_receive(receiver, media_time, (size_t)buffer, buffer_len);
+
+        if (res == 10)
+        {
+            fprintf(stderr, "we are ahead of the receiver's clock. something is very wrong here\n");
+            return 1;
+        }
+
+        // no data received, filll the buffer with zeros
+        if (res != 0)
+        {
+            for (int i = 0; i < buffer_len; i++)
+            {
                 buffer[i] = 0.0;
             }
         }

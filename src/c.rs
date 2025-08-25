@@ -36,6 +36,7 @@ pub const AES_VSC_ERROR_SENDER_NOT_FOUND: u8 = 0x07;
 pub const AES_VSC_ERROR_INVALID_CHANNEL: u8 = 0x08;
 pub const AES_VSC_ERROR_RECEIVER_BUFFER_UNDERRUN: u8 = 0x09;
 pub const AES_VSC_ERROR_CLOCK_SYNC_ERROR: u8 = 0x0A;
+pub const AES_VSC_ERROR_RECEIVER_NOT_READY_YET: u8 = 0x0B;
 
 /// A unique reference to a virtual sound card
 #[derive_ReprC]
@@ -73,11 +74,11 @@ fn aes67_vsc_create_receiver<'a>(
 #[ffi_export]
 fn aes67_vsc_receive(
     receiver_id: u32,
-    media_time: u64,
+    playout_time: u64,
     buffer_ptr: usize,
     buffer_len: usize,
 ) -> u8 {
-    match try_receive(receiver_id, media_time, buffer_ptr, buffer_len) {
+    match try_receive(receiver_id, playout_time, buffer_ptr, buffer_len) {
         Ok(it) => it,
         Err(err) => err.error_code(),
     }

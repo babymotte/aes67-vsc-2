@@ -38,8 +38,6 @@ use tokio::{io::AsyncReadExt, net::TcpStream, spawn, sync::mpsc, time::sleep};
 use tracing::{error, info};
 use worterbuch_client::Worterbuch;
 
-const WALL_CLOCK: clockid_t = CLOCK_TAI;
-
 #[derive(Debug, Clone, Copy)]
 pub struct MediaClockTimestamp {
     pub timestamp: u32,
@@ -302,7 +300,7 @@ pub fn wallclock_monotonic_offset_nanos() -> Aes67Vsc2Result<u128> {
     };
 
     let res_mono = unsafe { clock_gettime(CLOCK_MONOTONIC, &mut tp_mono) };
-    let res_wall = unsafe { clock_gettime(WALL_CLOCK, &mut tp_wall) };
+    let res_wall = unsafe { clock_gettime(CLOCK_TAI, &mut tp_wall) };
 
     if res_wall == -1 {
         return Err(Aes67Vsc2Error::Other(
@@ -340,7 +338,7 @@ impl SystemTime for timespec {
 }
 
 pub fn system_time() -> Aes67Vsc2Result<timespec> {
-    system_time_for_clock_id(WALL_CLOCK)
+    system_time_for_clock_id(CLOCK_TAI)
 }
 
 pub fn system_time_monotonic() -> Aes67Vsc2Result<timespec> {
@@ -381,8 +379,8 @@ impl MediaClock for SystemMediaClock {
     fn current_media_time(&self) -> Aes67Vsc2Result<u64> {
         let ptp_time = system_time()?;
         Ok(media_time_from_ptp(
-            ptp_time.tv_sec as u64,
-            ptp_time.tv_nsec as u64,
+            ptp_time.tv_sec,
+            ptp_time.tv_nsec,
             &self.audio_format,
         ))
     }
@@ -420,8 +418,8 @@ impl MediaClock for StatimePtpMediaClock {
     fn current_media_time(&self) -> Aes67Vsc2Result<u64> {
         let ptp_time = self.statime_ptp_clock.now();
         Ok(media_time_from_ptp(
-            ptp_time.secs(),
-            ptp_time.subsec_nanos() as u64,
+            ptp_time.secs() as i64,
+            ptp_time.subsec_nanos() as i64,
             &self.audio_format,
         ))
     }
@@ -432,9 +430,9 @@ impl MediaClock for StatimePtpMediaClock {
     }
 }
 
-fn media_time_from_ptp(ptp_time_secs: u64, ptp_time_nanos: u64, audio_format: &AudioFormat) -> u64 {
-    let ptp_nanos = (ptp_time_secs as u128) * 1_000_000_000 + ptp_time_nanos as u128;
-    let total_frames = (ptp_nanos * audio_format.sample_rate as u128) / 1_000_000_000;
+fn media_time_from_ptp(ptp_time_secs: i64, ptp_time_nanos: i64, audio_format: &AudioFormat) -> u64 {
+    let ptp_nanos = (ptp_time_secs as i128) * 1_000_000_000 + ptp_time_nanos as i128;
+    let total_frames = (ptp_nanos * audio_format.sample_rate as i128) / 1_000_000_000;
     total_frames as u64
 }
 

@@ -1,7 +1,7 @@
 use crate::{
     AES_VSC_ERROR_CLOCK_SYNC_ERROR, AES_VSC_ERROR_INVALID_CHANNEL,
-    AES_VSC_ERROR_RECEIVER_BUFFER_UNDERRUN, AES_VSC_ERROR_RECEIVER_NOT_FOUND, AES_VSC_OK,
-    Aes67VscReceiverConfig,
+    AES_VSC_ERROR_RECEIVER_BUFFER_UNDERRUN, AES_VSC_ERROR_RECEIVER_NOT_FOUND,
+    AES_VSC_ERROR_RECEIVER_NOT_READY_YET, AES_VSC_OK, Aes67VscReceiverConfig,
     config::Config,
     error::{Aes67Vsc2Error, Aes67Vsc2Result},
     receiver::{
@@ -89,7 +89,7 @@ pub fn try_create_receiver(
 
 pub fn try_receive(
     receiver_id: u32,
-    media_time: u64,
+    playout_time: u64,
     buffer_ptr: usize,
     buffer_len: usize,
 ) -> Aes67Vsc2Result<u8> {
@@ -97,8 +97,9 @@ pub fn try_receive(
         return Ok(AES_VSC_ERROR_RECEIVER_NOT_FOUND);
     };
 
-    match receiver.receive_all(media_time, buffer_ptr, buffer_len)? {
+    match receiver.receive_all(playout_time, buffer_ptr, buffer_len)? {
         DataState::Ready => Ok(AES_VSC_OK),
+        DataState::NotReady => Ok(AES_VSC_ERROR_RECEIVER_NOT_READY_YET),
         DataState::InvalidChannelNumber => Ok(AES_VSC_ERROR_INVALID_CHANNEL),
         DataState::Missed => Ok(AES_VSC_ERROR_RECEIVER_BUFFER_UNDERRUN),
         DataState::SyncError => Ok(AES_VSC_ERROR_CLOCK_SYNC_ERROR),

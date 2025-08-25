@@ -233,6 +233,10 @@ impl RxDescriptor {
         formats::frames_per_packet(self.audio_format.sample_rate, self.link_offset)
     }
 
+    pub(crate) fn frames_in_buffer(&self, buffer: &[u8]) -> usize {
+        buffer.len() / self.bytes_per_sample()
+    }
+
     // pub(crate) fn frames_per_link_offset(&self, link_offset: MilliSeconds) -> usize {
     //     formats::frames_per_packet(self.audio_format.sample_rate, link_offset)
     // }
