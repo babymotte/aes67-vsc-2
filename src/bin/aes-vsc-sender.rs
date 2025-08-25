@@ -115,7 +115,7 @@ impl<C: MediaClock> Player<C> {
         rrs: RequestResponseServerChannel<AudioBufferPointer, (Seq, u64)>,
         ptime: MilliSeconds,
     ) -> Self {
-        let mut interval = interval(Duration::from_nanos((ptime * 1_000_000.0) as u64));
+        let mut interval = interval(Duration::from_micros((ptime * 1_000.0) as u64));
         interval.set_missed_tick_behavior(MissedTickBehavior::Burst);
         Self {
             clock,
@@ -157,7 +157,11 @@ impl<C: MediaClock> Player<C> {
             }
         }
 
-        let buffer = audio_buffer.buffer_mut();
+        let buffer = unsafe {
+            // this is safe because the thread from which we borrow this buffer is blocked until we send
+            // the response back, so no concurrent reads and writes can occur
+            audio_buffer.buffer_mut()
+        };
         let frames = buffer.len()
             / self.audio_format.frame_format.channels
             / self
@@ -189,9 +193,7 @@ impl<C: MediaClock> Player<C> {
                     .write_sample(val, ch_buf);
             }
         }
-
         let seq = Seq::from((self.pos / frames as u64) as u16);
-
         Ok((seq, timestamp))
     }
 }

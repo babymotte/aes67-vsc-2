@@ -17,10 +17,7 @@
 
 use crate::{
     formats::{BufferFormat, SampleReader},
-    receiver::{
-        api::{AudioDataRequest, DataState},
-        config::RxDescriptor,
-    },
+    receiver::{api::DataState, config::RxDescriptor},
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -54,13 +51,15 @@ impl AudioBufferPointer {
         unsafe { from_raw_parts(self.ptr as *const u8, self.len) }
     }
 
-    pub fn buffer_mut<T>(&self) -> &mut [T] {
+    pub unsafe fn buffer_mut<T>(&self) -> &mut [T] {
         unsafe { from_raw_parts_mut(self.ptr as *mut T, self.len) }
     }
 
-    pub fn audio_buffer<'a, 'b>(&'a self, desc: &'b RxDescriptor) -> AudioBuffer<'a, 'b> {
-        let buf = self.buffer_mut();
-        AudioBuffer { buf, desc }
+    pub unsafe fn audio_buffer<'a, 'b>(&'a self, desc: &'b RxDescriptor) -> AudioBuffer<'a, 'b> {
+        unsafe {
+            let buf = self.buffer_mut();
+            AudioBuffer { buf, desc }
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -116,6 +115,25 @@ impl FloatingPointAudioBuffer {
 
     pub fn insert(&mut self, payload: &[u8], playout_time: u64) {
         let sample_format = &self.desc.audio_format.frame_format.sample_format;
+        let buffer_len = self.buf.len();
+        let channels = self.desc.audio_format.frame_format.channels;
+
+        let bytes_per_input_sample: usize = self
+            .desc
+            .audio_format
+            .frame_format
+            .sample_format
+            .bytes_per_sample();
+
+        for (offset, sample) in payload.chunks(bytes_per_input_sample).enumerate() {
+            let index =
+                ((playout_time * channels as u64 + offset as u64) % buffer_len as u64) as usize;
+            self.buf[index] = sample_format.read_sample(sample);
+        }
+    }
+
+    pub fn insert_deinterlaced(&mut self, payload: &[u8], playout_time: u64) {
+        let sample_format = &self.desc.audio_format.frame_format.sample_format;
         let channels = self.desc.audio_format.frame_format.channels;
         let chunk_size = self.buf.len() / channels;
         let channel_partitions = self.buf.chunks_mut(chunk_size);
@@ -140,18 +158,38 @@ impl FloatingPointAudioBuffer {
         }
     }
 
-    pub fn read(&self, req: AudioDataRequest) -> DataState {
-        let output_buffer = req.buffer.buffer_mut::<f32>();
+    pub fn read(&self, output_buffer: &mut [f32], playout_time: u64) -> DataState {
+        let buffer_len = self.buf.len();
+        let channels = self.desc.audio_format.frame_format.channels;
 
+        let start_index = ((playout_time * channels as u64) % buffer_len as u64) as usize;
+        let end_index: usize = start_index + output_buffer.len();
+        if end_index <= buffer_len {
+            output_buffer.copy_from_slice(&self.buf[start_index..end_index]);
+        } else {
+            let remainder = end_index % buffer_len;
+            let pivot = output_buffer.len() - remainder;
+            output_buffer[..pivot].copy_from_slice(&self.buf[start_index..]);
+            output_buffer[pivot..].copy_from_slice(&self.buf[..remainder]);
+        }
+        DataState::Ready
+    }
+
+    pub fn read_deinterlaced(
+        &self,
+        output_buffer: &mut [f32],
+        playout_time: u64,
+        channel: usize,
+    ) -> DataState {
         let channels = self.desc.audio_format.frame_format.channels;
         let chunk_size = self.buf.len() / channels;
         let channel_partitions = self.buf.chunks(chunk_size);
 
-        let Some(rtp_buffer) = channel_partitions.skip(req.channel).next() else {
+        let Some(rtp_buffer) = channel_partitions.skip(channel).next() else {
             return DataState::InvalidChannelNumber;
         };
 
-        let start_index = (req.playout_time % rtp_buffer.len() as u64) as usize;
+        let start_index = (playout_time % rtp_buffer.len() as u64) as usize;
         let end_index: usize = start_index + output_buffer.len();
         if end_index <= rtp_buffer.len() {
             output_buffer.copy_from_slice(&rtp_buffer[start_index..end_index]);

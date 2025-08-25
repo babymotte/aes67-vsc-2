@@ -22,13 +22,19 @@ use tracing::instrument;
 #[derive(Debug, PartialEq)]
 pub enum DataState {
     Ready,
-    Wait,
     InvalidChannelNumber,
     Missed,
+    SyncError,
 }
 
 #[derive(Debug)]
 pub struct AudioDataRequest {
+    pub buffer: AudioBufferPointer,
+    pub playout_time: u64,
+}
+
+#[derive(Debug)]
+pub struct ChannelAudioDataRequest {
     pub buffer: AudioBufferPointer,
     pub channel: usize,
     pub playout_time: u64,
@@ -37,7 +43,7 @@ pub struct AudioDataRequest {
 #[derive(Debug)]
 pub enum ReceiverApiMessage {
     GetInfo(oneshot::Sender<RxDescriptor>),
-    DataRequest(AudioDataRequest, mpsc::Sender<DataState>),
+    DataRequest(AudioDataRequest, oneshot::Sender<DataState>),
     Stop,
 }
 
@@ -51,15 +57,33 @@ impl ReceiverApi {
         Self { api_tx }
     }
 
-    #[instrument]
+    #[instrument(skip(self))]
     pub async fn stop(&self) {
         self.api_tx.send(ReceiverApiMessage::Stop).await.ok();
     }
 
-    #[instrument(ret, err)]
+    #[instrument(skip(self), ret, err)]
     pub async fn info(&self) -> Aes67Vsc2Result<RxDescriptor> {
         let (tx, rx) = oneshot::channel();
         self.api_tx.send(ReceiverApiMessage::GetInfo(tx)).await.ok();
         Ok(rx.await?)
+    }
+
+    pub fn receive_all(
+        &self,
+        media_time: u64,
+        buffer_ptr: usize,
+        buffer_len: usize,
+    ) -> Aes67Vsc2Result<DataState> {
+        let (tx, rx) = oneshot::channel();
+        let buffer = AudioBufferPointer::new(buffer_ptr, buffer_len);
+        let req = AudioDataRequest {
+            buffer,
+            playout_time: media_time,
+        };
+        self.api_tx
+            .blocking_send(ReceiverApiMessage::DataRequest(req, tx))
+            .ok();
+        Ok(rx.blocking_recv()?)
     }
 }

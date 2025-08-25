@@ -18,12 +18,14 @@
 use crate::{
     error::{Aes67Vsc2Error, Aes67Vsc2Result},
     receiver::{
+        api::ReceiverApi,
         config::{ReceiverConfig, RxDescriptor},
         start_receiver,
     },
+    sender::api::SenderApi,
     time::SystemMediaClock,
 };
-use std::thread;
+use std::{collections::HashMap, thread};
 use tokio::{
     runtime,
     sync::{mpsc, oneshot},
@@ -31,8 +33,12 @@ use tokio::{
 use tracing::info;
 
 enum VscApiMessage {
-    CreateReceiver(String, ReceiverConfig, oneshot::Sender<Aes67Vsc2Result<()>>),
-    DestroyReceiver(String, oneshot::Sender<Aes67Vsc2Result<()>>),
+    CreateReceiver(
+        String,
+        ReceiverConfig,
+        oneshot::Sender<Aes67Vsc2Result<(ReceiverApi, u32)>>,
+    ),
+    DestroyReceiverById(u32, oneshot::Sender<Aes67Vsc2Result<()>>),
     Stop(oneshot::Sender<()>),
 }
 
@@ -41,13 +47,13 @@ pub struct VirtualSoundCardApi {
 }
 
 impl VirtualSoundCardApi {
-    pub fn new(id: i32) -> Aes67Vsc2Result<Self> {
+    pub fn new(name: String) -> Aes67Vsc2Result<Self> {
         let (result_tx, result_rx) = oneshot::channel();
         let (api_tx, api_rx) = mpsc::channel(1024);
         thread::Builder::new()
-            .name(format!("aes67-vsc-{id}"))
+            .name(format!("aes67-vsc-{name}"))
             .spawn(move || {
-                let vsc_future = VirtualSoundCard::new(id, api_rx).run();
+                let vsc_future = VirtualSoundCard::new(name, api_rx).run();
                 let runtime = match runtime::Builder::new_current_thread().enable_all().build() {
                     Ok(it) => it,
                     Err(e) => {
@@ -62,7 +68,11 @@ impl VirtualSoundCardApi {
         Ok(VirtualSoundCardApi { api_tx })
     }
 
-    pub fn create_receiver(&self, id: String, config: ReceiverConfig) -> Aes67Vsc2Result<()> {
+    pub fn create_receiver(
+        &self,
+        id: String,
+        config: ReceiverConfig,
+    ) -> Aes67Vsc2Result<(ReceiverApi, u32)> {
         let (tx, rx) = oneshot::channel();
         self.api_tx
             .blocking_send(VscApiMessage::CreateReceiver(id, config, tx))
@@ -70,10 +80,10 @@ impl VirtualSoundCardApi {
         rx.blocking_recv()?
     }
 
-    pub fn destroy_receiver(&self, id: String) -> Aes67Vsc2Result<()> {
+    pub fn destroy_receiver(&self, id: u32) -> Aes67Vsc2Result<()> {
         let (tx, rx) = oneshot::channel();
         self.api_tx
-            .blocking_send(VscApiMessage::DestroyReceiver(id, tx))
+            .blocking_send(VscApiMessage::DestroyReceiverById(id, tx))
             .ok();
         rx.blocking_recv()?
     }
@@ -86,24 +96,39 @@ impl VirtualSoundCardApi {
 }
 
 struct VirtualSoundCard {
-    id: i32,
+    name: String,
     api_rx: mpsc::Receiver<VscApiMessage>,
+    txs: HashMap<u32, SenderApi>,
+    rxs: HashMap<u32, ReceiverApi>,
+    tx_names: HashMap<u32, String>,
+    rx_names: HashMap<u32, String>,
+    tx_counter: u32,
+    rx_counter: u32,
 }
 
 impl VirtualSoundCard {
-    fn new(id: i32, api_rx: mpsc::Receiver<VscApiMessage>) -> Self {
-        VirtualSoundCard { id, api_rx }
+    fn new(name: String, api_rx: mpsc::Receiver<VscApiMessage>) -> Self {
+        VirtualSoundCard {
+            name,
+            api_rx,
+            txs: HashMap::new(),
+            rxs: HashMap::new(),
+            tx_names: HashMap::new(),
+            rx_names: HashMap::new(),
+            tx_counter: 0,
+            rx_counter: 0,
+        }
     }
 
     async fn run(mut self) {
-        let vsc_id = self.id.clone();
+        let vsc_id = self.name.clone();
 
         while let Some(msg) = self.api_rx.recv().await {
             match msg {
                 VscApiMessage::CreateReceiver(id, config, tx) => {
                     tx.send(self.create_receiver(id, config).await).ok();
                 }
-                VscApiMessage::DestroyReceiver(id, tx) => {
+                VscApiMessage::DestroyReceiverById(id, tx) => {
                     tx.send(self.destroy_receiver(id).await).ok();
                 }
                 VscApiMessage::Stop(tx) => {
@@ -116,18 +141,28 @@ impl VirtualSoundCard {
         }
     }
 
-    async fn create_receiver(&mut self, id: String, config: ReceiverConfig) -> Aes67Vsc2Result<()> {
-        info!("Creating receiver '{id}' …");
+    async fn create_receiver(
+        &mut self,
+        name: String,
+        config: ReceiverConfig,
+    ) -> Aes67Vsc2Result<(ReceiverApi, u32)> {
+        self.rx_counter += 1;
+        let id = self.rx_counter;
+        let display_name = format!("{}/rx/{}", self.name, name);
+        info!("Creating receiver '{display_name}' …");
 
         let desc = RxDescriptor::try_from(&config)?;
         let clock = SystemMediaClock::new(desc.audio_format.clone());
-        start_receiver(format!("receiver-{id}"), config, None, clock).await?;
+        let receiver_api = start_receiver(display_name.clone(), config, None, clock).await?;
 
-        info!("Receiver '{id}' successfully created.");
-        Ok(())
+        self.rx_names.insert(id, name.clone());
+        self.rxs.insert(id, receiver_api.clone());
+
+        info!("Receiver '{display_name}' successfully created.");
+        Ok((receiver_api, id))
     }
 
-    async fn destroy_receiver(&mut self, id: String) -> Aes67Vsc2Result<()> {
+    async fn destroy_receiver(&mut self, id: u32) -> Aes67Vsc2Result<()> {
         info!("Destroying receiver '{id}' …");
         // TODO
         info!("Receiver '{id}' successfully destroyed.");
@@ -138,6 +173,6 @@ impl VirtualSoundCard {
 
 impl Drop for VirtualSoundCard {
     fn drop(&mut self) {
-        info!("Virtual sound card '{}' stopped.", self.id);
+        info!("Virtual sound card '{}' destroyed.", self.name);
     }
 }

@@ -225,17 +225,17 @@ impl RxDescriptor {
         formats::frames_per_packet(self.audio_format.sample_rate, self.packet_time)
     }
 
-    pub(crate) fn frames_per_ms(&self) -> usize {
-        formats::frames_per_packet(self.audio_format.sample_rate, 1.0)
-    }
+    // pub(crate) fn frames_per_ms(&self) -> usize {
+    //     formats::frames_per_packet(self.audio_format.sample_rate, 1.0)
+    // }
 
     pub(crate) fn frames_in_link_offset(&self) -> usize {
         formats::frames_per_packet(self.audio_format.sample_rate, self.link_offset)
     }
 
-    pub(crate) fn frames_per_link_offset(&self, link_offset: MilliSeconds) -> usize {
-        formats::frames_per_packet(self.audio_format.sample_rate, link_offset)
-    }
+    // pub(crate) fn frames_per_link_offset(&self, link_offset: MilliSeconds) -> usize {
+    //     formats::frames_per_packet(self.audio_format.sample_rate, link_offset)
+    // }
 
     #[deprecated = "packet time should not be assumed based on SDP but taken from actual packet size"]
     pub fn samples_per_packet(&self) -> usize {

@@ -40,24 +40,13 @@ typedef struct Aes67VscReceiverConfig {
 
 /** \brief
  *  Create a new AES67 receiver
- *  * `id` - A string pointer to the receiver ID, which must be unique within this process
+ *  * `id` - A string pointer to the receiver ID, which must be unique within the process (not within the virtual sound card!)
  *  * `audio_format` - The receiver's audio format
  */
-uint8_t
-aes67_vsc_create_receiver (
-    int32_t const * vsc,
-    char const * id,
-    Aes67VscReceiverConfig_t const * config);
-
-/** \brief
- *  Create a new virtual sound card.
- *  The sound card can then be used to create senders and receivers and get stats and monitoring.
- *
- *  While technically possible, it is generally not recommended to create more than one sound card
- *  at the same time to avoid allocating resources unnecessarily.
- */
 int32_t
-aes67_vsc_create_vsc (void);
+aes67_vsc_create_receiver (
+    char const * receiver_name,
+    Aes67VscReceiverConfig_t const * config);
 
 /** \brief
  *  Destroy an existing AES67 receiver. Destroying a receiver will stop it from receiving any
@@ -69,22 +58,15 @@ aes67_vsc_create_vsc (void);
  */
 uint8_t
 aes67_vsc_destroy_receiver (
-    int32_t const * vsc,
-    char const * id);
+    uint32_t receiver_id);
 
-/** \brief
- *  Destroy a virtual sound card. This will stop all senders and receivers that were created on
- *  this sound card and de-allocate all memory that was allocated by it.
- */
+/** <No documentation available> */
 uint8_t
-aes67_vsc_destroy_vsc (
-    int32_t const * vsc);
-
-/** \brief
- *  Initialize the VSC subsystem. This only needs to be called once, any subsequent calls will be ignored.
- */
-uint8_t
-aes67_vsc_init (void);
+aes67_vsc_receive (
+    uint32_t receiver_id,
+    uint64_t media_time,
+    size_t buffer_ptr,
+    size_t buffer_len);
 
 
 #ifdef __cplusplus

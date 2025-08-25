@@ -70,6 +70,10 @@ impl AudioFormat {
     pub fn frames_in_buffer(&self, buffer_time: MilliSeconds) -> usize {
         frames_in_buffer(buffer_time, self.sample_rate)
     }
+
+    pub fn samples_in_buffer(&self, buffer_time: MilliSeconds) -> usize {
+        samples_in_buffer(buffer_time, self.sample_rate, self.frame_format.channels)
+    }
 }
 
 impl From<&RxDescriptor> for AudioFormat {
@@ -302,6 +306,14 @@ pub fn packets_in_link_offset(link_offset: MilliSeconds, packet_time: MilliSecon
 pub fn frames_in_buffer(buffer_time: MilliSeconds, sample_rate: FramesPerSecond) -> usize {
     ((sample_rate as f32 * buffer_time) / Duration::from_secs(1).as_millis() as f32).round()
         as usize
+}
+
+pub fn samples_in_buffer(
+    buffer_time: MilliSeconds,
+    sample_rate: FramesPerSecond,
+    channels: usize,
+) -> usize {
+    frames_in_buffer(buffer_time, sample_rate) * channels
 }
 
 pub fn link_offset_buffer_size(

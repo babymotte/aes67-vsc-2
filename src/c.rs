@@ -19,20 +19,23 @@
 
 mod r#impl;
 
-use crate::c::r#impl::{
-    try_create_receiver, try_create_vsc, try_destroy_receiver, try_destroy_vsc, try_init,
-};
+use crate::c::r#impl::{try_create_receiver, try_destroy_receiver, try_receive};
 use ::safer_ffi::prelude::*;
 
 #[cfg(feature = "headers")]
 pub use r#impl::generate_headers;
 
 pub const AES_VSC_OK: u8 = 0x00;
-pub const AES_VSC_ERROR_ALREADY_INITIALIZED: u8 = 0x01;
-pub const AES_VSC_ERROR_UNSUPPORTED_BIT_DEPTH: u8 = 0x02;
-pub const AES_VSC_ERROR_UNSUPPORTED_SAMPLE_RATE: u8 = 0x03;
-pub const AES_VSC_ERROR_VSC_NOT_FOUND: u8 = 0x04;
-pub const AES_VSC_ERROR_MUTEX_POISONED: u8 = 0x05;
+pub const AES_VSC_ERROR_NOT_INITIALIZED: u8 = 0x01;
+pub const AES_VSC_ERROR_ALREADY_INITIALIZED: u8 = 0x02;
+pub const AES_VSC_ERROR_UNSUPPORTED_BIT_DEPTH: u8 = 0x03;
+pub const AES_VSC_ERROR_UNSUPPORTED_SAMPLE_RATE: u8 = 0x04;
+pub const AES_VSC_ERROR_VSC_NOT_CREATED: u8 = 0x05;
+pub const AES_VSC_ERROR_RECEIVER_NOT_FOUND: u8 = 0x06;
+pub const AES_VSC_ERROR_SENDER_NOT_FOUND: u8 = 0x07;
+pub const AES_VSC_ERROR_INVALID_CHANNEL: u8 = 0x08;
+pub const AES_VSC_ERROR_RECEIVER_BUFFER_UNDERRUN: u8 = 0x09;
+pub const AES_VSC_ERROR_CLOCK_SYNC_ERROR: u8 = 0x0A;
 
 /// A unique reference to a virtual sound card
 #[derive_ReprC]
@@ -53,49 +56,29 @@ pub struct Aes67VscReceiverConfig<'a> {
     interface_ip: char_p::Ref<'a>,
 }
 
-/// Initialize the VSC subsystem. This only needs to be called once, any subsequent calls will be ignored.
+/// Create a new AES67 receiver
+/// * `id` - A string pointer to the receiver ID, which must be unique within the process (not within the virtual sound card!)
+/// * `audio_format` - The receiver's audio format
 #[ffi_export]
-fn aes67_vsc_init() -> u8 {
-    match try_init() {
-        Ok(_) => AES_VSC_OK,
-        Err(err) => err.error_code(),
-    }
-}
-
-/// Create a new virtual sound card.
-/// The sound card can then be used to create senders and receivers and get stats and monitoring.
-///
-/// While technically possible, it is generally not recommended to create more than one sound card
-/// at the same time to avoid allocating resources unnecessarily.
-#[ffi_export]
-fn aes67_vsc_create_vsc() -> i32 {
-    match try_create_vsc() {
+fn aes67_vsc_create_receiver<'a>(
+    receiver_name: char_p::Ref<'_>,
+    config: &'a Aes67VscReceiverConfig<'a>,
+) -> i32 {
+    match try_create_receiver(receiver_name, config) {
         Ok(it) => it,
         Err(err) => -(err.error_code() as i32),
     }
 }
 
-/// Destroy a virtual sound card. This will stop all senders and receivers that were created on
-/// this sound card and de-allocate all memory that was allocated by it.
 #[ffi_export]
-fn aes67_vsc_destroy_vsc(vsc: &i32) -> u8 {
-    match try_destroy_vsc(vsc) {
-        Ok(_) => AES_VSC_OK,
-        Err(err) => err.error_code(),
-    }
-}
-
-/// Create a new AES67 receiver
-/// * `id` - A string pointer to the receiver ID, which must be unique within this process
-/// * `audio_format` - The receiver's audio format
-#[ffi_export]
-fn aes67_vsc_create_receiver<'a>(
-    vsc: &i32,
-    id: char_p::Ref<'_>,
-    config: &'a Aes67VscReceiverConfig<'a>,
+fn aes67_vsc_receive(
+    receiver_id: u32,
+    media_time: u64,
+    buffer_ptr: usize,
+    buffer_len: usize,
 ) -> u8 {
-    match try_create_receiver(vsc, id, config) {
-        Ok(_) => AES_VSC_OK,
+    match try_receive(receiver_id, media_time, buffer_ptr, buffer_len) {
+        Ok(it) => it,
         Err(err) => err.error_code(),
     }
 }
@@ -107,9 +90,9 @@ fn aes67_vsc_create_receiver<'a>(
 /// * `vsc` - the virtual soundcard on which to destroy the receiver
 /// * `id` - the ID of the receiver to be destroyed
 #[ffi_export]
-fn aes67_vsc_destroy_receiver(vsc: &i32, id: char_p::Ref<'_>) -> u8 {
-    match try_destroy_receiver(vsc, id) {
-        Ok(_) => AES_VSC_OK,
+fn aes67_vsc_destroy_receiver(receiver_id: u32) -> u8 {
+    match try_destroy_receiver(receiver_id) {
+        Ok(it) => it,
         Err(err) => err.error_code(),
     }
 }

@@ -27,7 +27,7 @@ use crate::{
         webserver::start_webserver,
     },
     receiver::{
-        api::{AudioDataRequest, DataState, ReceiverApi},
+        api::{AudioDataRequest, ChannelAudioDataRequest, DataState, ReceiverApi},
         config::RxDescriptor,
     },
     time::{MediaClock, wallclock_monotonic_offset_nanos},
@@ -54,7 +54,7 @@ pub async fn start_jack_playout<C: MediaClock>(
     wb: Option<Worterbuch>,
     clock: C,
     compensate_clock_drift: bool,
-    requests: RequestResponseClientChannel<AudioDataRequest, DataState>,
+    requests: RequestResponseClientChannel<ChannelAudioDataRequest, DataState>,
     receiver_api: ReceiverApi,
 ) -> Aes67Vsc2Result<PlayoutApi> {
     jack::set_logger(jack::LoggerType::Log);
@@ -84,7 +84,7 @@ async fn run<C: MediaClock>(
     wb: Option<Worterbuch>,
     clock: C,
     compensate_clock_drift: bool,
-    requests: RequestResponseClientChannel<AudioDataRequest, DataState>,
+    requests: RequestResponseClientChannel<ChannelAudioDataRequest, DataState>,
     receiver_api: ReceiverApi,
 ) -> Aes67Vsc2Result<()> {
     let (api_tx, api_rx) = mpsc::channel(1024);
@@ -119,7 +119,7 @@ impl PlayoutActor {
         _wb: Option<Worterbuch>,
         clock: C,
         compensate_clock_drift: bool,
-        requests: RequestResponseClientChannel<AudioDataRequest, DataState>,
+        requests: RequestResponseClientChannel<ChannelAudioDataRequest, DataState>,
         receiver_api: ReceiverApi,
     ) -> Aes67Vsc2Result<()> {
         let playout_config = config.playout_config.clone().expect("no playout config");
@@ -144,7 +144,7 @@ impl PlayoutActor {
         mut self,
         clock: C,
         compensate_clock_drift: bool,
-        requests: RequestResponseClientChannel<AudioDataRequest, DataState>,
+        requests: RequestResponseClientChannel<ChannelAudioDataRequest, DataState>,
         receiver_api: ReceiverApi,
     ) -> Aes67Vsc2Result<()> {
         info!(
@@ -260,7 +260,7 @@ struct ProcessHandlerState<C: MediaClock> {
     clock: C,
     thread_prio_set: bool,
     jack_clock_offset: u64,
-    requests: RequestResponseClientChannel<AudioDataRequest, DataState>,
+    requests: RequestResponseClientChannel<ChannelAudioDataRequest, DataState>,
     jack_media_clock_offset: Option<u64>,
     warmup_counter: u64,
     wallclock_offset_calculator: AverageCalculationBuffer<u64>,
@@ -511,7 +511,7 @@ fn process<C: MediaClock>(
                 output_buffer.fill(0.0);
                 break 'request;
             }
-            match state.requests.request_blocking(AudioDataRequest {
+            match state.requests.request_blocking(ChannelAudioDataRequest {
                 buffer: AudioBufferPointer::from_slice(&output_buffer),
                 channel: port_nr,
                 playout_time: jack_media_time,
@@ -533,16 +533,21 @@ fn process<C: MediaClock>(
                     error!("Channel mismatch between JACK and receiver!");
                     return Control::Quit;
                 }
-                Some(DataState::Wait) => {
-                    if !state.waiting_for_data {
-                        warn!(
-                            "Waiting for data for port {} to become available @ media time {}",
-                            port_nr, jack_media_time
-                        );
-                        state.waiting_for_data = true;
-                    }
-                    continue 'request;
+                Some(DataState::SyncError) => {
+                    error!("Clock mismatch between JACK and receiver!");
+                    return Control::Quit;
                 }
+
+                // Some(DataState::Wait) => {
+                //     if !state.waiting_for_data {
+                //         warn!(
+                //             "Waiting for data for port {} to become available @ media time {}",
+                //             port_nr, jack_media_time
+                //         );
+                //         state.waiting_for_data = true;
+                //     }
+                //     continue 'request;
+                // }
                 None => return Control::Quit,
             }
         }
