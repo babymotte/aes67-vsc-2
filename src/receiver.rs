@@ -37,12 +37,11 @@ use rtp_rs::{RtpReader, Seq};
 use std::{net::SocketAddr, thread, time::Duration, u32};
 use tokio::{
     net::UdpSocket,
-    runtime, select, spawn,
+    runtime, select,
     sync::{
         mpsc::{self},
         oneshot::{self},
     },
-    time::sleep,
 };
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle, Toplevel};
 use tracing::{debug, error, info, instrument, trace, warn};
@@ -58,7 +57,6 @@ pub async fn start_receiver<C: MediaClock>(
     let receiver_id = id.clone();
     let (result_tx, result_rx) = oneshot::channel();
     let (api_tx, api_rx) = mpsc::channel(1024);
-    let api_loopback = api_tx.clone();
     let desc = RxDescriptor::try_from(&config)?;
     let socket = create_rx_socket(&config.session, config.interface_ip)?;
     thread::Builder::new().name(id.clone()).spawn(move || {
@@ -71,8 +69,7 @@ pub async fn start_receiver<C: MediaClock>(
                 return;
             }
         };
-        let receiver_future =
-            Receiver::start(id, desc, config, wb, clock, api_loopback, api_rx, socket);
+        let receiver_future = Receiver::start(id, desc, config, wb, clock, api_rx, socket);
         result_tx.send(Ok(())).ok();
         runtime.block_on(receiver_future);
     })?;
@@ -89,16 +86,15 @@ struct Receiver<C: MediaClock> {
     desc: RxDescriptor,
     wb: Option<Worterbuch>,
     clock: C,
-    api_tx: mpsc::Sender<ReceiverApiMessage>,
     api_rx: mpsc::Receiver<ReceiverApiMessage>,
     last_timestamp: Option<u32>,
     last_sequence_number: Option<Seq>,
     timestamp_offset: Option<u64>,
     delay_buffer: AverageCalculationBuffer<i64>,
     rtp_packet_buffer: FloatingPointAudioBuffer,
-    latest_received_playout_time: u64,
+    latest_received_frame: u64,
     strict_checks_disabled: bool,
-    measured_link_offset: AverageCalculationBuffer<i64>,
+    measured_link_offset: AverageCalculationBuffer<u64>,
     socket: UdpSocket,
 }
 
@@ -109,7 +105,6 @@ impl<C: MediaClock> Receiver<C> {
         config: ReceiverConfig,
         wb: Option<Worterbuch>,
         clock: C,
-        api_tx: mpsc::Sender<ReceiverApiMessage>,
         api_rx: mpsc::Receiver<ReceiverApiMessage>,
         socket: UdpSocket,
     ) {
@@ -131,7 +126,6 @@ impl<C: MediaClock> Receiver<C> {
                 config,
                 wb,
                 clock,
-                api_tx,
                 api_rx,
                 last_sequence_number: None,
                 last_timestamp: None,
@@ -143,7 +137,7 @@ impl<C: MediaClock> Receiver<C> {
                     vec![0f32; packet_buffer_len].into(),
                     desc_rx,
                 ),
-                latest_received_playout_time: 0,
+                latest_received_frame: 0,
                 strict_checks_disabled: true,
                 measured_link_offset: AverageCalculationBuffer::new(measured_link_offset_buffer),
                 socket,
@@ -169,8 +163,7 @@ impl<C: MediaClock> Receiver<C> {
         loop {
             select! {
                 Some(api_msg) = self.api_rx.recv() => {
-                    let media_time_at_reception = self.clock.current_media_time()?;
-                    self.handle_api_message(api_msg,media_time_at_reception).await?;
+                    self.handle_api_message(api_msg)?;
                 },
                 Ok((len, addr)) = self.socket.recv_from(&mut receive_buffer) => {
                     let time = self.clock.current_media_time()?;
@@ -186,117 +179,71 @@ impl<C: MediaClock> Receiver<C> {
         Ok(())
     }
 
-    async fn handle_api_message(
-        &mut self,
-        api_msg: ReceiverApiMessage,
-        time: u64,
-    ) -> Aes67Vsc2Result<()> {
+    fn handle_api_message(&mut self, api_msg: ReceiverApiMessage) -> Aes67Vsc2Result<()> {
         match api_msg {
             ReceiverApiMessage::GetInfo { tx } => _ = tx.send(self.desc.clone()),
-            ReceiverApiMessage::DataRequest { req, tx } => self.send_audio(req, tx, time).await,
+            ReceiverApiMessage::DataRequest { req, tx } => _ = tx.send(self.write_out_buf(req)),
             ReceiverApiMessage::Stop => self.subsys.request_shutdown(),
         }
         Ok(())
     }
 
-    async fn send_audio(
-        &mut self,
-        req: AudioDataRequest,
-        tx: oneshot::Sender<DataState>,
-        time: u64,
-    ) {
-        if self.latest_received_playout_time == 0 {
-            tx.send(DataState::NotReady).ok();
-            return;
-        }
-
-        // expected: time < req.playout_time && req.playout_time + req.buf.len <= time + link offset
-        // because of this, req.buf.len should be a fraction of the link offset, max half the link offset
-
-        if !self.strict_checks_disabled && time > req.playout_time {
-            tx.send(DataState::Missed).ok();
-            return;
-        }
-
+    fn write_out_buf(&mut self, req: AudioDataRequest) -> DataState {
+        // get the playout buffer
         // this is safe because the thread from which we borrow this buffer is blocked until we send
         // the response back, so no concurrent reads and writes can occur
         let buf = unsafe { req.buffer.buffer_mut::<f32>() };
 
-        let last_frame_in_request_buffer = req.playout_time + buf.len() as u64 - 1;
-        // latest received playout time must be greater than end of requested buffer
-        let data_ready_since =
-            self.latest_received_playout_time as i64 - last_frame_in_request_buffer as i64;
-
-        let data_ready_since_msec = (data_ready_since as f64 * 1_000.0
-            / self.desc.audio_format.sample_rate as f64)
-            .floor()
-            .abs() as i64;
-
-        if data_ready_since_msec.abs() > (self.config.buffer_time as f64 * 1_000.0).floor() as i64 {
-            // data is either too old or too far ahead in the future
-            let link_offset = self.desc.link_offset;
-
-            if data_ready_since > 0 {
-                warn!(
-                    "Requested packet for playout time that is {data_ready_since_msec} ms in the past (link offset is {link_offset} ms), discarding request.)"
-                );
-                tx.send(DataState::Missed).ok();
-            } else {
-                warn!(
-                    "Requested packet for playout time that is {data_ready_since_msec} ms in the future, discarding request.)"
-                );
-                tx.send(DataState::SyncError).ok();
-            }
-            return;
+        if self.latest_received_frame == 0 {
+            return DataState::NotReady;
         }
-        if data_ready_since < 0 {
-            // data not received yet
-            let data_ready_in = -data_ready_since;
-            self.delay_data_request(req, tx, data_ready_in).await;
-        } else {
-            self.measure_link_offset(data_ready_since);
-            let state = self.rtp_packet_buffer.read(buf, req.playout_time);
-            tx.send(state).ok();
+
+        let buf_frames = buf.len() / self.desc.audio_format.frame_format.channels;
+        let last_frame_in_request_buffer = req.playout_time + buf_frames as u64 - 1;
+
+        if last_frame_in_request_buffer > self.latest_received_frame {
+            // we have not received enough data to fill the buffer yet
+            debug!(
+                "Not all requested frames have been received yet (requested frames: [{}; {}]; last received frame: {})!",
+                req.playout_time, last_frame_in_request_buffer, self.latest_received_frame
+            );
+            return DataState::NotReady;
         }
+
+        let oldest_frame_in_buffer =
+            self.latest_received_frame - self.rtp_packet_buffer.frames() as u64 + 1;
+        if oldest_frame_in_buffer > req.playout_time {
+            warn!(
+                "The requested data is not in the receiver buffer anymore (requested frames: [{}; {}]; oldest frame in buffer: {})!",
+                req.playout_time, last_frame_in_request_buffer, oldest_frame_in_buffer
+            );
+            return DataState::Missed;
+        }
+
+        self.measure_link_offset(req.playout_time);
+
+        self.rtp_packet_buffer.read(buf, req.playout_time)
     }
 
-    fn measure_link_offset(&mut self, data_ready_since: i64) {
+    fn measure_link_offset(&mut self, requested_playout_time: u64) {
+        let data_ready_since = self.latest_received_frame
+            + self.desc.frames_in_link_offset() as u64
+            - requested_playout_time;
+
         if let Some(measured_link_offset) = self.measured_link_offset.update(data_ready_since) {
             let link_offset_ms =
                 measured_link_offset as f32 / self.desc.audio_format.sample_rate as f32 * 1_000.0;
 
             if link_offset_ms < self.desc.link_offset {
                 info!(
-                    "measured minimum link offset: {measured_link_offset} frames / {link_offset_ms:.1} ms"
+                    "Measured minimum link offset: {measured_link_offset} frames / {link_offset_ms:.1} ms"
                 );
             } else {
                 warn!(
-                    "measured minimum  link offset: {measured_link_offset} frames / {link_offset_ms:.1} ms"
+                    "Measured minimum  link offset: {measured_link_offset} frames / {link_offset_ms:.1} ms"
                 );
             }
         }
-    }
-
-    async fn delay_data_request(
-        &mut self,
-        req: AudioDataRequest,
-        tx: oneshot::Sender<DataState>,
-        data_ready_in: i64,
-    ) {
-        let data_ready_in_usec = (data_ready_in as f64 * 1_000_000.0
-            / self.desc.audio_format.sample_rate as f64)
-            .floor() as u64;
-        let delay = Duration::from_micros(data_ready_in_usec);
-        let atx = self.api_tx.clone();
-        trace!(
-            "Delaying data request by {data_ready_in} frames / {data_ready_in_usec} µs, data not yet received!"
-        );
-        spawn(async move {
-            sleep(delay).await;
-            atx.send(ReceiverApiMessage::DataRequest { req, tx })
-                .await
-                .ok();
-        });
     }
 
     fn rtp_data_received(
@@ -336,7 +283,7 @@ impl<C: MediaClock> Receiver<C> {
             let expected_ts = last_ts.wrapping_add(self.desc.frames_per_packet() as u32);
             if seq != expected_seq {
                 warn!(
-                    "inconsistent sequence number: {} (last was {})",
+                    "Inconsistent sequence number: {} (last was {})",
                     u16::from(seq),
                     u16::from(last_seq)
                 );
@@ -346,12 +293,12 @@ impl<C: MediaClock> Receiver<C> {
                     expected_ts as i64 + self.desc.frames_per_packet() as i64 * diff as i64;
                 if consistent_ts == ts as i64 {
                     info!(
-                        "timestamp of out-of-order packet is consistent with sequence id, queuing it for playout"
+                        "Timestamp of out-of-order packet is consistent with sequence id, queuing it for playout"
                     );
                     // TODO report out-of-order packets
                 } else {
                     warn!(
-                        "timestamp of out-of-order packet is not consistent with sequence id, discarding it"
+                        "Timestamp of out-of-order packet is not consistent with sequence id, discarding it"
                     );
                     // TODO report misbehaving sender/polluted multicast group
                     return Ok(());
@@ -374,42 +321,45 @@ impl<C: MediaClock> Receiver<C> {
         self.last_sequence_number = Some(seq);
         self.last_timestamp = Some(ts);
 
-        if let Some(ingress_timestamp) = self.unwrapped_timestamp(&rtp) {
-            let playout_time = ingress_timestamp + self.desc.frames_in_link_offset() as u64;
-            if media_time_at_reception > playout_time {
-                trace!("Packet {} is late for playout.", u16::from(seq));
-                // TODO report late packet
-                if !self.strict_checks_disabled {
-                    return Ok(());
-                }
-            }
-            if ingress_timestamp > media_time_at_reception {
-                let diff = ingress_timestamp - media_time_at_reception;
-                let diff_usec =
-                    (diff as f64 * 1_000_000.0 / self.desc.audio_format.sample_rate as f64) as u64;
-                // TODO this could well happen in local testing due to send jitter. On an actual network it's very unlikely
-                warn!(
-                    "Packet {} was received {diff} frames / {diff_usec} µs before it was sent, sender and receiver clocks must be out of sync.",
-                    u16::from(seq)
-                );
-                if !self.strict_checks_disabled {
-                    return Ok(());
-                }
-            }
-            let delay = media_time_at_reception as i64 - ingress_timestamp as i64;
-            if let Some(average) = self.delay_buffer.update(delay) {
-                let micros = (average * 1_000_000) / self.desc.audio_format.sample_rate as i64;
-                let packets = average as f32 / self.desc.frames_per_packet() as f32;
-                info!("Network delay: {average} frames / {micros} µs / {packets:.1} packets");
-            }
-            let last_received_frame =
-                playout_time + self.desc.frames_in_buffer(rtp.payload()) as u64 - 1;
-            if last_received_frame > self.latest_received_playout_time {
-                self.latest_received_playout_time = last_received_frame;
-            }
+        let Some(ingress_timestamp) = self.unwrapped_timestamp(&rtp) else {
+            return Ok(());
+        };
 
-            self.rtp_packet_buffer.insert(rtp.payload(), playout_time);
+        let playout_time = ingress_timestamp + self.desc.frames_in_link_offset() as u64;
+        if media_time_at_reception > playout_time {
+            trace!("Packet {} is late for playout.", u16::from(seq));
+            // TODO report late packet
+            if !self.strict_checks_disabled {
+                return Ok(());
+            }
         }
+        if ingress_timestamp > media_time_at_reception {
+            let diff = ingress_timestamp - media_time_at_reception;
+            let diff_usec =
+                (diff as f64 * 1_000_000.0 / self.desc.audio_format.sample_rate as f64) as u64;
+            // TODO this could well happen in local testing due to send jitter. On an actual network it's very unlikely
+            warn!(
+                "Packet {} was received {diff} frames / {diff_usec} µs before it was sent, sender and receiver clocks must be out of sync.",
+                u16::from(seq)
+            );
+            if !self.strict_checks_disabled {
+                return Ok(());
+            }
+        }
+        let delay = media_time_at_reception as i64 - ingress_timestamp as i64;
+        if let Some(average) = self.delay_buffer.update(delay) {
+            let micros = (average * 1_000_000) / self.desc.audio_format.sample_rate as i64;
+            let packets = average as f32 / self.desc.frames_per_packet() as f32;
+            info!("Network delay: {average} frames / {micros} µs / {packets:.1} packets");
+        }
+        let last_received_frame =
+            ingress_timestamp + self.desc.frames_in_buffer(rtp.payload()) as u64 - 1;
+        if last_received_frame > self.latest_received_frame {
+            self.latest_received_frame = last_received_frame;
+        }
+
+        self.rtp_packet_buffer
+            .insert(rtp.payload(), ingress_timestamp);
 
         Ok(())
     }

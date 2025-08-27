@@ -234,7 +234,7 @@ impl RxDescriptor {
     }
 
     pub(crate) fn frames_in_buffer(&self, buffer: &[u8]) -> usize {
-        buffer.len() / self.bytes_per_sample()
+        buffer.len() / self.bytes_per_frame()
     }
 
     // pub(crate) fn frames_per_link_offset(&self, link_offset: MilliSeconds) -> usize {

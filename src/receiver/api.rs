@@ -23,6 +23,7 @@ use tracing::instrument;
 pub enum DataState {
     Ready,
     NotReady,
+    ReceiverNotReady,
     Missed,
     InvalidChannelNumber,
     SyncError,

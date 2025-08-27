@@ -9,19 +9,23 @@
 #include <unistd.h>
 #include "../../include/aes67-vsc-2.h"
 
-// TODO read config from file / return audio format from receiver after parsing SDP
-// TODO should SDP be parsed in host or library?
-static const unsigned int SAMPLE_RATE = 48000;
-static const unsigned int CYCLE_TIME = 96; // this should be half the frames that fit into the link offset or less
-static const unsigned int CHANNELS = 2;
+// TODO read config from file
+static const char RECEIVER_ID[] = "alsa-1";
+static const char INTERFACE_IP[] = "192.168.178.39";
+static const float LINK_OFFSET = 420.0;
 static const char SDP[] = "v=0\r\no=- 10943522194 10943522206 IN IP4 192.168.178.97\r\ns=AVIO-Bluetooth : 2\r\ni=2 channels: Left, Right\r\nc=IN IP4 239.69.232.56/32\r\nt=0 0\r\na=keywds:Dante\r\na=recvonly\r\nm=audio 5004 RTP/AVP 97\r\na=rtpmap:97 L24/48000/2\r\na=ptime:1\r\na=ts-refclk:ptp=IEEE1588-2008:00-1D-C1-FF-FE-0E-10-C4:0\r\na=mediaclk:direct=0\r\n";
+static const unsigned int ALSA_FRAMES_PER_CYCLE = 48;
+
+// TODO read from SDP
+static const unsigned int SAMPLE_RATE = 48000;
+static const unsigned int CHANNELS = 2;
 
 Aes67VscReceiverConfig_t receiver_config = {
-    id : "alsa-1",
+    id : RECEIVER_ID,
     sdp : SDP,
-    link_offset : 4.0,
-    buffer_time : 20.0,
-    interface_ip : "192.168.178.39"
+    link_offset : LINK_OFFSET,
+    buffer_time : 20.0 * LINK_OFFSET,
+    interface_ip : INTERFACE_IP
 };
 
 static volatile int keep_running = 1;
@@ -38,13 +42,25 @@ void int_handler(int dummy)
     }
 }
 
-uint64_t current_media_time()
+uint64_t current_time_media(struct timespec *now)
 {
-    struct timespec now;
-    clock_gettime(CLOCK_TAI, &now);
-    double now_d = (double)now.tv_sec + (double)now.tv_nsec / 1000000000.0;
-    double media_time_d = now_d * SAMPLE_RATE;
-    return (uint64_t)round(media_time_d);
+    clock_gettime(CLOCK_TAI, now);
+    return (uint64_t)(*now).tv_sec * SAMPLE_RATE + (uint64_t)(*now).tv_nsec * SAMPLE_RATE / 1000000000;
+}
+
+uint64_t current_time_usec(struct timespec *now)
+{
+    clock_gettime(CLOCK_TAI, now);
+    return (uint64_t)(*now).tv_sec * 1000000 + (uint64_t)(*now).tv_nsec / 1000;
+}
+
+void mute(int *mute)
+{
+    if (!*mute)
+    {
+        fprintf(stderr, "mute ON\n");
+    }
+    *mute = 200;
 }
 
 int set_thread_prio()
@@ -90,6 +106,21 @@ int main(int argc, char *argv[])
     }
     uint32_t receiver = (uint32_t)maybe_receiver;
 
+    // create and zero playout buffer
+    uint64_t buffer_len = ALSA_FRAMES_PER_CYCLE * CHANNELS;
+    float buffer[buffer_len];
+
+    uint64_t link_offset_frames = LINK_OFFSET * SAMPLE_RATE / 1000;
+
+    // used to keep track of current time
+    struct timespec now;
+
+    // warmup, wait for receiver to actually receive data
+    while (keep_running && aes67_vsc_receive(receiver, current_time_media(&now) - link_offset_frames, (size_t)buffer, buffer_len) == AES_VSC_ERROR_RECEIVER_NOT_READY_YET)
+    {
+        usleep(100000);
+    }
+
     // Open default PCM device
     rc = snd_pcm_open(&pcm_handle, "default", SND_PCM_STREAM_PLAYBACK, 0);
     if (rc < 0)
@@ -122,52 +153,85 @@ int main(int argc, char *argv[])
     // Prepare audio interface
     snd_pcm_prepare(pcm_handle);
 
-    // create playout buffer
-    uint64_t buffer_len = CYCLE_TIME * CHANNELS;
-    float buffer[buffer_len];
+    // start playout
+
     for (int i = 0; i < buffer_len; i++)
     {
         buffer[i] = 0.0;
     }
 
-    uint64_t media_time = current_media_time();
+    uint64_t media_time = (current_time_media(&now) / ALSA_FRAMES_PER_CYCLE) * ALSA_FRAMES_PER_CYCLE;
+
+    int muted = 0;
 
     while (keep_running)
     {
+        uint64_t playout_time = media_time - link_offset_frames;
 
-        // write data fetched in last cycle
-        rc = snd_pcm_writei(pcm_handle, buffer, CYCLE_TIME);
+        uint8_t res = aes67_vsc_receive(receiver, playout_time, (size_t)buffer, buffer_len);
 
+        if (res == AES_VSC_ERROR_CLOCK_SYNC_ERROR)
+        {
+            fprintf(stderr, "we are out of sync with the receiver's clock. something is very wrong here\n");
+            return 1;
+        }
+
+        if (res == AES_VSC_ERROR_NO_DATA)
+        {
+            if (media_time > current_time_media(&now))
+            {
+                // we have freewheeled too far ahead, let's wait and try again
+                usleep(1);
+                // skip writing to playout buffer and incrementing cycle
+                continue;
+            }
+            else
+            {
+                // assuming the link offset and alsa buffer size are configured correctly and there is no clock sync isue this should only happen if the sender stopped sending packets or there is a network issue
+                for (int i = 0; i < buffer_len; i++)
+                {
+                    buffer[i] = 0.0;
+                }
+                if (!muted)
+                {
+                    fprintf(stderr, "no data received even though we are not ahead of the clock\n");
+                }
+                mute(&muted);
+            }
+        }
+
+        if (muted)
+        {
+            muted--;
+            for (int i = 0; i < buffer_len; i++)
+            {
+                buffer[i] = 0.0;
+            }
+            if (!muted)
+            {
+                fprintf(stderr, "mute OFF\n");
+            }
+        }
+
+        // write audio data to alsa buffer
+        rc = snd_pcm_writei(pcm_handle, buffer, ALSA_FRAMES_PER_CYCLE);
         if (rc == -EPIPE)
         {
             // Underrun
-            fprintf(stderr, "underrun occurred\n");
+            if (!muted)
+            {
+                fprintf(stderr, "underrun occurred\n");
+            }
+            mute(&muted);
             snd_pcm_prepare(pcm_handle);
         }
         else if (rc < 0)
         {
             fprintf(stderr, "error writing to PCM device: %s\n", snd_strerror(rc));
         }
-
-        // advance media clock
-        media_time += CYCLE_TIME;
-
-        // pre-fetch data for next cycle
-        uint8_t res = aes67_vsc_receive(receiver, media_time, (size_t)buffer, buffer_len);
-
-        if (res == 10)
+        else
         {
-            fprintf(stderr, "we are ahead of the receiver's clock. something is very wrong here\n");
-            return 1;
-        }
-
-        // no data received, filll the buffer with zeros
-        if (res != 0)
-        {
-            for (int i = 0; i < buffer_len; i++)
-            {
-                buffer[i] = 0.0;
-            }
+            media_time += rc;
         }
     }
 

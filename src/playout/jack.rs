@@ -532,6 +532,9 @@ fn process<C: MediaClock>(
                 Some(DataState::NotReady) => {
                     todo!()
                 }
+                Some(DataState::ReceiverNotReady) => {
+                    todo!()
+                }
                 Some(DataState::InvalidChannelNumber) => {
                     error!("Channel mismatch between JACK and receiver!");
                     return Control::Quit;

@@ -113,6 +113,10 @@ impl FloatingPointAudioBuffer {
         Self { buf, desc }
     }
 
+    pub fn frames(&self) -> usize {
+        self.buf.len() / self.desc.audio_format.frame_format.channels
+    }
+
     pub fn insert(&mut self, payload: &[u8], playout_time: u64) {
         let sample_format = &self.desc.audio_format.frame_format.sample_format;
         let buffer_len = self.buf.len();

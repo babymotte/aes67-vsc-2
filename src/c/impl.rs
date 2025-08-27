@@ -1,5 +1,5 @@
 use crate::{
-    AES_VSC_ERROR_CLOCK_SYNC_ERROR, AES_VSC_ERROR_INVALID_CHANNEL,
+    AES_VSC_ERROR_CLOCK_SYNC_ERROR, AES_VSC_ERROR_INVALID_CHANNEL, AES_VSC_ERROR_NO_DATA,
     AES_VSC_ERROR_RECEIVER_BUFFER_UNDERRUN, AES_VSC_ERROR_RECEIVER_NOT_FOUND,
     AES_VSC_ERROR_RECEIVER_NOT_READY_YET, AES_VSC_OK, Aes67VscReceiverConfig,
     config::Config,
@@ -99,7 +99,8 @@ pub fn try_receive(
 
     match receiver.receive_all(playout_time, buffer_ptr, buffer_len)? {
         DataState::Ready => Ok(AES_VSC_OK),
-        DataState::NotReady => Ok(AES_VSC_ERROR_RECEIVER_NOT_READY_YET),
+        DataState::NotReady => Ok(AES_VSC_ERROR_NO_DATA),
+        DataState::ReceiverNotReady => Ok(AES_VSC_ERROR_RECEIVER_NOT_READY_YET),
         DataState::InvalidChannelNumber => Ok(AES_VSC_ERROR_INVALID_CHANNEL),
         DataState::Missed => Ok(AES_VSC_ERROR_RECEIVER_BUFFER_UNDERRUN),
         DataState::SyncError => Ok(AES_VSC_ERROR_CLOCK_SYNC_ERROR),
@@ -115,6 +116,21 @@ pub fn try_destroy_receiver(id: u32) -> Aes67Vsc2Result<u8> {
 #[cfg(feature = "headers")] // c.f. the `Cargo.toml` section
 pub fn generate_headers() -> ::std::io::Result<()> {
     ::safer_ffi::headers::builder()
+        .with_text_after_guard(
+            "static const unsigned int AES_VSC_OK = 0x00;
+static const unsigned int AES_VSC_ERROR_NOT_INITIALIZED = 0x01;
+static const unsigned int AES_VSC_ERROR_ALREADY_INITIALIZED = 0x02;
+static const unsigned int AES_VSC_ERROR_UNSUPPORTED_BIT_DEPTH = 0x03;
+static const unsigned int AES_VSC_ERROR_UNSUPPORTED_SAMPLE_RATE = 0x04;
+static const unsigned int AES_VSC_ERROR_VSC_NOT_CREATED = 0x05;
+static const unsigned int AES_VSC_ERROR_RECEIVER_NOT_FOUND = 0x06;
+static const unsigned int AES_VSC_ERROR_SENDER_NOT_FOUND = 0x07;
+static const unsigned int AES_VSC_ERROR_INVALID_CHANNEL = 0x08;
+static const unsigned int AES_VSC_ERROR_RECEIVER_BUFFER_UNDERRUN = 0x09;
+static const unsigned int AES_VSC_ERROR_CLOCK_SYNC_ERROR = 0x0A;
+static const unsigned int AES_VSC_ERROR_RECEIVER_NOT_READY_YET = 0x0B;
+static const unsigned int AES_VSC_ERROR_NO_DATA = 0x0C;",
+        )
         .to_file("./include/aes67-vsc-2.h")?
         .generate()
 }
