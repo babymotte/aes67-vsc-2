@@ -290,6 +290,10 @@ pub fn duration_to_frames(duration: Duration, sample_rate: FramesPerSecond) -> f
     (sample_rate as f64 * duration.as_micros() as f64) / 1_000_000.0
 }
 
+pub fn frames_to_duration(frames: Frames, sample_rate: FramesPerSecond) -> Duration {
+    Duration::from_micros(((frames as f64 / sample_rate as f64) * 1_000_000.0).round() as u64)
+}
+
 pub fn packets_in_link_offset(link_offset: MilliSeconds, packet_time: MilliSeconds) -> usize {
     (link_offset / packet_time).round() as usize
 }

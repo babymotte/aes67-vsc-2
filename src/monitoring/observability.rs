@@ -223,7 +223,7 @@ impl ObservabilityActor {
 
     async fn publish_receiver(&self, name: &str, descriptor: RxDescriptor) {
         if let Some(wb) = &self.wb {
-            publish_individual(wb, topic!(ROOT_KEY, name), descriptor).await;
+            publish_individual(wb, topic!(ROOT_KEY, name, "config"), descriptor).await;
         };
     }
 

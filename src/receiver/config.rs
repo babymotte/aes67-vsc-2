@@ -17,7 +17,7 @@
 
 use crate::{
     error::{ConfigError, ConfigResult},
-    formats::{self, AudioFormat, FrameFormat, MilliSeconds, Seconds},
+    formats::{self, AudioFormat, FrameFormat, Frames, MilliSeconds, Seconds},
 };
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -227,5 +227,13 @@ impl RxDescriptor {
 
     pub fn to_link_offset(&self, samples: usize) -> usize {
         formats::to_link_offset(samples, self.audio_format.sample_rate)
+    }
+
+    pub fn duration_to_frames(&self, duration: Duration) -> f64 {
+        formats::duration_to_frames(duration, self.audio_format.sample_rate)
+    }
+
+    pub fn frames_to_duration(&self, frames: Frames) -> Duration {
+        formats::frames_to_duration(frames, self.audio_format.sample_rate)
     }
 }

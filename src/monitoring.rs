@@ -89,7 +89,10 @@ pub enum RxStats {
     },
     OutOfOrderPacket(Seq),
     MalformedRtpPacket(RtpReaderError),
-    LatePacket(Seq),
+    LatePacket {
+        seq: Seq,
+        delay: Frames,
+    },
     TimeTravellingPacket {
         sequence_number: Seq,
         ingress_timestamp: Frames,

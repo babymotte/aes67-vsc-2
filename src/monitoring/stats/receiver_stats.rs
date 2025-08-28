@@ -68,8 +68,8 @@ impl ReceiverStats {
             RxStats::MalformedRtpPacket(e) => {
                 warn!("received malformed rtp packet: {e:?}");
             }
-            RxStats::LatePacket(seq) => {
-                self.process_late_packet(seq, observ_tx).await;
+            RxStats::LatePacket { seq, delay } => {
+                self.process_late_packet(seq, delay, observ_tx).await;
             }
             RxStats::TimeTravellingPacket {
                 sequence_number,
@@ -220,8 +220,17 @@ impl ReceiverStats {
         // TODO collect stats + publish
     }
 
-    async fn process_late_packet(&self, seq: Seq, observ_tx: mpsc::Sender<ObservabilityEvent>) {
-        warn!("Packet {} is late for playout.", u16::from(seq));
+    async fn process_late_packet(
+        &self,
+        seq: Seq,
+        delay: Frames,
+        observ_tx: mpsc::Sender<ObservabilityEvent>,
+    ) {
+        warn!(
+            "Packet {} is {} frames late for playout.",
+            u16::from(seq),
+            delay
+        );
         // TODO collect stats + publish
     }
 }

@@ -41,7 +41,7 @@ use tokio::{
     net::UdpSocket,
     runtime, select,
     sync::{
-        mpsc::{self},
+        mpsc::{self, error::TrySendError},
         oneshot::{self},
     },
 };
@@ -100,6 +100,7 @@ struct Receiver<C: MediaClock> {
     timestamp_offset: Option<u64>,
     rtp_packet_buffer: FloatingPointAudioBuffer,
     latest_received_frame: u64,
+    latest_played_frame: u64,
     socket: UdpSocket,
     #[cfg(feature = "monitoring")]
     monitoring: Monitoring,
@@ -137,6 +138,7 @@ impl<C: MediaClock> Receiver<C> {
                     desc_rx,
                 ),
                 latest_received_frame: 0,
+                latest_played_frame: 0,
                 socket,
                 #[cfg(feature = "monitoring")]
                 monitoring,
@@ -248,6 +250,10 @@ impl<C: MediaClock> Receiver<C> {
             return DataState::NotReady;
         }
 
+        if last_frame_in_request_buffer > self.latest_played_frame {
+            self.latest_played_frame = last_frame_in_request_buffer;
+        }
+
         let oldest_frame_in_buffer =
             self.latest_received_frame - self.rtp_packet_buffer.frames() as u64 + 1;
         if oldest_frame_in_buffer > req.playout_time {
@@ -319,6 +325,9 @@ impl<C: MediaClock> Receiver<C> {
                     u16::from(last_seq)
                 );
 
+                // TODO if sequence number was skipped, note down the skipped sequence number until it is either received or played out
+                // if it is played out before it is received, report lost packet
+
                 let diff = seq - expected_seq;
                 let consistent_ts = expected_ts as i64 + frames_in_packet as i64 * diff as i64;
                 if consistent_ts == ts as i64 {
@@ -364,10 +373,14 @@ impl<C: MediaClock> Receiver<C> {
         };
 
         let playout_time = ingress_timestamp + self.desc.frames_in_link_offset() as u64;
-        if media_time_at_reception > playout_time {
+        if playout_time < self.latest_played_frame {
+            let delay = media_time_at_reception - playout_time;
             self.monitoring
                 .stats()
-                .send(Stats::Rx(RxStats::LatePacket(rtp.sequence_number())))
+                .send(Stats::Rx(RxStats::LatePacket {
+                    delay,
+                    seq: rtp.sequence_number(),
+                }))
                 .await
                 .ok();
             return Ok(());
@@ -384,16 +397,18 @@ impl<C: MediaClock> Receiver<C> {
                 .ok();
             return Ok(());
         }
-        self.monitoring
-            .stats()
-            .send(Stats::Rx(RxStats::PacketReceived {
-                seq,
-                payload_len: rtp.payload().len(),
-                ingress_timestamp,
-                media_time_at_reception,
-            }))
-            .await
-            .ok();
+        if let Err(TrySendError::Full(_)) =
+            self.monitoring
+                .stats()
+                .try_send(Stats::Rx(RxStats::PacketReceived {
+                    seq,
+                    payload_len: rtp.payload().len(),
+                    ingress_timestamp,
+                    media_time_at_reception,
+                }))
+        {
+            warn!("dropped stats message, buffer is full");
+        }
         let last_received_frame = ingress_timestamp + frames_in_packet as u64 - 1;
         if last_received_frame > self.latest_received_frame {
             self.latest_received_frame = last_received_frame;
