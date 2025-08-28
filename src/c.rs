@@ -58,11 +58,8 @@ pub struct Aes67VscReceiverConfig<'a> {
 /// * `id` - A string pointer to the receiver ID, which must be unique within the process (not within the virtual sound card!)
 /// * `audio_format` - The receiver's audio format
 #[ffi_export]
-fn aes67_vsc_create_receiver<'a>(
-    receiver_name: char_p::Ref<'_>,
-    config: &'a Aes67VscReceiverConfig<'a>,
-) -> i32 {
-    match try_create_receiver(receiver_name, config) {
+fn aes67_vsc_create_receiver<'a>(config: &'a Aes67VscReceiverConfig<'a>) -> i32 {
+    match try_create_receiver(config) {
         Ok(it) => it,
         Err(err) => -(err.error_code() as i32),
     }

@@ -103,7 +103,7 @@ int main(int argc, char *argv[])
     signal(SIGINT, int_handler);
     signal(SIGTERM, int_handler);
 
-    int32_t maybe_receiver = aes67_vsc_create_receiver("alsa-1", &receiver_config);
+    int32_t maybe_receiver = aes67_vsc_create_receiver(&receiver_config);
     if (maybe_receiver < 0)
     {
         int err = -maybe_receiver;

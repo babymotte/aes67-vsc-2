@@ -221,8 +221,8 @@ impl RxDescriptor {
         .round() as usize
     }
 
-    pub(crate) fn frames_in_buffer(&self, buffer: &[u8]) -> usize {
-        buffer.len() / self.bytes_per_frame()
+    pub(crate) fn frames_in_buffer(&self, buffer_len: usize) -> usize {
+        buffer_len / self.bytes_per_frame()
     }
 
     pub fn to_link_offset(&self, samples: usize) -> usize {

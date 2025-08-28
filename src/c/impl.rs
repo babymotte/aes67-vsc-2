@@ -32,7 +32,7 @@ fn init_vsc() -> VscApiResult<Arc<VirtualSoundCardApi>> {
     try_init().boxed()?;
     let vsc_name = env::var("AES67_VSC_NAME").unwrap_or("aes67-virtual-sound-card".to_owned());
     info!("Creating new VSC with name '{vsc_name}' …");
-    let vsc = VirtualSoundCardApi::new(vsc_name.clone())?;
+    let vsc = VirtualSoundCardApi::new_blocking(vsc_name.clone())?;
     info!("VSC '{}' created.", vsc_name);
     Ok(Arc::new(vsc))
 }
@@ -73,16 +73,12 @@ impl<'a> TryFrom<&Aes67VscReceiverConfig<'a>> for ReceiverConfig {
     }
 }
 
-pub fn try_create_receiver(
-    name: char_p::Ref<'_>,
-    config: &Aes67VscReceiverConfig,
-) -> ReceiverInternalResult<i32> {
-    let receiver_id = name.to_string();
+pub fn try_create_receiver(config: &Aes67VscReceiverConfig) -> ReceiverInternalResult<i32> {
     let config = match ReceiverConfig::try_from(config) {
         Ok(it) => it,
         Err(err) => return Ok(-(err.error_code() as i32)),
     };
-    let (receiver_api, id) = match VIRTUAL_SOUND_CARD.create_receiver(receiver_id, config) {
+    let (receiver_api, id) = match VIRTUAL_SOUND_CARD.create_receiver_blocking(config) {
         Ok(it) => it,
         Err(err) => return Ok(-(err.error_code() as i32)),
     };
@@ -111,7 +107,7 @@ pub fn try_receive(
 }
 
 pub fn try_destroy_receiver(id: u32) -> VscApiResult<u8> {
-    VIRTUAL_SOUND_CARD.destroy_receiver(id)?;
+    VIRTUAL_SOUND_CARD.destroy_receiver_blocking(id)?;
     Ok(AES_VSC_OK)
 }
 

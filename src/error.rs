@@ -168,6 +168,7 @@ pub enum Aes67Vsc2Error {
     AlsaError(#[from] Box<AlsaError>),
     #[error("Telemetry error: {0}")]
     TelemetryError(#[from] Box<TelemetryError>),
+    #[cfg(feature = "monitoring")]
     #[error("Worterbuch error: {0}")]
     WorterbuchError(#[from] Box<worterbuch_client::ConnectionError>),
 }

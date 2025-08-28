@@ -26,6 +26,7 @@ use std::{
 };
 use tokio::fs;
 use tracing::{info, instrument, warn};
+#[cfg(feature = "monitoring")]
 use worterbuch_client::topic;
 
 #[derive(Parser)]
@@ -187,6 +188,6 @@ impl Config {
     }
 
     pub fn instance_name(&self) -> String {
-        topic!(self.app.name, self.app.instance.name)
+        format!("{}/{}", self.app.name, self.app.instance.name)
     }
 }

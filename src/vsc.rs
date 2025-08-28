@@ -15,6 +15,8 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+#[cfg(feature = "monitoring")]
+use crate::monitoring::{Monitoring, ObservabilityEvent, VscEvent, start_monitoring_service};
 use crate::{
     error::{
         ReceiverInternalError, ReceiverInternalResult, ToBoxedResult, VscApiResult,
@@ -50,11 +52,35 @@ pub struct VirtualSoundCardApi {
 }
 
 impl VirtualSoundCardApi {
-    pub fn new(name: String) -> VscApiResult<Self> {
-        Ok(VirtualSoundCardApi::try_new(name).boxed()?)
+    pub fn new_blocking(name: String) -> VscApiResult<Self> {
+        Ok(VirtualSoundCardApi::try_new_blocking(name).boxed()?)
     }
 
-    fn try_new(name: String) -> VscInternalResult<Self> {
+    pub async fn new(name: String) -> VscApiResult<Self> {
+        Ok(VirtualSoundCardApi::try_new(name).await.boxed()?)
+    }
+
+    fn try_new_blocking(name: String) -> VscInternalResult<Self> {
+        let (result_rx, api_tx) = VirtualSoundCardApi::create_vsc(name)?;
+        result_rx.blocking_recv()??;
+        Ok(VirtualSoundCardApi { api_tx })
+    }
+
+    async fn try_new(name: String) -> VscInternalResult<Self> {
+        let (result_rx, api_tx) = VirtualSoundCardApi::create_vsc(name)?;
+        result_rx.await??;
+        Ok(VirtualSoundCardApi { api_tx })
+    }
+
+    fn create_vsc(
+        name: String,
+    ) -> Result<
+        (
+            oneshot::Receiver<Result<(), VscInternalError>>,
+            mpsc::Sender<VscApiMessage>,
+        ),
+        VscInternalError,
+    > {
         let (result_tx, result_rx) = oneshot::channel();
         let (api_tx, api_rx) = mpsc::channel(1024);
         thread::Builder::new()
@@ -71,23 +97,41 @@ impl VirtualSoundCardApi {
                 result_tx.send(Ok(())).ok();
                 runtime.block_on(vsc_future);
             })?;
-        result_rx.blocking_recv()??;
-        Ok(VirtualSoundCardApi { api_tx })
+        Ok((result_rx, api_tx))
     }
 
-    pub fn create_receiver(
+    pub fn create_receiver_blocking(
         &self,
-        id: String,
         config: ReceiverConfig,
     ) -> VscApiResult<(ReceiverApi, u32)> {
         let (tx, rx) = oneshot::channel();
         self.api_tx
-            .blocking_send(VscApiMessage::CreateReceiver(id, Box::new(config), tx))
+            .blocking_send(VscApiMessage::CreateReceiver(
+                config.id.clone(),
+                Box::new(config),
+                tx,
+            ))
             .ok();
         Ok(rx.blocking_recv().map_err(ReceiverInternalError::from)??)
     }
 
-    pub fn destroy_receiver(&self, id: u32) -> VscApiResult<()> {
+    pub async fn create_receiver(
+        &self,
+        config: ReceiverConfig,
+    ) -> VscApiResult<(ReceiverApi, u32)> {
+        let (tx, rx) = oneshot::channel();
+        self.api_tx
+            .send(VscApiMessage::CreateReceiver(
+                config.id.clone(),
+                Box::new(config),
+                tx,
+            ))
+            .await
+            .ok();
+        Ok(rx.await.map_err(ReceiverInternalError::from)??)
+    }
+
+    pub fn destroy_receiver_blocking(&self, id: u32) -> VscApiResult<()> {
         let (tx, rx) = oneshot::channel();
         self.api_tx
             .blocking_send(VscApiMessage::DestroyReceiverById(id, tx))
@@ -95,10 +139,25 @@ impl VirtualSoundCardApi {
         Ok(rx.blocking_recv().map_err(ReceiverInternalError::from)??)
     }
 
-    pub fn close(self) -> VscApiResult<()> {
+    pub async fn destroy_receiver(&self, id: u32) -> VscApiResult<()> {
+        let (tx, rx) = oneshot::channel();
+        self.api_tx
+            .send(VscApiMessage::DestroyReceiverById(id, tx))
+            .await
+            .ok();
+        Ok(rx.await.map_err(ReceiverInternalError::from)??)
+    }
+
+    pub fn close_blocking(self) -> VscApiResult<()> {
         let (tx, rx) = oneshot::channel();
         self.api_tx.blocking_send(VscApiMessage::Stop(tx)).ok();
         Ok(rx.blocking_recv().map_err(VscInternalError::from).boxed()?)
+    }
+
+    pub async fn close(self) -> VscApiResult<()> {
+        let (tx, rx) = oneshot::channel();
+        self.api_tx.send(VscApiMessage::Stop(tx)).await.ok();
+        Ok(rx.await.map_err(VscInternalError::from).boxed()?)
     }
 }
 
@@ -111,10 +170,14 @@ struct VirtualSoundCard {
     rx_names: HashMap<u32, String>,
     _tx_counter: u32,
     rx_counter: u32,
+    #[cfg(feature = "monitoring")]
+    monitoring: Monitoring,
 }
 
 impl VirtualSoundCard {
     fn new(name: String, api_rx: mpsc::Receiver<VscApiMessage>) -> Self {
+        #[cfg(feature = "monitoring")]
+        let monitoring = start_monitoring_service(name.clone());
         VirtualSoundCard {
             name,
             api_rx,
@@ -124,11 +187,20 @@ impl VirtualSoundCard {
             rx_names: HashMap::new(),
             _tx_counter: 0,
             rx_counter: 0,
+            #[cfg(feature = "monitoring")]
+            monitoring,
         }
     }
 
     async fn run(mut self) {
         let vsc_id = self.name.clone();
+
+        #[cfg(feature = "monitoring")]
+        self.monitoring
+            .observability()
+            .send(ObservabilityEvent::VscEvent(VscEvent::VscCreated))
+            .await
+            .ok();
 
         while let Some(msg) = self.api_rx.recv().await {
             match msg {
@@ -160,7 +232,14 @@ impl VirtualSoundCard {
 
         let desc = RxDescriptor::try_from(&config)?;
         let clock = SystemMediaClock::new(desc.audio_format);
-        let receiver_api = start_receiver(display_name.clone(), config, clock).await?;
+        let receiver_api = start_receiver(
+            display_name.clone(),
+            config,
+            clock,
+            #[cfg(feature = "monitoring")]
+            self.monitoring.child(display_name.clone()),
+        )
+        .await?;
 
         self.rx_names.insert(id, name.clone());
         self.rxs.insert(id, receiver_api.clone());

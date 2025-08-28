@@ -60,7 +60,6 @@ typedef struct Aes67VscReceiverConfig {
  */
 int32_t
 aes67_vsc_create_receiver (
-    char const * receiver_name,
     Aes67VscReceiverConfig_t const * config);
 
 /** \brief

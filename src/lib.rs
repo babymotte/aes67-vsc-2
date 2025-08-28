@@ -19,6 +19,8 @@ pub mod buffer;
 pub mod config;
 pub mod error;
 pub mod formats;
+#[cfg(feature = "monitoring")]
+pub mod monitoring;
 pub mod receiver;
 pub mod sender;
 pub mod serde;
@@ -27,6 +29,7 @@ pub mod telemetry;
 pub mod time;
 pub mod utils;
 pub mod vsc;
+#[cfg(feature = "monitoring")]
 pub mod worterbuch;
 
 #[cfg(feature = "c")]
