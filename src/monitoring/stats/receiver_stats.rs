@@ -1,16 +1,15 @@
-use std::{
-    collections::{HashMap, HashSet},
-    net::IpAddr,
-};
-
 use crate::{
     formats::Frames,
-    monitoring::{ObservabilityEvent, ReceiverStatsReport, RxStats},
+    monitoring::{ObservabilityEvent, ReceiverStatsReport, RxStats, StatsReport},
     receiver::config::RxDescriptor,
     utils::AverageCalculationBuffer,
 };
 use miette::{IntoDiagnostic, Result};
 use rtp_rs::Seq;
+use std::{
+    collections::{HashMap, HashSet},
+    net::IpAddr,
+};
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
@@ -152,7 +151,14 @@ impl ReceiverStats {
             let micros = (average * 1_000_000) / desc.audio_format.sample_rate as u64;
             let packets = average as f32 / frames_in_packet as f32;
             info!("Network delay: {average} frames / {micros} µs / {packets:.1} packets");
-            // TODO send observability event
+            observ_tx
+                .send(ObservabilityEvent::Stats(StatsReport::Receiver(
+                    ReceiverStatsReport::NetworkDelay {
+                        receiver: self.id.clone(),
+                        delay,
+                    },
+                )))
+                .await;
         }
 
         self.skipped_packets.remove(&ingress_timestamp);
@@ -176,14 +182,22 @@ impl ReceiverStats {
 
             if link_offset_ms < desc.link_offset {
                 info!(
-                    "Measured minimum link offset: {measured_link_offset} frames / {link_offset_ms:.1} ms"
+                    "Measured link offset: {measured_link_offset} frames / {link_offset_ms:.1} ms"
                 );
             } else {
                 warn!(
-                    "Measured minimum  link offset: {measured_link_offset} frames / {link_offset_ms:.1} ms"
+                    "Measured link offset: {measured_link_offset} frames / {link_offset_ms:.1} ms"
                 );
             }
-            // TODO send observability event
+            observ_tx
+                .send(ObservabilityEvent::Stats(StatsReport::Receiver(
+                    ReceiverStatsReport::MeasuredLinkOffset {
+                        receiver: self.id.clone(),
+                        link_offset_frames: measured_link_offset,
+                        link_offset_ms,
+                    },
+                )))
+                .await;
         }
 
         let mut missed_timestamps = vec![];

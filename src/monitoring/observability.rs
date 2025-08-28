@@ -1,4 +1,11 @@
-use crate::{monitoring::ObservabilityEvent, receiver::config::RxDescriptor};
+use crate::{
+    formats::{Frames, MilliSeconds},
+    monitoring::{
+        ObservabilityEvent, ReceiverEvent, ReceiverStatsReport, SenderEvent, SenderStatsReport,
+        StatsReport, VscEvent, VscStatsReport,
+    },
+    receiver::config::RxDescriptor,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{collections::HashMap, time::Duration};
@@ -18,6 +25,9 @@ const ROOT_KEY: &str = "aes67-vsc";
 struct ReceiverData {
     config: RxDescriptor,
     clock_offset: u64,
+    network_delay: u64,
+    measured_link_offset_frames: u64,
+    measured_link_offset_ms: f32,
 }
 
 pub async fn observability(
@@ -137,33 +147,33 @@ impl ObservabilityActor {
         }
     }
 
-    async fn process_vsc_event(&mut self, e: super::VscEvent) {
+    async fn process_vsc_event(&mut self, e: VscEvent) {
         match e {
-            super::VscEvent::VscCreated => self.vsc_created().await,
+            VscEvent::VscCreated => self.vsc_created().await,
         }
     }
 
-    async fn process_sender_event(&mut self, e: super::SenderEvent) {
+    async fn process_sender_event(&mut self, e: SenderEvent) {
         match e {
-            super::SenderEvent::SenderCreated { name, sdp } => self.sender_created(name, sdp).await,
-            super::SenderEvent::SenderDestroyed { name } => self.sender_destroyed(name).await,
+            SenderEvent::SenderCreated { name, sdp } => self.sender_created(name, sdp).await,
+            SenderEvent::SenderDestroyed { name } => self.sender_destroyed(name).await,
         }
     }
 
-    async fn process_receiver_event(&mut self, e: super::ReceiverEvent) {
+    async fn process_receiver_event(&mut self, e: ReceiverEvent) {
         match e {
-            super::ReceiverEvent::ReceiverCreated { name, descriptor } => {
+            ReceiverEvent::ReceiverCreated { name, descriptor } => {
                 self.receiver_created(name, descriptor).await
             }
-            super::ReceiverEvent::ReceiverDestroyed { name } => self.receiver_destroyed(name).await,
+            ReceiverEvent::ReceiverDestroyed { name } => self.receiver_destroyed(name).await,
         }
     }
 
-    async fn process_stats_report(&mut self, e: super::StatsReport) {
+    async fn process_stats_report(&mut self, e: StatsReport) {
         match e {
-            super::StatsReport::Vsc(r) => self.process_vsc_stats_report(r).await,
-            super::StatsReport::Sender(r) => self.process_sender_stats_report(r).await,
-            super::StatsReport::Receiver(r) => self.process_receiver_stats_report(r).await,
+            StatsReport::Vsc(r) => self.process_vsc_stats_report(r).await,
+            StatsReport::Sender(r) => self.process_sender_stats_report(r).await,
+            StatsReport::Receiver(r) => self.process_receiver_stats_report(r).await,
         }
     }
 
@@ -185,6 +195,9 @@ impl ObservabilityActor {
     async fn receiver_created(&mut self, name: String, descriptor: RxDescriptor) {
         let data = ReceiverData {
             clock_offset: 0,
+            network_delay: 0,
+            measured_link_offset_frames: 0,
+            measured_link_offset_ms: 0.0,
             config: descriptor.clone(),
         };
         self.receivers.insert(name.clone(), data.clone());
@@ -196,18 +209,33 @@ impl ObservabilityActor {
         self.unpublish_receiver(&name).await;
     }
 
-    async fn process_vsc_stats_report(&mut self, report: super::VscStatsReport) {
+    async fn process_vsc_stats_report(&mut self, report: VscStatsReport) {
         match report {}
     }
 
-    async fn process_sender_stats_report(&mut self, report: super::SenderStatsReport) {
+    async fn process_sender_stats_report(&mut self, report: SenderStatsReport) {
         match report {}
     }
 
-    async fn process_receiver_stats_report(&mut self, report: super::ReceiverStatsReport) {
+    async fn process_receiver_stats_report(&mut self, report: ReceiverStatsReport) {
         match report {
-            super::ReceiverStatsReport::MediaClockOffsetChanged { receiver, offset } => {
+            ReceiverStatsReport::MediaClockOffsetChanged { receiver, offset } => {
                 self.receiver_clock_offset_changed(receiver, offset).await;
+            }
+            ReceiverStatsReport::NetworkDelay { receiver, delay } => {
+                self.receiver_network_delay_changed(receiver, delay).await;
+            }
+            ReceiverStatsReport::MeasuredLinkOffset {
+                receiver,
+                link_offset_frames,
+                link_offset_ms,
+            } => {
+                self.receiver_measured_link_offset_changed(
+                    receiver,
+                    link_offset_frames,
+                    link_offset_ms,
+                )
+                .await;
             }
         }
     }
@@ -217,6 +245,30 @@ impl ObservabilityActor {
             return;
         };
         receiver.clock_offset = offset;
+        let data = receiver.clone();
+        self.publish_receiver(&name, data).await;
+    }
+
+    async fn receiver_network_delay_changed(&mut self, name: String, delay: u64) {
+        let Some(receiver) = self.receivers.get_mut(&name) else {
+            return;
+        };
+        receiver.network_delay = delay;
+        let data = receiver.clone();
+        self.publish_receiver(&name, data).await;
+    }
+
+    async fn receiver_measured_link_offset_changed(
+        &mut self,
+        name: String,
+        link_offset_frames: Frames,
+        link_offset_ms: MilliSeconds,
+    ) {
+        let Some(receiver) = self.receivers.get_mut(&name) else {
+            return;
+        };
+        receiver.measured_link_offset_frames = link_offset_frames;
+        receiver.measured_link_offset_ms = link_offset_ms;
         let data = receiver.clone();
         self.publish_receiver(&name, data).await;
     }

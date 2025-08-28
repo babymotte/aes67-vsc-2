@@ -2,7 +2,7 @@ mod observability;
 mod stats;
 
 use crate::{
-    formats::Frames,
+    formats::{Frames, MilliSeconds},
     monitoring::{observability::observability, stats::stats},
     receiver::config::RxDescriptor,
 };
@@ -61,7 +61,19 @@ pub enum SenderStatsReport {}
 
 #[derive(Debug)]
 pub enum ReceiverStatsReport {
-    MediaClockOffsetChanged { receiver: String, offset: u64 },
+    MediaClockOffsetChanged {
+        receiver: String,
+        offset: u64,
+    },
+    NetworkDelay {
+        receiver: String,
+        delay: Frames,
+    },
+    MeasuredLinkOffset {
+        receiver: String,
+        link_offset_frames: Frames,
+        link_offset_ms: MilliSeconds,
+    },
 }
 
 #[derive(Debug)]
