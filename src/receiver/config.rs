@@ -23,7 +23,7 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use sdp::SessionDescription;
 use serde::{Deserialize, Serialize};
-use std::net::IpAddr;
+use std::{net::IpAddr, time::Duration};
 
 lazy_static! {
     static ref MEDIA_REGEX: Regex =
@@ -61,7 +61,6 @@ pub struct RxDescriptor {
     pub session_name: String,
     pub session_id: u64,
     pub session_version: u64,
-    #[deprecated = "packet time should not be assumed based on SDP but taken from actual packet size"]
     pub packet_time: MilliSeconds,
     pub link_offset: MilliSeconds,
     pub origin_ip: IpAddr,
@@ -214,54 +213,16 @@ impl RxDescriptor {
         )
     }
 
-    #[deprecated = "packet time should not be assumed based on SDP but taken from actual packet size"]
-    pub fn frames_per_packet(&self) -> usize {
-        formats::frames_per_packet(self.audio_format.sample_rate, self.packet_time)
-    }
-
-    // pub(crate) fn frames_per_ms(&self) -> usize {
-    //     formats::frames_per_packet(self.audio_format.sample_rate, 1.0)
-    // }
-
     pub(crate) fn frames_in_link_offset(&self) -> usize {
-        formats::frames_per_packet(self.audio_format.sample_rate, self.link_offset)
+        formats::duration_to_frames(
+            Duration::from_micros((self.link_offset * 1_000.0).round() as u64),
+            self.audio_format.sample_rate,
+        )
+        .round() as usize
     }
 
     pub(crate) fn frames_in_buffer(&self, buffer: &[u8]) -> usize {
         buffer.len() / self.bytes_per_frame()
-    }
-
-    // pub(crate) fn frames_per_link_offset(&self, link_offset: MilliSeconds) -> usize {
-    //     formats::frames_per_packet(self.audio_format.sample_rate, link_offset)
-    // }
-
-    #[deprecated = "packet time should not be assumed based on SDP but taken from actual packet size"]
-    pub fn samples_per_packet(&self) -> usize {
-        formats::samples_per_packet(
-            self.audio_format.frame_format.channels,
-            self.audio_format.sample_rate,
-            self.packet_time,
-        )
-    }
-
-    #[deprecated = "packet time should not be assumed based on SDP but taken from actual packet size"]
-    pub fn rtp_payload_size(&self) -> usize {
-        formats::rtp_payload_size(
-            self.audio_format.sample_rate,
-            self.packet_time,
-            self.audio_format.frame_format.channels,
-            self.audio_format.frame_format.sample_format,
-        )
-    }
-
-    #[deprecated = "packet time should not be assumed based on SDP but taken from actual packet size"]
-    pub fn rtp_packet_size(&self) -> usize {
-        formats::rtp_packet_size(
-            self.audio_format.sample_rate,
-            self.packet_time,
-            self.audio_format.frame_format.channels,
-            self.audio_format.frame_format.sample_format,
-        )
     }
 
     pub fn to_link_offset(&self, samples: usize) -> usize {

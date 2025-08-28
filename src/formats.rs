@@ -286,17 +286,8 @@ pub fn bytes_per_frame(channels: usize, sample_format: SampleFormat) -> usize {
     channels * sample_format.bytes_per_sample()
 }
 
-#[deprecated = "actual packet size is different for 44.1 kHz, this needs to be hard coded based on an enum"]
-pub fn frames_per_packet(sample_rate: FramesPerSecond, packet_time: MilliSeconds) -> usize {
-    ((sample_rate as f32 * packet_time) / 1000.0).round() as usize
-}
-
-pub fn samples_per_packet(
-    channels: usize,
-    sample_rate: FramesPerSecond,
-    packet_time: MilliSeconds,
-) -> usize {
-    channels * frames_per_packet(sample_rate, packet_time)
+pub fn duration_to_frames(duration: Duration, sample_rate: FramesPerSecond) -> f64 {
+    (sample_rate as f64 * duration.as_micros() as f64) / 1_000_000.0
 }
 
 pub fn packets_in_link_offset(link_offset: MilliSeconds, packet_time: MilliSeconds) -> usize {
@@ -326,41 +317,12 @@ pub fn link_offset_buffer_size(
         * sample_format.bytes_per_sample()
 }
 
-pub fn rtp_payload_size(
-    sample_rate: FramesPerSecond,
-    packet_time: MilliSeconds,
-    channels: usize,
-    sample_format: SampleFormat,
-) -> usize {
-    frames_per_packet(sample_rate, packet_time) * bytes_per_frame(channels, sample_format)
-}
-
-pub fn rtp_packet_size(
-    sample_rate: FramesPerSecond,
-    packet_time: MilliSeconds,
-    channels: usize,
-    sample_format: SampleFormat,
-) -> usize {
-    rtp_header_len() + rtp_payload_size(sample_rate, packet_time, channels, sample_format)
-}
-
 pub fn samples_per_link_offset_buffer(
     channels: usize,
     link_offset: MilliSeconds,
     sample_rate: FramesPerSecond,
 ) -> usize {
     channels * frames_in_buffer(link_offset, sample_rate)
-}
-
-pub fn rtp_buffer_size(
-    link_offset: MilliSeconds,
-    packet_time: MilliSeconds,
-    sample_rate: FramesPerSecond,
-    channels: usize,
-    sample_format: SampleFormat,
-) -> usize {
-    packets_in_link_offset(link_offset, packet_time)
-        * rtp_packet_size(sample_rate, packet_time, channels, sample_format)
 }
 
 pub fn to_link_offset(samples: usize, sample_rate: FramesPerSecond) -> usize {

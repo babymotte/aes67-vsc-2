@@ -269,9 +269,11 @@ impl<C: MediaClock> Receiver<C> {
         let mut ts_wrapped = false;
         let mut seq_wrapped = false;
 
+        let frames_in_packet = self.desc.frames_in_buffer(rtp.payload());
+
         if let (Some(last_ts), Some(last_seq)) = (self.last_timestamp, self.last_sequence_number) {
             let expected_seq = last_seq.next();
-            let expected_ts = last_ts.wrapping_add(self.desc.frames_per_packet() as u32);
+            let expected_ts = last_ts.wrapping_add(frames_in_packet as u32);
             if seq != expected_seq {
                 warn!(
                     "Inconsistent sequence number: {} (last was {})",
@@ -280,8 +282,7 @@ impl<C: MediaClock> Receiver<C> {
                 );
 
                 let diff = seq - expected_seq;
-                let consistent_ts =
-                    expected_ts as i64 + self.desc.frames_per_packet() as i64 * diff as i64;
+                let consistent_ts = expected_ts as i64 + frames_in_packet as i64 * diff as i64;
                 if consistent_ts == ts as i64 {
                     info!(
                         "Timestamp of out-of-order packet is consistent with sequence id, queuing it for playout"
@@ -336,7 +337,7 @@ impl<C: MediaClock> Receiver<C> {
         let delay = media_time_at_reception as i64 - ingress_timestamp as i64;
         if let Some(average) = self.delay_buffer.update(delay) {
             let micros = (average * 1_000_000) / self.desc.audio_format.sample_rate as i64;
-            let packets = average as f32 / self.desc.frames_per_packet() as f32;
+            let packets = average as f32 / frames_in_packet as f32;
             info!("Network delay: {average} frames / {micros} µs / {packets:.1} packets");
         }
         let last_received_frame =
