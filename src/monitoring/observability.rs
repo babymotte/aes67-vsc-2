@@ -1,8 +1,9 @@
 use crate::{
     formats::{Frames, MilliSeconds},
     monitoring::{
-        ObservabilityEvent, ReceiverEvent, ReceiverStatsReport, SenderEvent, SenderStatsReport,
-        StatsReport, VscEvent, VscStatsReport,
+        HealthReport, ReceiverHealthReport, ReceiverState, ReceiverStatsReport, Report,
+        SenderHealthReport, SenderState, SenderStatsReport, StateEvent, StatsReport,
+        VscHealthReport, VscState, VscStatsReport,
     },
     receiver::config::RxDescriptor,
 };
@@ -14,7 +15,7 @@ use std::{
 };
 use tokio::{
     select, spawn,
-    sync::mpsc,
+    sync::{broadcast, mpsc},
     time::{sleep, timeout},
 };
 use tokio_graceful_shutdown::SubsystemHandle;
@@ -54,7 +55,7 @@ struct ReceiverData {
 pub async fn observability(
     subsys: SubsystemHandle,
     client_name: String,
-    rx: mpsc::Receiver<ObservabilityEvent>,
+    rx: broadcast::Receiver<Report>,
 ) -> Result<(), &'static str> {
     ObservabilityActor::new(subsys, client_name, rx).run().await;
     Ok(())
@@ -63,7 +64,7 @@ pub async fn observability(
 struct ObservabilityActor {
     subsys: SubsystemHandle,
     client_name: String,
-    rx: mpsc::Receiver<ObservabilityEvent>,
+    rx: broadcast::Receiver<Report>,
     wb: Option<Worterbuch>,
     senders: HashMap<String, String>,
     receivers: HashMap<String, ReceiverData>,
@@ -71,11 +72,7 @@ struct ObservabilityActor {
 }
 
 impl ObservabilityActor {
-    fn new(
-        subsys: SubsystemHandle,
-        client_name: String,
-        rx: mpsc::Receiver<ObservabilityEvent>,
-    ) -> Self {
+    fn new(subsys: SubsystemHandle, client_name: String, rx: broadcast::Receiver<Report>) -> Self {
         Self {
             subsys,
             client_name,
@@ -95,7 +92,7 @@ impl ObservabilityActor {
         info!("Observability subsystem started.");
         loop {
             select! {
-                Some(evt) = self.rx.recv() => self.process_event(evt).await,
+                Ok(evt) = self.rx.recv() => self.process_event(evt).await,
                 recv = wb_disco_rx.recv() => if recv.is_some() { self.restart_wb(wb_disco_tx.clone(), self.client_name.clone()).await },
                 _ = self.subsys.on_shutdown_requested() => break,
                 else => {
@@ -159,34 +156,42 @@ impl ObservabilityActor {
         }
     }
 
-    async fn process_event(&mut self, evt: ObservabilityEvent) {
+    async fn process_event(&mut self, evt: Report) {
+        info!("Event received: {evt:?}");
         match evt {
-            ObservabilityEvent::VscEvent(e) => self.process_vsc_event(e).await,
-            ObservabilityEvent::SenderEvent(e) => self.process_sender_event(e).await,
-            ObservabilityEvent::ReceiverEvent(e) => self.process_receiver_event(e).await,
-            ObservabilityEvent::Stats(e) => self.process_stats_report(e).await,
+            Report::State(state) => self.process_state(state).await,
+            Report::Stats(stats) => self.process_stats_report(stats).await,
+            Report::Health(health) => self.process_health_report(health).await,
         }
     }
 
-    async fn process_vsc_event(&mut self, e: VscEvent) {
-        match e {
-            VscEvent::VscCreated => self.vsc_created().await,
+    async fn process_state(&mut self, state: StateEvent) {
+        match state {
+            StateEvent::Vsc(e) => self.process_vsc_event(e).await,
+            StateEvent::Sender(e) => self.process_sender_event(e).await,
+            StateEvent::Receiver(e) => self.process_receiver_event(e).await,
         }
     }
 
-    async fn process_sender_event(&mut self, e: SenderEvent) {
+    async fn process_vsc_event(&mut self, e: VscState) {
         match e {
-            SenderEvent::SenderCreated { name, sdp } => self.sender_created(name, sdp).await,
-            SenderEvent::SenderDestroyed { name } => self.sender_destroyed(name).await,
+            VscState::VscCreated => self.vsc_created().await,
         }
     }
 
-    async fn process_receiver_event(&mut self, e: ReceiverEvent) {
+    async fn process_sender_event(&mut self, e: SenderState) {
         match e {
-            ReceiverEvent::ReceiverCreated { name, descriptor } => {
+            SenderState::SenderCreated { name, sdp } => self.sender_created(name, sdp).await,
+            SenderState::SenderDestroyed { name } => self.sender_destroyed(name).await,
+        }
+    }
+
+    async fn process_receiver_event(&mut self, e: ReceiverState) {
+        match e {
+            ReceiverState::ReceiverCreated { name, descriptor } => {
                 self.receiver_created(name, descriptor).await
             }
-            ReceiverEvent::ReceiverDestroyed { name } => self.receiver_destroyed(name).await,
+            ReceiverState::ReceiverDestroyed { name } => self.receiver_destroyed(name).await,
         }
     }
 
@@ -198,7 +203,16 @@ impl ObservabilityActor {
         }
     }
 
+    async fn process_health_report(&mut self, e: HealthReport) {
+        match e {
+            HealthReport::Vsc(r) => self.process_vsc_health_report(r).await,
+            HealthReport::Sender(r) => self.process_sender_health_report(r).await,
+            HealthReport::Receiver(r) => self.process_receiver_health_report(r).await,
+        }
+    }
+
     async fn vsc_created(&mut self) {
+        info!("VSC created");
         self.running = true;
         self.publish_vsc().await;
     }
@@ -350,6 +364,18 @@ impl ObservabilityActor {
         };
         let stats = receiver.stats.clone();
         self.publish_receiver_stats(&name, stats).await;
+    }
+
+    async fn process_vsc_health_report(&mut self, report: VscHealthReport) {
+        match report {}
+    }
+
+    async fn process_sender_health_report(&mut self, report: SenderHealthReport) {
+        match report {}
+    }
+
+    async fn process_receiver_health_report(&mut self, report: ReceiverHealthReport) {
+        match report {}
     }
 
     async fn publish_vsc(&self) {

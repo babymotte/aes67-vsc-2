@@ -25,7 +25,7 @@ pub mod config;
 use crate::{
     buffer::FloatingPointAudioBuffer,
     error::{ReceiverInternalError, ReceiverInternalResult},
-    monitoring::{Monitoring, ObservabilityEvent, ReceiverEvent, RxStats, Stats},
+    monitoring::{Monitoring, ReceiverState, RxStats},
     receiver::{
         api::{AudioDataRequest, DataState, ReceiverApi, ReceiverApiMessage},
         config::{ReceiverConfig, RxDescriptor},
@@ -150,7 +150,6 @@ impl<C: MediaClock> Receiver<C> {
         info!("Receiver '{}' started.", self.id);
 
         self.report_receiver_created().await;
-        self.report_receiver_started().await;
 
         loop {
             select! {
@@ -166,7 +165,6 @@ impl<C: MediaClock> Receiver<C> {
             }
         }
 
-        self.report_receiver_stopped().await;
         self.report_receiver_destroyed().await;
 
         info!("Receiver '{}' stopped.", self.id);
@@ -368,28 +366,15 @@ impl<C: MediaClock> Receiver<C> {
 
 mod monitoring {
     use super::*;
-    use tokio::sync::mpsc::error::TrySendError;
 
     impl<C: MediaClock> Receiver<C> {
         pub(crate) async fn report_receiver_created(&mut self) {
             self.monitoring
-                .observability()
-                .send(ObservabilityEvent::ReceiverEvent(
-                    ReceiverEvent::ReceiverCreated {
-                        name: self.id.clone(),
-                        descriptor: self.desc.clone(),
-                    },
-                ))
-                .await
-                .ok();
-        }
-
-        pub(crate) async fn report_receiver_started(&mut self) {
-            self.monitoring
-                .stats()
-                .send(Stats::Rx(RxStats::Started(self.desc.clone())))
-                .await
-                .ok();
+                .receiver_state(ReceiverState::ReceiverCreated {
+                    name: self.id.clone(),
+                    descriptor: self.desc.clone(),
+                })
+                .await;
         }
 
         pub(crate) fn report_packet_received(
@@ -399,29 +384,19 @@ mod monitoring {
             seq: Seq,
             ingress_timestamp: u64,
         ) {
-            if let Err(TrySendError::Full(_)) =
-                self.monitoring
-                    .stats()
-                    .try_send(Stats::Rx(RxStats::PacketReceived {
-                        seq,
-                        payload_len: rtp.payload().len(),
-                        ingress_timestamp,
-                        media_time_at_reception,
-                    }))
-            {
-                warn!("dropped stats message, buffer is full");
-            }
+            self.monitoring.receiver_stats(RxStats::PacketReceived {
+                seq,
+                payload_len: rtp.payload().len(),
+                ingress_timestamp,
+                media_time_at_reception,
+            });
         }
 
         pub(crate) async fn report_playout(&mut self, req: &AudioDataRequest) {
-            self.monitoring
-                .stats()
-                .send(Stats::Rx(RxStats::Playout {
-                    playout_time: req.playout_time,
-                    latest_received_frame: self.latest_received_frame,
-                }))
-                .await
-                .ok();
+            self.monitoring.receiver_stats(RxStats::Playout {
+                playout_time: req.playout_time,
+                latest_received_frame: self.latest_received_frame,
+            });
         }
 
         pub(crate) async fn report_media_clock_offset_changed(
@@ -430,37 +405,22 @@ mod monitoring {
             rtp_timestamp: u32,
         ) {
             self.monitoring
-                .stats()
-                .send(Stats::Rx(RxStats::MediaClockOffsetChanged(
-                    offset,
-                    rtp_timestamp,
-                )))
-                .await
-                .ok();
+                .receiver_stats(RxStats::MediaClockOffsetChanged(offset, rtp_timestamp));
         }
 
         pub(crate) async fn report_packet_from_wrong_sender(&mut self, addr: SocketAddr) {
             self.monitoring
-                .stats()
-                .send(Stats::Rx(RxStats::PacketFromWrongSender(addr.ip())))
-                .await
-                .ok();
+                .receiver_stats(RxStats::PacketFromWrongSender(addr.ip()));
         }
 
         pub(crate) async fn report_malformed_packet(&mut self, e: rtp_rs::RtpReaderError) {
             self.monitoring
-                .stats()
-                .send(Stats::Rx(RxStats::MalformedRtpPacket(e)))
-                .await
-                .ok();
+                .receiver_stats(RxStats::MalformedRtpPacket(format!("{e:?}")));
         }
 
         pub(crate) async fn report_inconsistent_timestamp(&mut self) {
             self.monitoring
-                .stats()
-                .send(Stats::Rx(RxStats::InconsistentTimestamp))
-                .await
-                .ok();
+                .receiver_stats(RxStats::InconsistentTimestamp);
         }
 
         pub(crate) async fn report_out_of_order_packet(
@@ -470,15 +430,11 @@ mod monitoring {
             expected_ts: u32,
             ts_offset: u64,
         ) {
-            self.monitoring
-                .stats()
-                .send(Stats::Rx(RxStats::OutOfOrderPacket {
-                    expected_timestamp: ts_offset + expected_ts as u64,
-                    expected_sequence_number: expected_seq,
-                    actual_sequence_number: rtp.sequence_number(),
-                }))
-                .await
-                .ok();
+            self.monitoring.receiver_stats(RxStats::OutOfOrderPacket {
+                expected_timestamp: ts_offset + expected_ts as u64,
+                expected_sequence_number: expected_seq,
+                actual_sequence_number: rtp.sequence_number(),
+            });
         }
 
         pub(crate) async fn report_time_travelling_packet(
@@ -488,34 +444,19 @@ mod monitoring {
             ingress_timestamp: u64,
         ) {
             self.monitoring
-                .stats()
-                .send(Stats::Rx(RxStats::TimeTravellingPacket {
+                .receiver_stats(RxStats::TimeTravellingPacket {
                     sequence_number: rtp.sequence_number(),
                     ingress_timestamp,
                     media_time_at_reception,
-                }))
-                .await
-                .ok();
-        }
-
-        pub(crate) async fn report_receiver_stopped(&mut self) {
-            self.monitoring
-                .stats()
-                .send(Stats::Rx(RxStats::Stopped))
-                .await
-                .ok();
+                });
         }
 
         pub(crate) async fn report_receiver_destroyed(&mut self) {
             self.monitoring
-                .observability()
-                .send(ObservabilityEvent::ReceiverEvent(
-                    ReceiverEvent::ReceiverDestroyed {
-                        name: self.id.clone(),
-                    },
-                ))
-                .await
-                .ok();
+                .receiver_state(ReceiverState::ReceiverDestroyed {
+                    name: self.id.clone(),
+                })
+                .await;
         }
     }
 }

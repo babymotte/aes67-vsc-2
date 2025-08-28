@@ -22,6 +22,7 @@ use rtp_rs::{RtpPacketBuildError, RtpReaderError};
 use std::{fmt::Display, io, net::AddrParseError};
 use thiserror::Error;
 use tokio::sync::oneshot;
+use tracing::error;
 use tracing_subscriber::{filter::ParseError, util::TryInitError};
 
 pub enum ErrorCode {
@@ -287,7 +288,14 @@ impl GetErrorCode for ConfigError {
 
 impl GetErrorCode for VscApiError {
     fn error_code(&self) -> u8 {
-        todo!()
+        match self {
+            VscApiError::Internal(e) => error!("{:?}", e),
+            VscApiError::Sender(e) => error!("{:?}", e),
+            VscApiError::Receiver(e) => error!("{:?}", e),
+            VscApiError::ChannelError(e) => error!("{:?}", e),
+        }
+        // TODO
+        3
     }
 }
 

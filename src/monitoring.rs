@@ -1,12 +1,13 @@
+mod health;
 mod observability;
 mod stats;
 
 use crate::{
     formats::{Frames, MilliSeconds},
-    monitoring::{observability::observability, stats::stats},
+    monitoring::{health::health, observability::observability, stats::stats},
     receiver::config::RxDescriptor,
 };
-use rtp_rs::{RtpReaderError, Seq};
+use rtp_rs::Seq;
 use std::{
     io,
     net::IpAddr,
@@ -16,32 +17,47 @@ use std::{
 use tokio::{
     runtime::{self},
     spawn,
-    sync::mpsc,
+    sync::{
+        broadcast,
+        mpsc::{self, error::TrySendError},
+    },
 };
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle, Toplevel};
 use tracing::{info, warn};
 
-#[derive(Debug)]
-pub enum ObservabilityEvent {
-    VscEvent(VscEvent),
-    SenderEvent(SenderEvent),
-    ReceiverEvent(ReceiverEvent),
-    Stats(StatsReport),
+#[derive(Debug, Clone)]
+pub enum MonitoringEvent {
+    State(StateEvent),
+    Stats(Stats),
 }
 
-#[derive(Debug)]
-pub enum VscEvent {
+#[derive(Debug, Clone)]
+pub enum Report {
+    State(StateEvent),
+    Stats(StatsReport),
+    Health(HealthReport),
+}
+
+#[derive(Debug, Clone)]
+pub enum StateEvent {
+    Vsc(VscState),
+    Sender(SenderState),
+    Receiver(ReceiverState),
+}
+
+#[derive(Debug, Clone)]
+pub enum VscState {
     VscCreated,
 }
 
-#[derive(Debug)]
-pub enum SenderEvent {
+#[derive(Debug, Clone)]
+pub enum SenderState {
     SenderCreated { name: String, sdp: String },
     SenderDestroyed { name: String },
 }
 
-#[derive(Debug)]
-pub enum ReceiverEvent {
+#[derive(Debug, Clone)]
+pub enum ReceiverState {
     ReceiverCreated {
         name: String,
         descriptor: RxDescriptor,
@@ -51,20 +67,20 @@ pub enum ReceiverEvent {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum StatsReport {
     Vsc(VscStatsReport),
     Sender(SenderStatsReport),
     Receiver(ReceiverStatsReport),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum VscStatsReport {}
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum SenderStatsReport {}
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ReceiverStatsReport {
     MediaClockOffsetChanged {
         receiver: String,
@@ -92,19 +108,35 @@ pub enum ReceiverStatsReport {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+pub enum HealthReport {
+    Vsc(VscHealthReport),
+    Sender(SenderHealthReport),
+    Receiver(ReceiverHealthReport),
+}
+
+#[derive(Debug, Clone)]
+pub enum VscHealthReport {}
+
+#[derive(Debug, Clone)]
+pub enum SenderHealthReport {}
+
+#[derive(Debug, Clone)]
+pub enum ReceiverHealthReport {}
+
+#[derive(Debug, Clone)]
 pub enum Stats {
     Tx(TxStats),
     Rx(RxStats),
     Playout(PoStats),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum TxStats {
     BufferUnderrun,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum RxStats {
     Started(RxDescriptor),
     BufferUnderrun,
@@ -120,7 +152,7 @@ pub enum RxStats {
         expected_sequence_number: Seq,
         actual_sequence_number: Seq,
     },
-    MalformedRtpPacket(RtpReaderError),
+    MalformedRtpPacket(String),
     TimeTravellingPacket {
         sequence_number: Seq,
         ingress_timestamp: Frames,
@@ -135,16 +167,12 @@ pub enum RxStats {
     PacketFromWrongSender(IpAddr),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum PoStats {
     BufferUnderrun,
 }
 
-#[derive(Clone)]
-struct MonitoringParent {
-    stats_tx: mpsc::Sender<(Stats, String)>,
-    observ_tx: mpsc::Sender<ObservabilityEvent>,
-}
+struct MonitoringParent(mpsc::Sender<(MonitoringEvent, String)>);
 
 impl MonitoringParent {
     fn child(&self, id: String) -> Monitoring {
@@ -154,54 +182,87 @@ impl MonitoringParent {
     }
 
     fn deferred_child(&self, id: String) -> (Monitoring, impl Future<Output = ()> + 'static) {
-        let (stats_tx, mut stats_rx) = mpsc::channel(1024);
-        let parent = self.clone();
-        let parent_tx = self.stats_tx.clone();
+        let (tx, mut rx) = mpsc::channel(1024);
+        let parent_tx = self.0.clone();
+        let parent = MonitoringParent(parent_tx.clone());
         let start = async move {
-            while let Some(evt) = stats_rx.recv().await {
+            while let Some(evt) = rx.recv().await {
                 if parent_tx.send((evt, id.clone())).await.is_err() {
                     break;
                 }
             }
         };
-        (Monitoring { parent, stats_tx }, start)
+        (Monitoring { parent, tx }, start)
     }
 }
 
 pub struct Monitoring {
     parent: MonitoringParent,
-    stats_tx: mpsc::Sender<Stats>,
+    tx: mpsc::Sender<MonitoringEvent>,
 }
 
 impl Monitoring {
-    pub fn stats(&self) -> &mpsc::Sender<Stats> {
-        &self.stats_tx
-    }
-
-    pub fn observability(&self) -> &mpsc::Sender<ObservabilityEvent> {
-        &self.parent.observ_tx
-    }
-
     pub fn child(&self, id: String) -> Monitoring {
         self.parent.child(id)
+    }
+
+    pub async fn vsc_state(&self, state: VscState) {
+        self.tx
+            .send(MonitoringEvent::State(StateEvent::Vsc(state)))
+            .await
+            .ok();
+    }
+
+    pub async fn sender_state(&self, state: SenderState) {
+        self.tx
+            .send(MonitoringEvent::State(StateEvent::Sender(state)))
+            .await
+            .ok();
+    }
+
+    pub async fn receiver_state(&self, state: ReceiverState) {
+        self.tx
+            .send(MonitoringEvent::State(StateEvent::Receiver(state)))
+            .await
+            .ok();
+    }
+
+    pub fn sender_stats(&self, stats: RxStats) {
+        if let Err(TrySendError::Full(_)) =
+            self.tx.try_send(MonitoringEvent::Stats(Stats::Rx(stats)))
+        {
+            warn!("Dropping sender stats, buffer is full!");
+        }
+    }
+
+    pub fn receiver_stats(&self, stats: RxStats) {
+        if let Err(TrySendError::Full(_)) =
+            self.tx.try_send(MonitoringEvent::Stats(Stats::Rx(stats)))
+        {
+            warn!("Dropping receiver stats, buffer is full!");
+        }
+    }
+
+    pub fn playout_stats(&self, stats: PoStats) {
+        if let Err(TrySendError::Full(_)) = self
+            .tx
+            .try_send(MonitoringEvent::Stats(Stats::Playout(stats)))
+        {
+            warn!("Dropping playout stats, buffer is full!");
+        }
     }
 }
 
 pub fn start_monitoring_service(root_id: String) -> Monitoring {
-    let (stats_tx, stats_rx) = mpsc::channel(1024);
-    let (observ_tx, observ_rx) = mpsc::channel(1024);
-    let stats_to_obs = observ_tx.clone();
+    let (mon_tx, mon_rx) = mpsc::channel::<(MonitoringEvent, String)>(1024);
+
     let client_name = root_id.clone();
 
-    let parent = MonitoringParent {
-        stats_tx,
-        observ_tx,
-    };
+    let parent = MonitoringParent(mon_tx);
 
     let (child, start) = parent.deferred_child(root_id);
 
-    let monitoring_thread =
-        move || monitoring(client_name, stats_rx, stats_to_obs, observ_rx, start);
+    let monitoring_thread = move || monitoring(client_name, mon_rx, start);
 
     thread::Builder::new()
         .name("monitoring".to_owned())
@@ -213,17 +274,20 @@ pub fn start_monitoring_service(root_id: String) -> Monitoring {
 
 fn monitoring(
     client_name: String,
-    stats_rx: mpsc::Receiver<(Stats, String)>,
-    observability_tx: mpsc::Sender<ObservabilityEvent>,
-    observability_rx: mpsc::Receiver<ObservabilityEvent>,
+    mon_rx: mpsc::Receiver<(MonitoringEvent, String)>,
     start: impl Future<Output = ()> + Send + 'static,
 ) -> io::Result<()> {
-    let stats = |s: SubsystemHandle| stats(s, stats_rx, observability_tx);
-    let observability = |s: SubsystemHandle| observability(s, client_name, observability_rx);
+    let (stats_tx, stats_rx) = mpsc::channel::<Report>(1024);
+    let (observ_tx, observ_rx) = broadcast::channel::<Report>(1024);
+
+    let stats = |s: SubsystemHandle| stats(s, mon_rx, stats_tx);
+    let health = |s: SubsystemHandle| health(s, stats_rx, observ_tx);
+    let observability = |s: SubsystemHandle| observability(s, client_name, observ_rx);
     let monitoring = async {
         spawn(start);
         if let Err(e) = Toplevel::new(|s| async move {
             s.start(SubsystemBuilder::new("stats", stats));
+            s.start(SubsystemBuilder::new("health", health));
             s.start(SubsystemBuilder::new("observability", observability));
         })
         .handle_shutdown_requests(Duration::from_secs(1))

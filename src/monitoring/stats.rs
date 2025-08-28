@@ -3,7 +3,7 @@ mod receiver_stats;
 mod sender_stats;
 
 use crate::monitoring::{
-    ObservabilityEvent, Stats,
+    MonitoringEvent, ReceiverState, Report, RxStats, SenderState, StateEvent, Stats, VscState,
     stats::{
         playout_stats::PlayoutStats, receiver_stats::ReceiverStats, sender_stats::SenderStats,
     },
@@ -11,12 +11,12 @@ use crate::monitoring::{
 use std::collections::{HashMap, hash_map::Entry};
 use tokio::{select, sync::mpsc};
 use tokio_graceful_shutdown::SubsystemHandle;
-use tracing::info;
+use tracing::{info, warn};
 
 pub async fn stats(
     subsys: SubsystemHandle,
-    rx: mpsc::Receiver<(Stats, String)>,
-    tx: mpsc::Sender<ObservabilityEvent>,
+    rx: mpsc::Receiver<(MonitoringEvent, String)>,
+    tx: mpsc::Sender<Report>,
 ) -> Result<(), &'static str> {
     StatsActor::new(subsys, rx, tx).run().await;
     Ok(())
@@ -24,8 +24,8 @@ pub async fn stats(
 
 struct StatsActor {
     subsys: SubsystemHandle,
-    rx: mpsc::Receiver<(Stats, String)>,
-    tx: mpsc::Sender<ObservabilityEvent>,
+    rx: mpsc::Receiver<(MonitoringEvent, String)>,
+    tx: mpsc::Sender<Report>,
     senders: HashMap<String, SenderStats>,
     receivers: HashMap<String, ReceiverStats>,
     playouts: HashMap<String, PlayoutStats>,
@@ -34,8 +34,8 @@ struct StatsActor {
 impl StatsActor {
     fn new(
         subsys: SubsystemHandle,
-        rx: mpsc::Receiver<(Stats, String)>,
-        tx: mpsc::Sender<ObservabilityEvent>,
+        rx: mpsc::Receiver<(MonitoringEvent, String)>,
+        tx: mpsc::Sender<Report>,
     ) -> Self {
         Self {
             subsys,
@@ -62,33 +62,71 @@ impl StatsActor {
         info!("Stats subsystem stopped.");
     }
 
-    async fn process_event(&mut self, evt: Stats, src: String) {
-        let tx = self.tx.clone();
+    async fn process_event(&mut self, evt: MonitoringEvent, src: String) {
         match evt {
-            Stats::Tx(stats) => self.tx_stats(src).process(stats, tx).await,
-            Stats::Rx(stats) => self.rx_stats(src).process(stats, tx).await,
-            Stats::Playout(stats) => self.playout_stats(src).process(stats, tx).await,
+            MonitoringEvent::State(evt) => self.process_state(evt).await,
+            MonitoringEvent::Stats(evt) => self.process_stats(evt, src).await,
+        }
+    }
+
+    async fn process_state(&mut self, evt: StateEvent) {
+        match &evt {
+            StateEvent::Vsc(s) => self.process_vsc_state(s).await,
+            StateEvent::Sender(s) => self.process_sender_state(s).await,
+            StateEvent::Receiver(s) => self.process_receiver_state(s).await,
+        }
+
+        self.tx.send(Report::State(evt)).await.ok();
+    }
+
+    async fn process_stats(&mut self, evt: Stats, src: String) {
+        match evt {
+            Stats::Tx(stats) => self.tx_stats(src).process(stats).await,
+            Stats::Rx(stats) => self.rx_stats(src).process(stats).await,
+            Stats::Playout(stats) => self.playout_stats(src).process(stats).await,
         }
     }
 
     fn tx_stats(&mut self, src: String) -> &mut SenderStats {
         match self.senders.entry(src.clone()) {
             Entry::Occupied(e) => e.into_mut(),
-            Entry::Vacant(e) => e.insert(SenderStats::new(src)),
+            Entry::Vacant(e) => e.insert(SenderStats::new(src, self.tx.clone())),
         }
     }
 
     fn rx_stats(&mut self, src: String) -> &mut ReceiverStats {
         match self.receivers.entry(src.clone()) {
             Entry::Occupied(e) => e.into_mut(),
-            Entry::Vacant(e) => e.insert(ReceiverStats::new(src)),
+            Entry::Vacant(e) => e.insert(ReceiverStats::new(src, self.tx.clone())),
         }
     }
 
     fn playout_stats(&mut self, src: String) -> &mut PlayoutStats {
         match self.playouts.entry(src.clone()) {
             Entry::Occupied(e) => e.into_mut(),
-            Entry::Vacant(e) => e.insert(PlayoutStats::new(src)),
+            Entry::Vacant(e) => e.insert(PlayoutStats::new(src, self.tx.clone())),
+        }
+    }
+
+    async fn process_vsc_state(&mut self, s: &VscState) {
+        // TODO
+    }
+
+    async fn process_sender_state(&mut self, s: &SenderState) {
+        // TODO
+    }
+
+    async fn process_receiver_state(&mut self, s: &ReceiverState) {
+        match s {
+            ReceiverState::ReceiverCreated { name, descriptor } => {
+                self.rx_stats(name.to_owned())
+                    .process(RxStats::Started(descriptor.to_owned()))
+                    .await
+            }
+            ReceiverState::ReceiverDestroyed { name } => {
+                warn!("receiver destroyed: {name}");
+                // TODO
+            }
         }
     }
 }

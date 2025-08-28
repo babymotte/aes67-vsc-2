@@ -15,7 +15,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::monitoring::{Monitoring, ObservabilityEvent, VscEvent, start_monitoring_service};
+use crate::monitoring::{Monitoring, VscState, start_monitoring_service};
 use crate::{
     error::{
         ReceiverInternalError, ReceiverInternalResult, ToBoxedResult, VscApiResult,
@@ -191,11 +191,7 @@ impl VirtualSoundCard {
     async fn run(mut self) {
         let vsc_id = self.name.clone();
 
-        self.monitoring
-            .observability()
-            .send(ObservabilityEvent::VscEvent(VscEvent::VscCreated))
-            .await
-            .ok();
+        self.monitoring.vsc_state(VscState::VscCreated).await;
 
         while let Some(msg) = self.api_rx.recv().await {
             match msg {

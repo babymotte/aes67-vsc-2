@@ -1,6 +1,6 @@
 use crate::{
     formats::Frames,
-    monitoring::{ObservabilityEvent, ReceiverStatsReport, RxStats, StatsReport},
+    monitoring::{ReceiverStatsReport, Report, RxStats, StatsReport},
     receiver::config::RxDescriptor,
     utils::{AverageCalculationBuffer, U16_WRAP},
 };
@@ -11,6 +11,7 @@ use tracing::{debug, warn};
 
 pub struct ReceiverStats {
     id: String,
+    tx: mpsc::Sender<Report>,
     desc: Option<RxDescriptor>,
     delay_buffer: AverageCalculationBuffer<Frames>,
     measured_link_offset: AverageCalculationBuffer<Frames>,
@@ -21,9 +22,10 @@ pub struct ReceiverStats {
 }
 
 impl ReceiverStats {
-    pub fn new(id: String) -> Self {
+    pub fn new(id: String, tx: mpsc::Sender<Report>) -> Self {
         Self {
             id,
+            tx,
             desc: None,
             measured_link_offset: AverageCalculationBuffer::new(vec![0; 1000].into()),
             delay_buffer: AverageCalculationBuffer::new(vec![0; 1000].into()),
@@ -34,11 +36,7 @@ impl ReceiverStats {
         }
     }
 
-    pub(crate) async fn process(
-        &mut self,
-        stats: RxStats,
-        observ_tx: mpsc::Sender<ObservabilityEvent>,
-    ) {
+    pub(crate) async fn process(&mut self, stats: RxStats) {
         match stats {
             RxStats::Started(rx_descriptor) => {
                 self.desc = Some(rx_descriptor);
@@ -60,7 +58,6 @@ impl ReceiverStats {
                     payload_len,
                     ingress_timestamp,
                     media_time_at_reception,
-                    observ_tx,
                 )
                 .await;
             }
@@ -88,7 +85,6 @@ impl ReceiverStats {
                     sequence_number,
                     ingress_timestamp,
                     media_time_at_reception,
-                    observ_tx,
                 )
                 .await;
             }
@@ -96,18 +92,18 @@ impl ReceiverStats {
                 playout_time,
                 latest_received_frame,
             } => {
-                self.process_playout(playout_time, latest_received_frame, observ_tx)
+                self.process_playout(playout_time, latest_received_frame)
                     .await;
             }
             RxStats::Stopped => {
                 // TODO
             }
             RxStats::MediaClockOffsetChanged(offset, rtp_timestamp) => {
-                self.process_media_clock_offset_change(offset, rtp_timestamp, observ_tx)
+                self.process_media_clock_offset_change(offset, rtp_timestamp)
                     .await;
             }
             RxStats::PacketFromWrongSender(ip) => {
-                self.process_packet_from_wrong_sender(ip, observ_tx).await;
+                self.process_packet_from_wrong_sender(ip).await;
             }
         }
     }
@@ -117,7 +113,6 @@ impl ReceiverStats {
         sequence_number: Seq,
         ingress_timestamp: u64,
         media_time_at_reception: u64,
-        observ_tx: mpsc::Sender<ObservabilityEvent>,
     ) {
         let Some(desc) = &self.desc else {
             return;
@@ -137,7 +132,6 @@ impl ReceiverStats {
         payload_len: usize,
         ingress_timestamp: Frames,
         media_time_at_reception: Frames,
-        observ_tx: mpsc::Sender<ObservabilityEvent>,
     ) {
         // TODO detect and monitor late packets
 
@@ -148,14 +142,24 @@ impl ReceiverStats {
         // TODO monitor and report packet time
         let frames_in_packet = desc.frames_in_buffer(payload_len);
 
-        let delay = media_time_at_reception - ingress_timestamp - frames_in_packet;
+        let delay = media_time_at_reception - ingress_timestamp;
+
+        if delay < frames_in_packet {
+            // TODO report clock sync issue
+        }
+
+        if delay >= 2 * frames_in_packet {
+            // TODO report potential network or clock issue
+        }
+
         if let Some(average) = self.delay_buffer.update(delay) {
             let delay_duration = desc.frames_to_duration(delay);
             let micros = delay_duration.as_micros();
             let packets = average as f32 / frames_in_packet as f32;
             debug!("Network delay: {average} frames / {micros} µs / {packets:.1} packets");
-            observ_tx
-                .send(ObservabilityEvent::Stats(StatsReport::Receiver(
+
+            self.tx
+                .send(Report::Stats(StatsReport::Receiver(
                     ReceiverStatsReport::NetworkDelay {
                         receiver: self.id.clone(),
                         delay_frames: delay,
@@ -171,12 +175,7 @@ impl ReceiverStats {
         self.skipped_packets.remove(&ingress_timestamp);
     }
 
-    async fn process_playout(
-        &mut self,
-        playout_time: Frames,
-        latest_received_frame: Frames,
-        observ_tx: mpsc::Sender<ObservabilityEvent>,
-    ) {
+    async fn process_playout(&mut self, playout_time: Frames, latest_received_frame: Frames) {
         let Some(desc) = &self.desc else {
             return;
         };
@@ -196,8 +195,8 @@ impl ReceiverStats {
                     "Measured link offset: {measured_link_offset} frames / {link_offset_ms:.1} ms (too high)"
                 );
             }
-            observ_tx
-                .send(ObservabilityEvent::Stats(StatsReport::Receiver(
+            self.tx
+                .send(Report::Stats(StatsReport::Receiver(
                     ReceiverStatsReport::MeasuredLinkOffset {
                         receiver: self.id.clone(),
                         link_offset_frames: measured_link_offset,
@@ -229,8 +228,8 @@ impl ReceiverStats {
                     .join(", ")
             );
             self.lost_packet_counter += missed_timestamps.len();
-            observ_tx
-                .send(ObservabilityEvent::Stats(StatsReport::Receiver(
+            self.tx
+                .send(Report::Stats(StatsReport::Receiver(
                     ReceiverStatsReport::LostPackets {
                         receiver: self.id.clone(),
                         lost_packets: self.lost_packet_counter,
@@ -242,12 +241,7 @@ impl ReceiverStats {
         }
     }
 
-    async fn process_media_clock_offset_change(
-        &mut self,
-        offset: u64,
-        rtp_timestamp: u32,
-        observ_tx: mpsc::Sender<ObservabilityEvent>,
-    ) {
+    async fn process_media_clock_offset_change(&mut self, offset: u64, rtp_timestamp: u32) {
         debug!("Calibrating timestamp offset at RTP timestamp {rtp_timestamp}");
 
         let needs_update = if let Some(previous_offset) = self.timestamp_offset {
@@ -267,25 +261,19 @@ impl ReceiverStats {
 
         if needs_update {
             self.timestamp_offset = Some(offset);
-            observ_tx
-                .send(ObservabilityEvent::Stats(
-                    crate::monitoring::StatsReport::Receiver(
-                        ReceiverStatsReport::MediaClockOffsetChanged {
-                            receiver: self.id.clone(),
-                            offset,
-                        },
-                    ),
-                ))
+            self.tx
+                .send(Report::Stats(crate::monitoring::StatsReport::Receiver(
+                    ReceiverStatsReport::MediaClockOffsetChanged {
+                        receiver: self.id.clone(),
+                        offset,
+                    },
+                )))
                 .await
                 .ok();
         }
     }
 
-    async fn process_packet_from_wrong_sender(
-        &self,
-        ip: IpAddr,
-        observ_tx: mpsc::Sender<ObservabilityEvent>,
-    ) {
+    async fn process_packet_from_wrong_sender(&self, ip: IpAddr) {
         let Some(desc) = &self.desc else {
             return;
         };
@@ -296,13 +284,7 @@ impl ReceiverStats {
         // TODO collect stats + publish
     }
 
-    async fn process_late_packet(
-        &mut self,
-        seq: Seq,
-        timestamp: u64,
-        delay: Frames,
-        observ_tx: mpsc::Sender<ObservabilityEvent>,
-    ) {
+    async fn process_late_packet(&mut self, seq: Seq, timestamp: u64, delay: Frames) {
         let Some(desc) = &self.desc else {
             return;
         };
@@ -316,8 +298,8 @@ impl ReceiverStats {
             delay_usec
         );
         self.late_packet_counter += 1;
-        observ_tx
-            .send(ObservabilityEvent::Stats(StatsReport::Receiver(
+        self.tx
+            .send(Report::Stats(StatsReport::Receiver(
                 ReceiverStatsReport::LatePackets {
                     receiver: self.id.clone(),
                     late_packets: self.late_packet_counter,

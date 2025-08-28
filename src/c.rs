@@ -24,6 +24,7 @@ use crate::{
     error::GetErrorCode,
 };
 use ::safer_ffi::prelude::*;
+use tracing::error;
 
 #[cfg(feature = "headers")]
 pub use r#impl::generate_headers;
@@ -63,6 +64,7 @@ pub struct Aes67VscReceiverConfig<'a> {
 /// * `config` - the configuration for the sender
 #[ffi_export]
 fn aes67_vsc_create_receiver<'a>(config: &'a Aes67VscReceiverConfig<'a>) -> i32 {
+    eprintln!("config: {:?}", config);
     match try_create_receiver(config) {
         Ok(it) => it,
         Err(err) => -(err.error_code() as i32),
