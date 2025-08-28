@@ -1,5 +1,5 @@
 use crate::{monitoring::ObservabilityEvent, receiver::config::RxDescriptor};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{collections::HashMap, time::Duration};
 use tokio::{
@@ -12,6 +12,13 @@ use tracing::{info, instrument, warn};
 use worterbuch_client::{KeyValuePair, Worterbuch, topic};
 
 const ROOT_KEY: &str = "aes67-vsc";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReceiverData {
+    config: RxDescriptor,
+    clock_offset: u64,
+}
 
 pub async fn observability(
     subsys: SubsystemHandle,
@@ -28,7 +35,7 @@ struct ObservabilityActor {
     rx: mpsc::Receiver<ObservabilityEvent>,
     wb: Option<Worterbuch>,
     senders: HashMap<String, String>,
-    receivers: HashMap<String, RxDescriptor>,
+    receivers: HashMap<String, ReceiverData>,
     running: bool,
 }
 
@@ -116,8 +123,8 @@ impl ObservabilityActor {
         for (name, sdp) in &self.senders {
             self.publish_sender(name, sdp.to_owned()).await;
         }
-        for (name, desc) in &self.receivers {
-            self.publish_receiver(name, desc.clone()).await;
+        for (name, data) in &self.receivers {
+            self.publish_receiver(name, data.clone()).await;
         }
     }
 
@@ -176,8 +183,12 @@ impl ObservabilityActor {
     }
 
     async fn receiver_created(&mut self, name: String, descriptor: RxDescriptor) {
-        self.receivers.insert(name.clone(), descriptor.clone());
-        self.publish_receiver(&name, descriptor).await;
+        let data = ReceiverData {
+            clock_offset: 0,
+            config: descriptor.clone(),
+        };
+        self.receivers.insert(name.clone(), data.clone());
+        self.publish_receiver(&name, data).await;
     }
 
     async fn receiver_destroyed(&mut self, name: String) {
@@ -196,9 +207,18 @@ impl ObservabilityActor {
     async fn process_receiver_stats_report(&mut self, report: super::ReceiverStatsReport) {
         match report {
             super::ReceiverStatsReport::MediaClockOffsetChanged { receiver, offset } => {
-                self.publish_rx_clock_offset(receiver, offset).await
+                self.receiver_clock_offset_changed(receiver, offset).await;
             }
         }
+    }
+
+    async fn receiver_clock_offset_changed(&mut self, name: String, offset: u64) {
+        let Some(receiver) = self.receivers.get_mut(&name) else {
+            return;
+        };
+        receiver.clock_offset = offset;
+        let data = receiver.clone();
+        self.publish_receiver(&name, data).await;
     }
 
     async fn publish_vsc(&self) {
@@ -221,23 +241,15 @@ impl ObservabilityActor {
         };
     }
 
-    async fn publish_receiver(&self, name: &str, descriptor: RxDescriptor) {
+    async fn publish_receiver(&self, name: &str, data: ReceiverData) {
         if let Some(wb) = &self.wb {
-            publish_individual(wb, topic!(ROOT_KEY, name, "config"), descriptor).await;
+            publish_individual(wb, topic!(ROOT_KEY, name, "config"), data).await;
         };
     }
 
     async fn unpublish_receiver(&self, name: &str) {
         if let Some(wb) = &self.wb {
             wb.delete_async(topic!(ROOT_KEY, name)).await.ok();
-        };
-    }
-
-    async fn publish_rx_clock_offset(&self, receiver: String, offset: u64) {
-        if let Some(wb) = &self.wb {
-            wb.set_async(topic!(ROOT_KEY, receiver, "mediaClockOffset"), offset)
-                .await
-                .ok();
         };
     }
 }

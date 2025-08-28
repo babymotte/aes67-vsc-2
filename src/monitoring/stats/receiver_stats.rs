@@ -17,7 +17,6 @@ use tracing::{debug, info, warn};
 pub struct ReceiverStats {
     id: String,
     desc: Option<RxDescriptor>,
-    latest_received_frame: Frames,
     delay_buffer: AverageCalculationBuffer<Frames>,
     measured_link_offset: AverageCalculationBuffer<Frames>,
     timestamp_offset: Option<u64>,
@@ -29,7 +28,6 @@ impl ReceiverStats {
         Self {
             id,
             desc: None,
-            latest_received_frame: 0,
             measured_link_offset: AverageCalculationBuffer::new(vec![0; 1000].into()),
             delay_buffer: AverageCalculationBuffer::new(vec![0; 1000].into()),
             timestamp_offset: None,
@@ -219,29 +217,36 @@ impl ReceiverStats {
         observ_tx: mpsc::Sender<ObservabilityEvent>,
     ) {
         debug!("Calibrating timestamp offset at RTP timestamp {rtp_timestamp}");
-        if let Some(previous_offset) = self.timestamp_offset {
+
+        let needs_update = if let Some(previous_offset) = self.timestamp_offset {
             if previous_offset != offset {
                 warn!(
                     "RTP timestamp offset changed from {previous_offset} to {offset}, this may lead to audio interruptions"
                 );
+                true
             } else {
                 info!("Offset did not change ({offset})");
+                false
             }
         } else {
             info!("Offset: {offset}");
+            true
+        };
+
+        if needs_update {
+            self.timestamp_offset = Some(offset);
+            observ_tx
+                .send(ObservabilityEvent::Stats(
+                    crate::monitoring::StatsReport::Receiver(
+                        ReceiverStatsReport::MediaClockOffsetChanged {
+                            receiver: self.id.clone(),
+                            offset,
+                        },
+                    ),
+                ))
+                .await
+                .ok();
         }
-        self.timestamp_offset = Some(offset);
-        observ_tx
-            .send(ObservabilityEvent::Stats(
-                crate::monitoring::StatsReport::Receiver(
-                    ReceiverStatsReport::MediaClockOffsetChanged {
-                        receiver: self.id.clone(),
-                        offset,
-                    },
-                ),
-            ))
-            .await
-            .ok();
     }
 
     async fn process_packet_from_wrong_sender(
