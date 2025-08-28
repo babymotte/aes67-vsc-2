@@ -50,10 +50,24 @@ impl AudioBufferPointer {
         unsafe { from_raw_parts(self.ptr as *const u8, self.len) }
     }
 
+    /// Gets the actual audio buffer from the pointer as a mutable slice.
+    /// # Safety
+    /// The audio buffer this pointer refers to belongs to a different thread or process. It is only safe
+    /// to read from or write to this buffer if some kind of synchronization mechanism is in place. In the
+    /// receiver this is achieved by sending the pointer to the receiver through a channel along with a
+    /// tokio::sync::oneshot::Sender<DataState> that signals the owner of the buffer that write operation
+    /// is complete and it is now safe to read from the buffer.
     pub unsafe fn buffer_mut<T>(&mut self) -> &mut [T] {
         unsafe { from_raw_parts_mut(self.ptr as *mut T, self.len) }
     }
 
+    /// Gets the actual audio buffer from the pointer as an AudioBuffer.
+    /// # Safety
+    /// The audio buffer this pointer refers to belongs to a different thread or process. It is only safe
+    /// to read from or write to this buffer if some kind of synchronization mechanism is in place. In the
+    /// receiver this is achieved by sending the pointer to the receiver through a channel along with a
+    /// tokio::sync::oneshot::Sender<DataState> that signals the owner of the buffer that write operation
+    /// is complete and it is now safe to read from the buffer.
     pub unsafe fn audio_buffer<'a, 'b>(
         &'a mut self,
         desc: &'b RxDescriptor,

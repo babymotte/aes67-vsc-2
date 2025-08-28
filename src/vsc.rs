@@ -38,7 +38,7 @@ use tracing::info;
 enum VscApiMessage {
     CreateReceiver(
         String,
-        ReceiverConfig,
+        Box<ReceiverConfig>,
         oneshot::Sender<ReceiverInternalResult<(ReceiverApi, u32)>>,
     ),
     DestroyReceiverById(u32, oneshot::Sender<ReceiverInternalResult<()>>),
@@ -82,7 +82,7 @@ impl VirtualSoundCardApi {
     ) -> VscApiResult<(ReceiverApi, u32)> {
         let (tx, rx) = oneshot::channel();
         self.api_tx
-            .blocking_send(VscApiMessage::CreateReceiver(id, config, tx))
+            .blocking_send(VscApiMessage::CreateReceiver(id, Box::new(config), tx))
             .ok();
         Ok(rx.blocking_recv().map_err(ReceiverInternalError::from)??)
     }
@@ -133,7 +133,7 @@ impl VirtualSoundCard {
         while let Some(msg) = self.api_rx.recv().await {
             match msg {
                 VscApiMessage::CreateReceiver(id, config, tx) => {
-                    tx.send(self.create_receiver(id, config).await).ok();
+                    tx.send(self.create_receiver(id, *config).await).ok();
                 }
                 VscApiMessage::DestroyReceiverById(id, tx) => {
                     tx.send(self.destroy_receiver(id).await).ok();
