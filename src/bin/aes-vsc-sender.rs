@@ -17,7 +17,7 @@
 
 use aes67_vsc_2::{
     buffer::AudioBufferPointer,
-    error::Aes67Vsc2Result,
+    error::SenderInternalResult,
     formats::{AudioFormat, FrameFormat, MilliSeconds, SampleFormat, SampleWriter},
     sender::start_sender,
     time::{MediaClock, SystemMediaClock},
@@ -70,7 +70,7 @@ async fn run<C: MediaClock>(
     target_address: SocketAddr,
     audio_format: AudioFormat,
     ptime: MilliSeconds,
-) -> Aes67Vsc2Result<()> {
+) -> SenderInternalResult<()> {
     let (rrs, rrc) = request_response_channel();
 
     start_sender(
@@ -133,7 +133,7 @@ impl<C: MediaClock> Player<C> {
     async fn process_data_request(
         &mut self,
         audio_buffer: AudioBufferPointer,
-    ) -> Aes67Vsc2Result<bool> {
+    ) -> SenderInternalResult<bool> {
         self.interval.tick().await;
         let seq_ts = self.write_audio_data(audio_buffer)?;
         Ok(self.rrs.respond(seq_ts))
@@ -142,7 +142,7 @@ impl<C: MediaClock> Player<C> {
     fn write_audio_data(
         &mut self,
         audio_buffer: AudioBufferPointer,
-    ) -> Aes67Vsc2Result<(Seq, u64)> {
+    ) -> SenderInternalResult<(Seq, u64)> {
         if self.time == 0 {
             self.time = self.clock.current_media_time()?;
         } else {

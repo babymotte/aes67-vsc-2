@@ -16,7 +16,10 @@
  */
 
 use crate::{
-    error::{Aes67Vsc2Error, Aes67Vsc2Result},
+    error::{
+        ReceiverInternalError, ReceiverInternalResult, ToBoxedResult, VscApiResult,
+        VscInternalError, VscInternalResult,
+    },
     receiver::{
         api::ReceiverApi,
         config::{ReceiverConfig, RxDescriptor},
@@ -36,9 +39,9 @@ enum VscApiMessage {
     CreateReceiver(
         String,
         ReceiverConfig,
-        oneshot::Sender<Aes67Vsc2Result<(ReceiverApi, u32)>>,
+        oneshot::Sender<ReceiverInternalResult<(ReceiverApi, u32)>>,
     ),
-    DestroyReceiverById(u32, oneshot::Sender<Aes67Vsc2Result<()>>),
+    DestroyReceiverById(u32, oneshot::Sender<ReceiverInternalResult<()>>),
     Stop(oneshot::Sender<()>),
 }
 
@@ -47,7 +50,11 @@ pub struct VirtualSoundCardApi {
 }
 
 impl VirtualSoundCardApi {
-    pub fn new(name: String) -> Aes67Vsc2Result<Self> {
+    pub fn new(name: String) -> VscApiResult<Self> {
+        Ok(VirtualSoundCardApi::try_new(name).boxed()?)
+    }
+
+    fn try_new(name: String) -> VscInternalResult<Self> {
         let (result_tx, result_rx) = oneshot::channel();
         let (api_tx, api_rx) = mpsc::channel(1024);
         thread::Builder::new()
@@ -57,7 +64,7 @@ impl VirtualSoundCardApi {
                 let runtime = match runtime::Builder::new_current_thread().enable_all().build() {
                     Ok(it) => it,
                     Err(e) => {
-                        result_tx.send(Err(Aes67Vsc2Error::from(e))).ok();
+                        result_tx.send(Err(VscInternalError::from(e))).ok();
                         return;
                     }
                 };
@@ -72,26 +79,26 @@ impl VirtualSoundCardApi {
         &self,
         id: String,
         config: ReceiverConfig,
-    ) -> Aes67Vsc2Result<(ReceiverApi, u32)> {
+    ) -> VscApiResult<(ReceiverApi, u32)> {
         let (tx, rx) = oneshot::channel();
         self.api_tx
             .blocking_send(VscApiMessage::CreateReceiver(id, config, tx))
             .ok();
-        rx.blocking_recv()?
+        Ok(rx.blocking_recv().map_err(ReceiverInternalError::from)??)
     }
 
-    pub fn destroy_receiver(&self, id: u32) -> Aes67Vsc2Result<()> {
+    pub fn destroy_receiver(&self, id: u32) -> VscApiResult<()> {
         let (tx, rx) = oneshot::channel();
         self.api_tx
             .blocking_send(VscApiMessage::DestroyReceiverById(id, tx))
             .ok();
-        rx.blocking_recv()?
+        Ok(rx.blocking_recv().map_err(ReceiverInternalError::from)??)
     }
 
-    pub fn close(self) -> Aes67Vsc2Result<()> {
+    pub fn close(self) -> VscApiResult<()> {
         let (tx, rx) = oneshot::channel();
         self.api_tx.blocking_send(VscApiMessage::Stop(tx)).ok();
-        Ok(rx.blocking_recv()?)
+        Ok(rx.blocking_recv().map_err(VscInternalError::from).boxed()?)
     }
 }
 
@@ -145,7 +152,7 @@ impl VirtualSoundCard {
         &mut self,
         name: String,
         config: ReceiverConfig,
-    ) -> Aes67Vsc2Result<(ReceiverApi, u32)> {
+    ) -> ReceiverInternalResult<(ReceiverApi, u32)> {
         self.rx_counter += 1;
         let id = self.rx_counter;
         let display_name = format!("{}/rx/{}", self.name, name);
@@ -162,7 +169,7 @@ impl VirtualSoundCard {
         Ok((receiver_api, id))
     }
 
-    async fn destroy_receiver(&mut self, id: u32) -> Aes67Vsc2Result<()> {
+    async fn destroy_receiver(&mut self, id: u32) -> ReceiverInternalResult<()> {
         info!("Destroying receiver '{id}' …");
         // TODO
         info!("Receiver '{id}' successfully destroyed.");

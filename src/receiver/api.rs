@@ -15,7 +15,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{buffer::AudioBufferPointer, error::Aes67Vsc2Result, receiver::config::RxDescriptor};
+use crate::{buffer::AudioBufferPointer, error::ReceiverApiResult, receiver::config::RxDescriptor};
 use tokio::sync::{mpsc, oneshot};
 use tracing::instrument;
 
@@ -70,7 +70,7 @@ impl ReceiverApi {
     }
 
     #[instrument(skip(self), ret, err)]
-    pub async fn info(&self) -> Aes67Vsc2Result<RxDescriptor> {
+    pub async fn info(&self) -> ReceiverApiResult<RxDescriptor> {
         let (tx, rx) = oneshot::channel();
         self.api_tx
             .send(ReceiverApiMessage::GetInfo { tx })
@@ -84,7 +84,7 @@ impl ReceiverApi {
         playout_time: u64,
         buffer_ptr: usize,
         buffer_len: usize,
-    ) -> Aes67Vsc2Result<DataState> {
+    ) -> ReceiverApiResult<DataState> {
         let (tx, rx) = oneshot::channel();
         let buffer = AudioBufferPointer::new(buffer_ptr, buffer_len);
         let req = AudioDataRequest {

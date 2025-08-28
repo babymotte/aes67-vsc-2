@@ -19,12 +19,10 @@ use axum::{http::StatusCode, response::IntoResponse};
 use miette::Diagnostic;
 use opentelemetry_otlp::ExporterBuildError;
 use rtp_rs::{RtpPacketBuildError, RtpReaderError};
-use shared_memory::ShmemError;
 use std::{fmt::Display, io, net::AddrParseError};
 use thiserror::Error;
 use tokio::sync::oneshot;
 use tracing_subscriber::{filter::ParseError, util::TryInitError};
-use worterbuch_client::ConnectionError;
 
 pub enum ErrorCode {
     WorterbuchError = 0x10,
@@ -44,64 +42,264 @@ pub enum ErrorCode {
     JackError = 0x1E,
     Other = 0x1F,
 }
-
-// TODO split into receiver error, sender error, etc and remove any unused error variants
 #[derive(Error, Debug, Diagnostic)]
-pub enum Aes67Vsc2Error {
-    #[error("Worterbuch error: {0}")]
-    WorterbuchError(#[from] ConnectionError),
+pub enum VscApiError {
+    #[error("Internal error: {0}")]
+    Internal(#[from] Box<VscInternalError>),
+    #[error("Sender error: {0}")]
+    Sender(#[from] Box<SenderApiError>),
+    #[error("Receiver error: {0}")]
+    Receiver(#[from] Box<ReceiverApiError>),
+    #[error("Channel error.")]
+    ChannelError(#[from] oneshot::error::RecvError),
+}
+
+#[derive(Error, Debug, Diagnostic)]
+pub enum SenderApiError {
+    #[error("Internal error: {0}")]
+    Internal(#[from] Box<SenderInternalError>),
+    #[error("Channel error.")]
+    ChannelError(#[from] oneshot::error::RecvError),
+}
+
+#[derive(Error, Debug, Diagnostic)]
+pub enum ReceiverApiError {
+    #[error("Internal error: {0}")]
+    Internal(#[from] Box<ReceiverInternalError>),
+    #[error("Channel error.")]
+    ChannelError(#[from] oneshot::error::RecvError),
+}
+
+#[derive(Error, Debug, Diagnostic)]
+pub enum VscInternalError {
+    #[error("Config error: {0}")]
+    ConfigError(#[from] ConfigError),
     #[error("I/O error: {0}")]
     IoError(#[from] io::Error),
-    #[error("YAML parse error: {0}")]
-    YamlError(#[from] serde_yaml::Error),
+    #[error("Channel error.")]
+    ChannelError(#[from] oneshot::error::RecvError),
+    #[error("Telemetry error: {0}")]
+    TelemetryError(#[from] TelemetryError),
+}
+
+#[derive(Error, Debug, Diagnostic)]
+pub enum SenderInternalError {
+    #[error("Config error: {0}")]
+    ConfigError(#[from] ConfigError),
+    #[error("System clock Error: {0}.")]
+    SystemClockError(#[from] SystemClockError),
+    #[error("I/O error: {0}")]
+    IoError(#[from] io::Error),
+    #[error("RTP packet builder error: {0:?}")]
+    RtpPacketBuildError(#[from] WrappedRtpPacketBuildError),
+}
+
+#[derive(Error, Debug, Diagnostic)]
+pub enum ReceiverInternalError {
+    #[error("Config error: {0}")]
+    ConfigError(#[from] ConfigError),
+    #[error("System clock Error: {0}.")]
+    SystemClockError(#[from] SystemClockError),
+    #[error("I/O error: {0}")]
+    IoError(#[from] io::Error),
+    #[error("Channel error.")]
+    ChannelError(#[from] oneshot::error::RecvError),
+}
+
+#[derive(Error, Debug, Diagnostic)]
+pub enum JackError {}
+
+#[derive(Error, Debug, Diagnostic)]
+pub enum AlsaError {}
+
+#[derive(Error, Debug, Diagnostic)]
+pub enum TelemetryError {
     #[error("Tracing init error: {0}")]
     TryInitError(#[from] TryInitError),
     #[error("Tracing init error: {0}")]
     TraceError(#[from] ExporterBuildError),
     #[error("Tracing config parse error: {0}")]
     ParseError(#[from] ParseError),
-    #[error("API error.")]
-    ApiError(#[from] oneshot::error::RecvError),
-    #[error("Unknown smaple format: {0}")]
-    UnsupportedSampleFormat(String),
-    #[error("Invalid SDP: {0}")]
-    InvalidSdp(String),
-    #[error("Invalid IP address: {0}")]
-    InvalidIp(#[from] AddrParseError),
-    #[error("JSON serde error: {0}")]
-    JsonSerdeError(#[from] serde_json::Error),
-    #[error("Shared memory error: {0}")]
-    SharedMemoryError(#[from] ShmemError),
-    #[error("Received invalid RTP data: {0:?}")]
-    InvalidRtpData(#[from] WrappedRtpError),
-    #[error("RTP packet builder error: {0:?}")]
-    RtpPacketBuildError(#[from] WrappedRtpPacketBuildError),
-    #[error("Jack error: {0:?}")]
-    JackError(#[from] jack::Error),
-    #[error("General error: {0}")]
-    Other(String),
 }
 
-impl Aes67Vsc2Error {
-    pub fn error_code(&self) -> u8 {
+#[derive(Error, Debug, Diagnostic)]
+pub enum ConfigError {
+    #[error("YAML parse error: {0}")]
+    YamlError(#[from] serde_yaml::Error),
+    #[error("I/O error: {0}")]
+    IoError(#[from] io::Error),
+    #[error("Invalid SDP: {0}")]
+    InvalidSdp(String),
+    #[error("Invalid localIP: {0}")]
+    InvalidLocalIP(String),
+    #[error("Invalid IP address: {0}")]
+    InvalidIp(#[from] AddrParseError),
+    #[error("Unsupported sample format: {0}")]
+    UnsupportedSampleFormat(String),
+    #[error("NIC with specified IP not found: {0}")]
+    NoSuchNIC(String),
+}
+
+#[derive(Error, Debug, Diagnostic)]
+#[error("System clock error: {0}")]
+pub struct SystemClockError(pub String);
+
+#[derive(Error, Debug, Diagnostic)]
+pub enum Aes67Vsc2Error {
+    #[error("I/O error: {0}")]
+    IoError(#[from] Box<io::Error>),
+    #[error("Config error: {0}")]
+    ConfigError(#[from] Box<ConfigError>),
+    #[error(transparent)]
+    VscApiError(#[from] Box<VscApiError>),
+    #[error("Sender API error: {0}")]
+    SenderApiError(#[from] Box<SenderApiError>),
+    #[error("Receiver API error: {0}")]
+    ReceiverApiError(#[from] Box<ReceiverApiError>),
+    #[error("Internal VSC error: {0}")]
+    VscInternalError(#[from] Box<VscInternalError>),
+    #[error("Internal Sender error: {0}")]
+    SenderInternalError(#[from] Box<SenderInternalError>),
+    #[error("Internal Receiver error: {0}")]
+    ReceiverInternalError(#[from] Box<ReceiverInternalError>),
+    #[error("Jack error: {0}")]
+    JackError(#[from] Box<JackError>),
+    #[error("Alsa error: {0}")]
+    AlsaError(#[from] Box<AlsaError>),
+    #[error("Telemetry error: {0}")]
+    TelemetryError(#[from] Box<TelemetryError>),
+    #[error("Worterbuch error: {0}")]
+    WorterbuchError(#[from] Box<worterbuch_client::ConnectionError>),
+}
+
+pub type Aes67Vsc2Result<T> = Result<T, Aes67Vsc2Error>;
+pub type VscApiResult<T> = Result<T, VscApiError>;
+pub type SenderApiResult<T> = Result<T, SenderApiError>;
+pub type ReceiverApiResult<T> = Result<T, ReceiverApiError>;
+pub type VscInternalResult<T> = Result<T, VscInternalError>;
+pub type SenderInternalResult<T> = Result<T, SenderInternalError>;
+pub type ReceiverInternalResult<T> = Result<T, ReceiverInternalError>;
+pub type JackResult<T> = Result<T, JackError>;
+pub type AlsaResult<T> = Result<T, AlsaError>;
+pub type TelemetryResult<T> = Result<T, TelemetryError>;
+pub type ConfigResult<T> = Result<T, ConfigError>;
+pub type SystemClockResult<T> = Result<T, SystemClockError>;
+
+pub trait ToBoxed {
+    fn boxed(self) -> Box<Self>;
+}
+
+impl<T: std::error::Error> ToBoxed for T {
+    fn boxed(self) -> Box<Self> {
+        Box::new(self)
+    }
+}
+
+pub trait ToBoxedResult<T, E: ToBoxed> {
+    fn boxed(self) -> Result<T, Box<E>>;
+}
+
+impl<T, E: ToBoxed + std::error::Error> ToBoxedResult<T, E> for std::result::Result<T, E> {
+    fn boxed(self) -> Result<T, Box<E>> {
         match self {
-            Aes67Vsc2Error::WorterbuchError(_) => ErrorCode::WorterbuchError as u8,
-            Aes67Vsc2Error::IoError(_) => ErrorCode::IoError as u8,
-            Aes67Vsc2Error::YamlError(_) => ErrorCode::YamlError as u8,
-            Aes67Vsc2Error::TryInitError(_) => ErrorCode::TryInitError as u8,
-            Aes67Vsc2Error::TraceError(_) => ErrorCode::TraceError as u8,
-            Aes67Vsc2Error::ParseError(_) => ErrorCode::ParseError as u8,
-            Aes67Vsc2Error::ApiError(_) => ErrorCode::ApiError as u8,
-            Aes67Vsc2Error::UnsupportedSampleFormat(_) => ErrorCode::UnknownSampleFormat as u8,
-            Aes67Vsc2Error::InvalidSdp(_) => ErrorCode::InvalidSdp as u8,
-            Aes67Vsc2Error::InvalidIp(_) => ErrorCode::InvalidIp as u8,
-            Aes67Vsc2Error::JsonSerdeError(_) => ErrorCode::JsonSerdeError as u8,
-            Aes67Vsc2Error::SharedMemoryError(_) => ErrorCode::SharedMemoryError as u8,
-            Aes67Vsc2Error::InvalidRtpData(_) => ErrorCode::InvalidRtpData as u8,
-            Aes67Vsc2Error::RtpPacketBuildError(_) => ErrorCode::RtpPacketBuildError as u8,
-            Aes67Vsc2Error::JackError(_) => ErrorCode::JackError as u8,
-            Aes67Vsc2Error::Other(_) => ErrorCode::Other as u8,
+            Ok(it) => Ok(it),
+            Err(err) => Err(err.boxed()),
         }
+    }
+}
+
+impl From<SenderInternalError> for VscApiError {
+    fn from(value: SenderInternalError) -> Self {
+        VscApiError::Sender(SenderApiError::Internal(value.boxed()).boxed())
+    }
+}
+
+impl From<ReceiverInternalError> for VscApiError {
+    fn from(value: ReceiverInternalError) -> Self {
+        VscApiError::Receiver(ReceiverApiError::Internal(value.boxed()).boxed())
+    }
+}
+
+// #[derive(Error, Debug, Diagnostic)]
+// pub enum Aes67Vsc2Error {
+//     #[error("Worterbuch error: {0}")]
+//     WorterbuchError(#[from] ConnectionError),
+//     #[error("YAML parse error: {0}")]
+//     YamlError(#[from] serde_yaml::Error),
+//     #[error("Tracing init error: {0}")]
+//     TryInitError(#[from] TryInitError),
+//     #[error("Tracing init error: {0}")]
+//     TraceError(#[from] ExporterBuildError),
+//     #[error("Tracing config parse error: {0}")]
+//     ParseError(#[from] ParseError),
+//     #[error("API error.")]
+//     ApiError(#[from] oneshot::error::RecvError),
+//     #[error("Invalid SDP: {0}")]
+//     InvalidSdp(String),
+//     #[error("Invalid IP address: {0}")]
+//     InvalidIp(#[from] AddrParseError),
+//     #[error("JSON serde error: {0}")]
+//     JsonSerdeError(#[from] serde_json::Error),
+//     #[error("Shared memory error: {0}")]
+//     SharedMemoryError(#[from] ShmemError),
+//     #[error("Received invalid RTP data: {0:?}")]
+//     InvalidRtpData(#[from] WrappedRtpError),
+//     #[error("RTP packet builder error: {0:?}")]
+//     RtpPacketBuildError(#[from] WrappedRtpPacketBuildError),
+//     #[error("Jack error: {0:?}")]
+//     JackError(#[from] jack::Error),
+//     #[error("General error: {0}")]
+//     Other(String),
+// }
+
+// impl Aes67Vsc2Error {
+//     pub fn error_code(&self) -> u8 {
+//         match self {
+//             Aes67Vsc2Error::WorterbuchError(_) => ErrorCode::WorterbuchError as u8,
+//             Aes67Vsc2Error::IoError(_) => ErrorCode::IoError as u8,
+//             Aes67Vsc2Error::YamlError(_) => ErrorCode::YamlError as u8,
+//             Aes67Vsc2Error::TryInitError(_) => ErrorCode::TryInitError as u8,
+//             Aes67Vsc2Error::TraceError(_) => ErrorCode::TraceError as u8,
+//             Aes67Vsc2Error::ParseError(_) => ErrorCode::ParseError as u8,
+//             Aes67Vsc2Error::ApiError(_) => ErrorCode::ApiError as u8,
+//             Aes67Vsc2Error::UnsupportedSampleFormat(_) => ErrorCode::UnknownSampleFormat as u8,
+//             Aes67Vsc2Error::InvalidSdp(_) => ErrorCode::InvalidSdp as u8,
+//             Aes67Vsc2Error::InvalidIp(_) => ErrorCode::InvalidIp as u8,
+//             Aes67Vsc2Error::JsonSerdeError(_) => ErrorCode::JsonSerdeError as u8,
+//             Aes67Vsc2Error::SharedMemoryError(_) => ErrorCode::SharedMemoryError as u8,
+//             Aes67Vsc2Error::InvalidRtpData(_) => ErrorCode::InvalidRtpData as u8,
+//             Aes67Vsc2Error::RtpPacketBuildError(_) => ErrorCode::RtpPacketBuildError as u8,
+//             Aes67Vsc2Error::JackError(_) => ErrorCode::JackError as u8,
+//             Aes67Vsc2Error::Other(_) => ErrorCode::Other as u8,
+//         }
+//     }
+// }
+
+pub trait GetErrorCode {
+    fn error_code(&self) -> u8;
+}
+
+impl GetErrorCode for ConfigError {
+    fn error_code(&self) -> u8 {
+        todo!()
+    }
+}
+
+impl GetErrorCode for VscApiError {
+    fn error_code(&self) -> u8 {
+        todo!()
+    }
+}
+
+impl GetErrorCode for ReceiverApiError {
+    fn error_code(&self) -> u8 {
+        todo!()
+    }
+}
+
+impl GetErrorCode for ReceiverInternalError {
+    fn error_code(&self) -> u8 {
+        todo!()
     }
 }
 
@@ -129,5 +327,3 @@ impl IntoResponse for Aes67Vsc2Error {
         (StatusCode::INTERNAL_SERVER_ERROR, format!("{self}")).into_response()
     }
 }
-
-pub type Aes67Vsc2Result<T> = Result<T, Aes67Vsc2Error>;

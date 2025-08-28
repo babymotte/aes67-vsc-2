@@ -17,7 +17,7 @@
 
 use crate::{
     config::{Config, EndpointConfig},
-    error::Aes67Vsc2Result,
+    error::TelemetryResult,
 };
 use opentelemetry::{KeyValue, global, trace::TracerProvider};
 use opentelemetry_otlp::WithExportConfig;
@@ -32,7 +32,7 @@ use tracing_subscriber::{
     EnvFilter, Layer, filter::filter_fn, fmt, layer::SubscriberExt, util::SubscriberInitExt,
 };
 
-pub async fn init(config: &Config) -> Aes67Vsc2Result<()> {
+pub async fn init(config: &Config) -> TelemetryResult<()> {
     let subscriber = tracing_subscriber::registry().with(
         fmt::Layer::new()
             .with_ansi(supports_color::on(Stream::Stderr).is_some())

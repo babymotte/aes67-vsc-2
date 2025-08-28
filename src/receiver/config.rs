@@ -16,7 +16,7 @@
  */
 
 use crate::{
-    error::{Aes67Vsc2Error, Aes67Vsc2Result},
+    error::{ConfigError, ConfigResult},
     formats::{self, AudioFormat, FrameFormat, MilliSeconds, Seconds},
 };
 use lazy_static::lazy_static;
@@ -71,8 +71,8 @@ pub struct RxDescriptor {
 }
 
 impl TryFrom<&ReceiverConfig> for RxDescriptor {
-    type Error = Aes67Vsc2Error;
-    fn try_from(rx_config: &ReceiverConfig) -> Aes67Vsc2Result<Self> {
+    type Error = ConfigError;
+    fn try_from(rx_config: &ReceiverConfig) -> ConfigResult<Self> {
         let id = rx_config.id.to_owned();
         let descriptor = RxDescriptor::new(id, &rx_config.session, rx_config.link_offset)?;
         Ok(descriptor)
@@ -84,11 +84,11 @@ impl RxDescriptor {
         receiver_id: String,
         sd: &SessionDescription,
         link_offset: MilliSeconds,
-    ) -> Aes67Vsc2Result<Self> {
+    ) -> ConfigResult<Self> {
         let media = if let Some(it) = sd.media_descriptions.first() {
             it
         } else {
-            return Err(Aes67Vsc2Error::InvalidSdp(
+            return Err(ConfigError::InvalidSdp(
                 "no media description found".to_owned(),
             ));
         };
@@ -96,16 +96,14 @@ impl RxDescriptor {
         let fmt = if let Some(format) = media.media_name.formats.first() {
             format
         } else {
-            return Err(Aes67Vsc2Error::InvalidSdp(
-                "no media format found".to_owned(),
-            ));
+            return Err(ConfigError::InvalidSdp("no media format found".to_owned()));
         };
 
         // TODO make sure the right rtpmap is picked in case there is more than one
         let rtpmap = if let Some(Some(it)) = media.attribute("rtpmap") {
             it
         } else {
-            return Err(Aes67Vsc2Error::InvalidSdp("no rtpmap found".to_owned()));
+            return Err(ConfigError::InvalidSdp("no rtpmap found".to_owned()));
         };
 
         let (payload_type, sample_format, sample_rate, channels) =
@@ -117,7 +115,7 @@ impl RxDescriptor {
                     caps[4].parse().expect("regex guarantees this is a number"),
                 )
             } else {
-                return Err(Aes67Vsc2Error::InvalidSdp("malformed rtpmap".to_owned()));
+                return Err(ConfigError::InvalidSdp("malformed rtpmap".to_owned()));
             };
 
         let no_labels = || {
@@ -139,7 +137,7 @@ impl RxDescriptor {
         };
 
         if &payload_type != fmt {
-            return Err(Aes67Vsc2Error::InvalidSdp(
+            return Err(ConfigError::InvalidSdp(
                 "rtpmap and media description payload types do not match".to_owned(),
             ));
         }
@@ -151,29 +149,25 @@ impl RxDescriptor {
         {
             ptime
         } else {
-            return Err(Aes67Vsc2Error::InvalidSdp("no ptime".to_owned()));
+            return Err(ConfigError::InvalidSdp("no ptime".to_owned()));
         };
 
         let mediaclk = if let Some(it) = media.attribute("mediaclk").and_then(|it| it) {
             it
         } else {
-            return Err(Aes67Vsc2Error::InvalidSdp("mediaclk".to_owned()));
+            return Err(ConfigError::InvalidSdp("mediaclk".to_owned()));
         };
 
         let rtp_offset = if let Some(caps) = MEDIACLK_REGEX.captures(mediaclk) {
             caps[1].parse().expect("regex guarantees this is a number")
         } else {
-            return Err(Aes67Vsc2Error::InvalidSdp("malformed mediaclk".to_owned()));
+            return Err(ConfigError::InvalidSdp("malformed mediaclk".to_owned()));
         };
 
         let session_name = sd.session_name.clone();
         let session_id = sd.origin.session_id;
         let session_version = sd.origin.session_version;
-        let origin_ip = sd
-            .origin
-            .unicast_address
-            .parse()
-            .map_err(|e| Aes67Vsc2Error::Other(format!("error parsing origin IP: {e}")))?;
+        let origin_ip = sd.origin.unicast_address.parse()?;
 
         let frame_format = FrameFormat {
             channels,

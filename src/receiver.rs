@@ -24,14 +24,14 @@ pub mod config;
 
 use crate::{
     buffer::FloatingPointAudioBuffer,
-    error::{Aes67Vsc2Error, Aes67Vsc2Result},
+    error::{ReceiverInternalError, ReceiverInternalResult},
     receiver::{
         api::{AudioDataRequest, DataState, ReceiverApi, ReceiverApiMessage},
         config::{ReceiverConfig, RxDescriptor},
     },
     socket::create_rx_socket,
     time::MediaClock,
-    utils::{AverageCalculationBuffer, set_realtime_priority},
+    utils::AverageCalculationBuffer,
 };
 use rtp_rs::{RtpReader, Seq};
 use std::{net::SocketAddr, thread, time::Duration, u32};
@@ -48,12 +48,12 @@ use tracing::{debug, error, info, instrument, trace, warn};
 use worterbuch_client::Worterbuch;
 
 #[instrument(skip(wb, clock))]
-pub async fn start_receiver<C: MediaClock>(
+pub(crate) async fn start_receiver<C: MediaClock>(
     id: String,
     config: ReceiverConfig,
     wb: Option<Worterbuch>,
     clock: C,
-) -> Aes67Vsc2Result<ReceiverApi> {
+) -> ReceiverInternalResult<ReceiverApi> {
     let receiver_id = id.clone();
     let (result_tx, result_rx) = oneshot::channel();
     let (api_tx, api_rx) = mpsc::channel(1024);
@@ -65,7 +65,7 @@ pub async fn start_receiver<C: MediaClock>(
         let runtime = match runtime::Builder::new_current_thread().enable_all().build() {
             Ok(it) => it,
             Err(e) => {
-                result_tx.send(Err(Aes67Vsc2Error::from(e))).ok();
+                result_tx.send(Err(ReceiverInternalError::from(e))).ok();
                 return;
             }
         };
@@ -93,7 +93,6 @@ struct Receiver<C: MediaClock> {
     delay_buffer: AverageCalculationBuffer<i64>,
     rtp_packet_buffer: FloatingPointAudioBuffer,
     latest_received_frame: u64,
-    strict_checks_disabled: bool,
     measured_link_offset: AverageCalculationBuffer<u64>,
     socket: UdpSocket,
 }
@@ -138,7 +137,6 @@ impl<C: MediaClock> Receiver<C> {
                     desc_rx,
                 ),
                 latest_received_frame: 0,
-                strict_checks_disabled: true,
                 measured_link_offset: AverageCalculationBuffer::new(measured_link_offset_buffer),
                 socket,
             }
@@ -155,7 +153,7 @@ impl<C: MediaClock> Receiver<C> {
         }
     }
 
-    async fn run(mut self) -> Aes67Vsc2Result<()> {
+    async fn run(mut self) -> ReceiverInternalResult<()> {
         let mut receive_buffer = [0; 65_535];
 
         info!("Receiver '{}' started.", self.id);
@@ -179,7 +177,7 @@ impl<C: MediaClock> Receiver<C> {
         Ok(())
     }
 
-    fn handle_api_message(&mut self, api_msg: ReceiverApiMessage) -> Aes67Vsc2Result<()> {
+    fn handle_api_message(&mut self, api_msg: ReceiverApiMessage) -> ReceiverInternalResult<()> {
         match api_msg {
             ReceiverApiMessage::GetInfo { tx } => _ = tx.send(self.desc.clone()),
             ReceiverApiMessage::DataRequest { req, tx } => _ = tx.send(self.write_out_buf(req)),
@@ -251,7 +249,7 @@ impl<C: MediaClock> Receiver<C> {
         data: &[u8],
         addr: SocketAddr,
         media_time_at_reception: u64,
-    ) -> Aes67Vsc2Result<()> {
+    ) -> ReceiverInternalResult<()> {
         // TODO how to detect lost packets?
 
         if addr.ip() != self.desc.origin_ip {
@@ -327,11 +325,9 @@ impl<C: MediaClock> Receiver<C> {
 
         let playout_time = ingress_timestamp + self.desc.frames_in_link_offset() as u64;
         if media_time_at_reception > playout_time {
-            trace!("Packet {} is late for playout.", u16::from(seq));
+            warn!("Packet {} is late for playout.", u16::from(seq));
             // TODO report late packet
-            if !self.strict_checks_disabled {
-                return Ok(());
-            }
+            return Ok(());
         }
         if ingress_timestamp > media_time_at_reception {
             let diff = ingress_timestamp - media_time_at_reception;
@@ -342,9 +338,7 @@ impl<C: MediaClock> Receiver<C> {
                 "Packet {} was received {diff} frames / {diff_usec} µs before it was sent, sender and receiver clocks must be out of sync.",
                 u16::from(seq)
             );
-            if !self.strict_checks_disabled {
-                return Ok(());
-            }
+            return Ok(());
         }
         let delay = media_time_at_reception as i64 - ingress_timestamp as i64;
         if let Some(average) = self.delay_buffer.update(delay) {
@@ -370,7 +364,7 @@ impl<C: MediaClock> Receiver<C> {
     }
 
     #[instrument(skip(self))]
-    fn calibrate_timestamp_offset(&mut self, rtp_timestamp: u32) -> Aes67Vsc2Result<()> {
+    fn calibrate_timestamp_offset(&mut self, rtp_timestamp: u32) -> ReceiverInternalResult<()> {
         info!("Calibrating timestamp offset at RTP timestamp {rtp_timestamp}");
 
         let media_time = self.clock.current_media_time()?;

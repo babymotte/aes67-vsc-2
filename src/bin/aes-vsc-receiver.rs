@@ -18,8 +18,7 @@
 use aes67_vsc_2::{
     config::Config,
     error::{Aes67Vsc2Error, Aes67Vsc2Result},
-    playout::jack::start_jack_playout,
-    receiver::{config::RxDescriptor, start_receiver},
+    receiver::config::RxDescriptor,
     telemetry,
     time::{MediaClock, SystemMediaClock},
     utils::request_response_channel,
@@ -116,12 +115,12 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-fn print_time<C: MediaClock>(ptp_clock: &C) -> Aes67Vsc2Result<()> {
-    let ptp_time = ptp_clock.current_ptp_time_millis()?;
-    info!("PTP time: {}", datetime(ptp_time),);
-    Ok(())
-}
+// fn print_time<C: MediaClock>(ptp_clock: &C) -> Aes67Vsc2Result<()> {
+//     let ptp_time = ptp_clock.current_ptp_time_millis()?;
+//     info!("PTP time: {}", datetime(ptp_time),);
+//     Ok(())
+// }
 
-fn datetime(now: u64) -> DateTime<Local> {
-    DateTime::<Local>::from(UNIX_EPOCH + Duration::from_millis(now))
-}
+// fn datetime(now: u64) -> DateTime<Local> {
+//     DateTime::<Local>::from(UNIX_EPOCH + Duration::from_millis(now))
+// }

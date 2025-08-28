@@ -15,7 +15,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{error::Aes67Vsc2Error, receiver::config::RxDescriptor};
+use crate::{error::ConfigError, receiver::config::RxDescriptor};
 use serde::{Deserialize, Serialize};
 use std::{str::FromStr, time::Duration};
 
@@ -122,25 +122,25 @@ pub enum SampleFormat {
 }
 
 impl FromStr for SampleFormat {
-    type Err = Aes67Vsc2Error;
+    type Err = ConfigError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "L16" => Ok(SampleFormat::L24),
             "L24" => Ok(SampleFormat::L24),
-            other => Err(Aes67Vsc2Error::UnsupportedSampleFormat(other.to_owned())),
+            other => Err(ConfigError::UnsupportedSampleFormat(other.to_owned())),
         }
     }
 }
 
 impl TryFrom<BitDepth> for SampleFormat {
-    type Error = Aes67Vsc2Error;
+    type Error = ConfigError;
 
     fn try_from(value: BitDepth) -> Result<Self, Self::Error> {
         match value {
             16 => Ok(SampleFormat::L16),
             24 => Ok(SampleFormat::L24),
-            _ => Err(Aes67Vsc2Error::UnsupportedSampleFormat(format!(
+            _ => Err(ConfigError::UnsupportedSampleFormat(format!(
                 "unsupported bit depth: {value}"
             ))),
         }

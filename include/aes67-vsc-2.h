@@ -25,64 +25,64 @@ static const unsigned int AES_VSC_ERROR_RECEIVER_NOT_READY_YET = 0x0B;
 static const unsigned int AES_VSC_ERROR_NO_DATA = 0x0C;
 
 #ifdef __cplusplus
-extern "C"
-{
+extern "C" {
 #endif
+
 
 #include <stddef.h>
 #include <stdint.h>
 
+/** <No documentation available> */
+typedef struct Aes67VscReceiverConfig {
     /** <No documentation available> */
-    typedef struct Aes67VscReceiverConfig
-    {
-        /** <No documentation available> */
-        char const *id;
-
-        /** <No documentation available> */
-        char const *sdp;
-
-        /** <No documentation available> */
-        float link_offset;
-
-        /** <No documentation available> */
-        float buffer_time;
-
-        /** <No documentation available> */
-        uint32_t const *delay_calculation_interval;
-
-        /** <No documentation available> */
-        char const *interface_ip;
-    } Aes67VscReceiverConfig_t;
-
-    /** \brief
-     *  Create a new AES67 receiver
-     *  * `id` - A string pointer to the receiver ID, which must be unique within the process (not within the virtual sound card!)
-     *  * `audio_format` - The receiver's audio format
-     */
-    int32_t
-    aes67_vsc_create_receiver(
-        char const *receiver_name,
-        Aes67VscReceiverConfig_t const *config);
-
-    /** \brief
-     *  Destroy an existing AES67 receiver. Destroying a receiver will stop it from receiving any
-     *  more audio packets and filling the assigned buffer. It will also de-allocate any memory the
-     *  receiver has allocated during its creation.
-     *
-     *  * `vsc` - the virtual soundcard on which to destroy the receiver
-     *  * `id` - the ID of the receiver to be destroyed
-     */
-    uint8_t
-    aes67_vsc_destroy_receiver(
-        uint32_t receiver_id);
+    char const * id;
 
     /** <No documentation available> */
-    uint8_t
-    aes67_vsc_receive(
-        uint32_t receiver_id,
-        uint64_t playout_time,
-        size_t buffer_ptr,
-        size_t buffer_len);
+    char const * sdp;
+
+    /** <No documentation available> */
+    float link_offset;
+
+    /** <No documentation available> */
+    float buffer_time;
+
+    /** <No documentation available> */
+    uint32_t const * delay_calculation_interval;
+
+    /** <No documentation available> */
+    char const * interface_ip;
+} Aes67VscReceiverConfig_t;
+
+/** \brief
+ *  Create a new AES67 receiver
+ *  * `id` - A string pointer to the receiver ID, which must be unique within the process (not within the virtual sound card!)
+ *  * `audio_format` - The receiver's audio format
+ */
+int32_t
+aes67_vsc_create_receiver (
+    char const * receiver_name,
+    Aes67VscReceiverConfig_t const * config);
+
+/** \brief
+ *  Destroy an existing AES67 receiver. Destroying a receiver will stop it from receiving any
+ *  more audio packets and filling the assigned buffer. It will also de-allocate any memory the
+ *  receiver has allocated during its creation.
+ *
+ *  * `vsc` - the virtual soundcard on which to destroy the receiver
+ *  * `id` - the ID of the receiver to be destroyed
+ */
+uint8_t
+aes67_vsc_destroy_receiver (
+    uint32_t receiver_id);
+
+/** <No documentation available> */
+uint8_t
+aes67_vsc_receive (
+    uint32_t receiver_id,
+    uint64_t playout_time,
+    size_t buffer_ptr,
+    size_t buffer_len);
+
 
 #ifdef __cplusplus
 } /* extern \"C\" */

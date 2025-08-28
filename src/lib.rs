@@ -19,7 +19,6 @@ pub mod buffer;
 pub mod config;
 pub mod error;
 pub mod formats;
-pub mod playout;
 pub mod receiver;
 pub mod sender;
 pub mod serde;

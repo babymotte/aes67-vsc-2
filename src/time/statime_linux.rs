@@ -2,6 +2,7 @@
  * This is in large parts copied with some modifications from https://crates.io/crates/statime-linux
  */
 
+use crate::{error::SystemClockResult, time::system_time};
 use pnet::datalink::NetworkInterface;
 use rand::{SeedableRng, rngs::StdRng};
 use statime::{
@@ -44,11 +45,9 @@ use tokio::{
 use tracing::{error, info, trace};
 use worterbuch_client::{Worterbuch, topic};
 
-use crate::{error::Aes67Vsc2Result, time::system_time};
-
 pub type PtpClock = SharedClock<OverlayClock<LinuxClock>>;
 
-pub fn current_offset(clock: &PtpClock) -> Aes67Vsc2Result<i64> {
+pub fn current_offset(clock: &PtpClock) -> SystemClockResult<i64> {
     let ptp_time = clock.now();
     let system_time = system_time()?;
 

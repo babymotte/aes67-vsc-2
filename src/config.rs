@@ -15,9 +15,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{
-    error::Aes67Vsc2Result, playout::config::PlayoutConfig, receiver::config::ReceiverConfig,
-};
+use crate::{error::ConfigResult, receiver::config::ReceiverConfig};
 use clap::Parser;
 use gethostname::gethostname;
 use serde::{Deserialize, Serialize};
@@ -128,8 +126,6 @@ pub struct Config {
     pub telemetry: Option<TelemetryConfig>,
     #[serde(default)]
     pub receiver_config: Option<ReceiverConfig>,
-    #[serde(default)]
-    pub playout_config: Option<PlayoutConfig>,
     pub interface_ip: IpAddr,
 }
 
@@ -139,7 +135,6 @@ impl Default for Config {
             app: Default::default(),
             telemetry: Default::default(),
             receiver_config: Default::default(),
-            playout_config: Default::default(),
             interface_ip: IpAddr::V4(Ipv4Addr::LOCALHOST),
         }
     }
@@ -147,7 +142,7 @@ impl Default for Config {
 
 impl Config {
     #[instrument]
-    pub async fn load() -> Aes67Vsc2Result<Config> {
+    pub async fn load() -> ConfigResult<Config> {
         let args = Args::parse();
 
         info!("Loading config …");
@@ -158,7 +153,7 @@ impl Config {
     }
 
     #[instrument]
-    async fn load_from_file(path: Option<&Path>) -> Aes67Vsc2Result<Config> {
+    async fn load_from_file(path: Option<&Path>) -> ConfigResult<Config> {
         match path {
             Some(path) => {
                 let content = fs::read_to_string(&path).await?;

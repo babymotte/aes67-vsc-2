@@ -15,7 +15,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::error::{Aes67Vsc2Error, Aes67Vsc2Result};
+use crate::error::{ConfigError, ConfigResult};
 use pnet::datalink::{self, NetworkInterface};
 use std::{
     any::Any,
@@ -95,7 +95,7 @@ pub fn panic_to_string(panic: Box<dyn Any + Send>) -> String {
     }
 }
 
-pub fn find_network_interface(ip: IpAddr) -> Aes67Vsc2Result<NetworkInterface> {
+pub fn find_network_interface(ip: IpAddr) -> ConfigResult<NetworkInterface> {
     for iface in datalink::interfaces() {
         for ipn in &iface.ips {
             if ipn.ip() == ip {
@@ -104,7 +104,7 @@ pub fn find_network_interface(ip: IpAddr) -> Aes67Vsc2Result<NetworkInterface> {
         }
     }
 
-    Err(Aes67Vsc2Error::Other(format!("no NIC with IP {ip} exists")))
+    Err(ConfigError::NoSuchNIC(ip.to_string()))
 }
 
 pub trait GetAverage<T> {

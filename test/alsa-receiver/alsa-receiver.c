@@ -11,10 +11,16 @@
 
 // TODO read config from file
 static const char RECEIVER_ID[] = "alsa-1";
-static const char INTERFACE_IP[] = "192.168.178.39";
-static const float LINK_OFFSET = 420.0;
-static const char SDP[] = "v=0\r\no=- 10943522194 10943522206 IN IP4 192.168.178.97\r\ns=AVIO-Bluetooth : 2\r\ni=2 channels: Left, Right\r\nc=IN IP4 239.69.232.56/32\r\nt=0 0\r\na=keywds:Dante\r\na=recvonly\r\nm=audio 5004 RTP/AVP 97\r\na=rtpmap:97 L24/48000/2\r\na=ptime:1\r\na=ts-refclk:ptp=IEEE1588-2008:00-1D-C1-FF-FE-0E-10-C4:0\r\na=mediaclk:direct=0\r\n";
-static const unsigned int ALSA_FRAMES_PER_CYCLE = 48;
+static const char INTERFACE_IP[] = "192.168.178.36";
+static const float LINK_OFFSET = 411.0;
+static const unsigned int ALSA_FRAMES_PER_CYCLE = 24;
+
+// AVIO Bluetooth
+static const char SDP[] = "v=0\r\no=- 10943522194 10943522219 IN IP4 192.168.178.97\r\ns=AVIO-Bluetooth : 2\r\ni=2 channels: Left, Right\r\nc=IN IP4 239.69.232.56/32\r\nt=0 0\r\na=keywds:Dante\r\na=recvonly\r\nm=audio 5004 RTP/AVP 97\r\na=rtpmap:97 L24/48000/2\r\na=ptime:1\r\na=ts-refclk:ptp=IEEE1588-2008:00-1D-C1-FF-FE-0E-10-C4:0\r\na=mediaclk:direct=0\r\n";
+// XCEL 1201
+// static const char SDP[] = "v=0\r\no=- 18311622000 18311622019 IN IP4 192.168.178.114\r\ns=XCEL-1201 : 32\r\ni=2 channels: DANTE TX 01, DANTE TX 02\r\nc=IN IP4 239.69.224.56/32\r\nt=0 0\r\na=keywds:Dante\r\na=recvonly\r\nm=audio 5004 RTP/AVP 97\r\na=rtpmap:97 L24/48000/2\r\na=ptime:1\r\na=ts-refclk:ptp=IEEE1588-2008:2C-CF-67-FF-FE-75-93-93:0\r\na=mediaclk:direct=0\r\n";
+// NUC
+// static const char SDP[] = "v=0\r\no=- 12043261674 12043261683 IN IP4 192.168.178.190\r\ns=NUC : 2\r\ni=2 channels: Left, Right\r\nc=IN IP4 239.69.143.213/32\r\nt=0 0\r\na=keywds:Dante\r\na=recvonly\r\nm=audio 5004 RTP/AVP 97\r\na=rtpmap:97 L24/48000/2\r\na=ptime:1\r\na=ts-refclk:ptp=IEEE1588-2008:2C-CF-67-FF-FE-75-93-93:0\r\na=mediaclk:direct=0\r\n";
 
 // TODO read from SDP
 static const unsigned int SAMPLE_RATE = 48000;
@@ -178,26 +184,10 @@ int main(int argc, char *argv[])
 
         if (res == AES_VSC_ERROR_NO_DATA)
         {
-            if (media_time > current_time_media(&now))
-            {
-                // we have freewheeled too far ahead, let's wait and try again
-                usleep(1);
-                // skip writing to playout buffer and incrementing cycle
-                continue;
-            }
-            else
-            {
-                // assuming the link offset and alsa buffer size are configured correctly and there is no clock sync isue this should only happen if the sender stopped sending packets or there is a network issue
-                for (int i = 0; i < buffer_len; i++)
-                {
-                    buffer[i] = 0.0;
-                }
-                if (!muted)
-                {
-                    fprintf(stderr, "no data received even though we are not ahead of the clock\n");
-                }
-                mute(&muted);
-            }
+            // we have freewheeled too far ahead, let's wait and try again
+            usleep(1);
+            // skip writing to playout buffer and incrementing cycle
+            continue;
         }
 
         if (muted)

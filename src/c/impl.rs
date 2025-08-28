@@ -3,7 +3,10 @@ use crate::{
     AES_VSC_ERROR_RECEIVER_BUFFER_UNDERRUN, AES_VSC_ERROR_RECEIVER_NOT_FOUND,
     AES_VSC_ERROR_RECEIVER_NOT_READY_YET, AES_VSC_OK, Aes67VscReceiverConfig,
     config::Config,
-    error::{Aes67Vsc2Error, Aes67Vsc2Result},
+    error::{
+        ConfigError, ConfigResult, GetErrorCode, ReceiverApiResult, ReceiverInternalResult,
+        ToBoxedResult, VscApiResult, VscInternalError, VscInternalResult,
+    },
     receiver::{
         api::{DataState, ReceiverApi},
         config::ReceiverConfig,
@@ -25,8 +28,8 @@ lazy_static! {
     static ref RECEIVERS: DashMap<u32, ReceiverApi> = DashMap::new();
 }
 
-fn init_vsc() -> Aes67Vsc2Result<Arc<VirtualSoundCardApi>> {
-    try_init()?;
+fn init_vsc() -> VscApiResult<Arc<VirtualSoundCardApi>> {
+    try_init().boxed()?;
     let vsc_name = env::var("AES67_VSC_NAME").unwrap_or("aes67-virtual-sound-card".to_owned());
     info!("Creating new VSC with name '{vsc_name}' …");
     let vsc = VirtualSoundCardApi::new(vsc_name.clone())?;
@@ -34,14 +37,14 @@ fn init_vsc() -> Aes67Vsc2Result<Arc<VirtualSoundCardApi>> {
     Ok(Arc::new(vsc))
 }
 
-fn try_init() -> Aes67Vsc2Result<()> {
+fn try_init() -> VscInternalResult<()> {
     let runtime = runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
     let init_future = async {
         let config = Config::load().await?;
         telemetry::init(&config).await?;
-        Ok::<(), Aes67Vsc2Error>(())
+        Ok::<(), VscInternalError>(())
     };
     runtime.block_on(init_future)?;
     info!("AES67 VSC subsystem initialized successfully.");
@@ -49,11 +52,11 @@ fn try_init() -> Aes67Vsc2Result<()> {
 }
 
 impl<'a> TryFrom<&Aes67VscReceiverConfig<'a>> for ReceiverConfig {
-    type Error = Aes67Vsc2Error;
-    fn try_from(value: &Aes67VscReceiverConfig<'a>) -> Aes67Vsc2Result<Self> {
+    type Error = ConfigError;
+    fn try_from(value: &Aes67VscReceiverConfig<'a>) -> ConfigResult<Self> {
         let id = value.id.to_string();
         let session = SessionDescription::unmarshal(&mut Cursor::new(value.sdp.to_str()))
-            .map_err(|e| Aes67Vsc2Error::InvalidSdp(e.to_string()))?;
+            .map_err(|e| ConfigError::InvalidSdp(e.to_string()))?;
         let link_offset = value.link_offset;
         let buffer_time = value.buffer_time;
         let delay_calculation_interval = value.delay_calculation_interval.map(ToOwned::to_owned);
@@ -73,7 +76,7 @@ impl<'a> TryFrom<&Aes67VscReceiverConfig<'a>> for ReceiverConfig {
 pub fn try_create_receiver(
     name: char_p::Ref<'_>,
     config: &Aes67VscReceiverConfig,
-) -> Aes67Vsc2Result<i32> {
+) -> ReceiverInternalResult<i32> {
     let receiver_id = name.to_string();
     let config = match ReceiverConfig::try_from(config) {
         Ok(it) => it,
@@ -92,7 +95,7 @@ pub fn try_receive(
     playout_time: u64,
     buffer_ptr: usize,
     buffer_len: usize,
-) -> Aes67Vsc2Result<u8> {
+) -> ReceiverApiResult<u8> {
     let Some(receiver) = RECEIVERS.get(&receiver_id) else {
         return Ok(AES_VSC_ERROR_RECEIVER_NOT_FOUND);
     };
@@ -107,7 +110,7 @@ pub fn try_receive(
     }
 }
 
-pub fn try_destroy_receiver(id: u32) -> Aes67Vsc2Result<u8> {
+pub fn try_destroy_receiver(id: u32) -> VscApiResult<u8> {
     VIRTUAL_SOUND_CARD.destroy_receiver(id)?;
     Ok(AES_VSC_OK)
 }

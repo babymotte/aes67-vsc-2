@@ -19,7 +19,10 @@
 
 mod r#impl;
 
-use crate::c::r#impl::{try_create_receiver, try_destroy_receiver, try_receive};
+use crate::{
+    c::r#impl::{try_create_receiver, try_destroy_receiver, try_receive},
+    error::GetErrorCode,
+};
 use ::safer_ffi::prelude::*;
 
 #[cfg(feature = "headers")]
@@ -38,13 +41,6 @@ pub const AES_VSC_ERROR_RECEIVER_BUFFER_UNDERRUN: u8 = 0x09;
 pub const AES_VSC_ERROR_CLOCK_SYNC_ERROR: u8 = 0x0A;
 pub const AES_VSC_ERROR_RECEIVER_NOT_READY_YET: u8 = 0x0B;
 pub const AES_VSC_ERROR_NO_DATA: u8 = 0x0C;
-
-/// A unique reference to a virtual sound card
-#[derive_ReprC]
-#[repr(C)]
-pub struct Aes67VscVirtualSoundCard {
-    id: u32,
-}
 
 #[derive_ReprC]
 #[repr(C)]

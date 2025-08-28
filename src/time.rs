@@ -19,7 +19,7 @@ mod statime_linux;
 
 use crate::{
     config::Config,
-    error::{Aes67Vsc2Error, Aes67Vsc2Result},
+    error::{ConfigResult, SystemClockError, SystemClockResult},
     formats::{AudioFormat, FramesPerSecond, MilliSeconds, frames_in_buffer},
     time::statime_linux::{PtpClock, statime_linux},
     utils::find_network_interface,
@@ -198,7 +198,7 @@ pub struct RemoteMediaClock {
 }
 
 impl RemoteMediaClock {
-    pub async fn connect(port: u16, sample_rate: FramesPerSecond) -> Aes67Vsc2Result<Self> {
+    pub async fn connect(port: u16, sample_rate: FramesPerSecond) -> SystemClockResult<Self> {
         let offset = Arc::new(AtomicI64::new(0));
         let task_offset = offset.clone();
         let (close, mut close_rx) = mpsc::channel(1);
@@ -232,7 +232,7 @@ impl RemoteMediaClock {
         })
     }
 
-    pub fn media_time(&self) -> Aes67Vsc2Result<MediaClockTimestamp> {
+    pub fn media_time(&self) -> SystemClockResult<MediaClockTimestamp> {
         media_time(
             self.offset.load(std::sync::atomic::Ordering::Acquire),
             self.sample_rate,
@@ -270,7 +270,7 @@ async fn read_offset(
 pub fn media_time(
     offset: i64,
     sample_rate: FramesPerSecond,
-) -> Aes67Vsc2Result<MediaClockTimestamp> {
+) -> SystemClockResult<MediaClockTimestamp> {
     let timestamp = wrapped_media_time(sample_rate, offset)?;
     Ok(MediaClockTimestamp {
         timestamp,
@@ -278,18 +278,18 @@ pub fn media_time(
     })
 }
 
-fn wrapped_media_time(sample_rate: FramesPerSecond, offset: i64) -> Aes67Vsc2Result<u32> {
+fn wrapped_media_time(sample_rate: FramesPerSecond, offset: i64) -> SystemClockResult<u32> {
     Ok(wrap_u128(raw_media_time(sample_rate, offset)?))
 }
 
-fn raw_media_time(sample_rate: FramesPerSecond, offset: i64) -> Aes67Vsc2Result<u128> {
+fn raw_media_time(sample_rate: FramesPerSecond, offset: i64) -> SystemClockResult<u128> {
     let now = system_time()?;
     let nanos =
         (now.tv_sec * Duration::from_secs(1).as_nanos() as i64 + now.tv_nsec + offset) as u128;
     Ok((nanos * sample_rate as u128) / std::time::Duration::from_secs(1).as_nanos())
 }
 
-pub fn wallclock_monotonic_offset_nanos() -> Aes67Vsc2Result<u128> {
+pub fn wallclock_monotonic_offset_nanos() -> SystemClockResult<u128> {
     let mut tp_wall = timespec {
         tv_sec: 0,
         tv_nsec: 0,
@@ -303,15 +303,11 @@ pub fn wallclock_monotonic_offset_nanos() -> Aes67Vsc2Result<u128> {
     let res_wall = unsafe { clock_gettime(CLOCK_TAI, &mut tp_wall) };
 
     if res_wall == -1 {
-        return Err(Aes67Vsc2Error::Other(
-            "could not get system time".to_owned(),
-        ));
+        return Err(SystemClockError("could not get system time".to_owned()));
     }
 
     if res_mono == -1 {
-        return Err(Aes67Vsc2Error::Other(
-            "could not get monotonic time".to_owned(),
-        ));
+        return Err(SystemClockError("could not get monotonic time".to_owned()));
     }
 
     Ok(tp_wall.as_nanos() - tp_mono.as_nanos())
@@ -337,31 +333,29 @@ impl SystemTime for timespec {
     }
 }
 
-pub fn system_time() -> Aes67Vsc2Result<timespec> {
+pub fn system_time() -> SystemClockResult<timespec> {
     system_time_for_clock_id(CLOCK_TAI)
 }
 
-pub fn system_time_monotonic() -> Aes67Vsc2Result<timespec> {
+pub fn system_time_monotonic() -> SystemClockResult<timespec> {
     system_time_for_clock_id(CLOCK_MONOTONIC)
 }
 
-fn system_time_for_clock_id(clock_id: clockid_t) -> Aes67Vsc2Result<timespec> {
+fn system_time_for_clock_id(clock_id: clockid_t) -> SystemClockResult<timespec> {
     let mut tp = timespec {
         tv_sec: 0,
         tv_nsec: 0,
     };
     if unsafe { clock_gettime(clock_id, &mut tp) } == -1 {
-        Err(Aes67Vsc2Error::Other(
-            "could not get system time".to_owned(),
-        ))
+        Err(SystemClockError("could not get system time".to_owned()))
     } else {
         Ok(tp)
     }
 }
 
 pub trait MediaClock: Clone + Send + 'static {
-    fn current_media_time(&self) -> Aes67Vsc2Result<u64>;
-    fn current_ptp_time_millis(&self) -> Aes67Vsc2Result<u64>;
+    fn current_media_time(&self) -> SystemClockResult<u64>;
+    fn current_ptp_time_millis(&self) -> SystemClockResult<u64>;
 }
 
 #[derive(Clone)]
@@ -376,7 +370,7 @@ impl SystemMediaClock {
 }
 
 impl MediaClock for SystemMediaClock {
-    fn current_media_time(&self) -> Aes67Vsc2Result<u64> {
+    fn current_media_time(&self) -> SystemClockResult<u64> {
         let ptp_time = system_time()?;
         Ok(media_time_from_ptp(
             ptp_time.tv_sec,
@@ -385,7 +379,7 @@ impl MediaClock for SystemMediaClock {
         ))
     }
 
-    fn current_ptp_time_millis(&self) -> Aes67Vsc2Result<u64> {
+    fn current_ptp_time_millis(&self) -> SystemClockResult<u64> {
         let ptp_time = system_time()?;
         Ok(ptp_time.tv_sec as u64 * 1_000 + ptp_time.tv_nsec as u64 / 1_000_000)
     }
@@ -402,7 +396,7 @@ impl StatimePtpMediaClock {
         config: &Config,
         audio_format: AudioFormat,
         wb: Worterbuch,
-    ) -> Aes67Vsc2Result<Self> {
+    ) -> ConfigResult<Self> {
         let iface = find_network_interface(config.interface_ip)?;
         let ip = config.interface_ip;
         let root_key = config.instance_name();
@@ -415,7 +409,7 @@ impl StatimePtpMediaClock {
 }
 
 impl MediaClock for StatimePtpMediaClock {
-    fn current_media_time(&self) -> Aes67Vsc2Result<u64> {
+    fn current_media_time(&self) -> SystemClockResult<u64> {
         let ptp_time = self.statime_ptp_clock.now();
         Ok(media_time_from_ptp(
             ptp_time.secs() as i64,
@@ -424,7 +418,7 @@ impl MediaClock for StatimePtpMediaClock {
         ))
     }
 
-    fn current_ptp_time_millis(&self) -> Aes67Vsc2Result<u64> {
+    fn current_ptp_time_millis(&self) -> SystemClockResult<u64> {
         let ptp_time = self.statime_ptp_clock.now();
         Ok(ptp_time.secs() as u64 * 1_000 + ptp_time.subsec_nanos() as u64 / 1_000_000)
     }

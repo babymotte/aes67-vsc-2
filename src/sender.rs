@@ -19,7 +19,7 @@ pub mod api;
 
 use crate::{
     buffer::AudioBufferPointer,
-    error::{Aes67Vsc2Result, WrappedRtpPacketBuildError},
+    error::{SenderInternalResult, WrappedRtpPacketBuildError},
     formats::{AudioFormat, MilliSeconds},
     socket::create_tx_socket,
     utils::RequestResponseClientChannel,
@@ -37,7 +37,7 @@ pub async fn start_sender(
     target_address: SocketAddr,
     audio_format: AudioFormat,
     ptime: MilliSeconds,
-) -> Aes67Vsc2Result<()> {
+) -> SenderInternalResult<()> {
     let socket = create_tx_socket(local_ip, port)?;
 
     subsys.start(SubsystemBuilder::new("sender", move |s| async move {
@@ -64,7 +64,11 @@ struct SenderActor {
 }
 
 impl SenderActor {
-    async fn run(mut self, audio_format: AudioFormat, ptime: MilliSeconds) -> Aes67Vsc2Result<()> {
+    async fn run(
+        mut self,
+        audio_format: AudioFormat,
+        ptime: MilliSeconds,
+    ) -> SenderInternalResult<()> {
         let buffer_len = audio_format.bytes_per_buffer(ptime);
         eprintln!("send buffer len: {buffer_len}");
         let audio_buffer = vec![0u8; buffer_len];
@@ -81,7 +85,12 @@ impl SenderActor {
         Ok(())
     }
 
-    fn data_received(&mut self, seq: Seq, ingress_time: u64, buf: &[u8]) -> Aes67Vsc2Result<()> {
+    fn data_received(
+        &mut self,
+        seq: Seq,
+        ingress_time: u64,
+        buf: &[u8],
+    ) -> SenderInternalResult<()> {
         let len = RtpPacketBuilder::new()
             .payload_type(97)
             .sequence(seq)

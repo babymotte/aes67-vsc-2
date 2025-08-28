@@ -17,7 +17,7 @@
 
 use crate::{
     config::SocketConfig,
-    error::{Aes67Vsc2Error, Aes67Vsc2Result},
+    error::{ConfigError, ConfigResult, ReceiverInternalResult, SenderInternalResult},
 };
 use miette::{IntoDiagnostic, Result};
 use sdp::{
@@ -65,11 +65,18 @@ pub fn init_tcp_socket(bind_addr: IpAddr, port: u16, config: SocketConfig) -> Re
 }
 
 #[instrument]
-pub fn create_rx_socket(sdp: &SessionDescription, local_ip: IpAddr) -> Aes67Vsc2Result<UdpSocket> {
+pub fn create_rx_socket(
+    sdp: &SessionDescription,
+    local_ip: IpAddr,
+) -> ReceiverInternalResult<UdpSocket> {
+    Ok(try_create_rx_socket(sdp, local_ip)?)
+}
+
+fn try_create_rx_socket(sdp: &SessionDescription, local_ip: IpAddr) -> ConfigResult<UdpSocket> {
     let global_c = sdp.connection_information.as_ref();
 
     if sdp.media_descriptions.len() > 1 {
-        return Err(Aes67Vsc2Error::InvalidSdp(
+        return Err(ConfigError::InvalidSdp(
             "redundant streams aren't supported yet".to_owned(),
         ));
     }
@@ -77,13 +84,13 @@ pub fn create_rx_socket(sdp: &SessionDescription, local_ip: IpAddr) -> Aes67Vsc2
     let media = if let Some(media) = sdp.media_descriptions.first() {
         media
     } else {
-        return Err(Aes67Vsc2Error::InvalidSdp(
+        return Err(ConfigError::InvalidSdp(
             "media description is missing".to_owned(),
         ));
     };
 
     if media.media_name.media != "audio" {
-        return Err(Aes67Vsc2Error::InvalidSdp(format!(
+        return Err(ConfigError::InvalidSdp(format!(
             "unsupported media type: {}",
             media.media_name.media
         )));
@@ -92,7 +99,7 @@ pub fn create_rx_socket(sdp: &SessionDescription, local_ip: IpAddr) -> Aes67Vsc2
     if !(media.media_name.protos.contains(&"RTP".to_owned())
         && media.media_name.protos.contains(&"AVP".to_owned()))
     {
-        return Err(Aes67Vsc2Error::InvalidSdp(format!(
+        return Err(ConfigError::InvalidSdp(format!(
             "unsupported media protocols: {:?}; only RTP/AVP is supported",
             media.media_name.protos
         )));
@@ -103,7 +110,7 @@ pub fn create_rx_socket(sdp: &SessionDescription, local_ip: IpAddr) -> Aes67Vsc2
     let c = if let Some(c) = c {
         c
     } else {
-        return Err(Aes67Vsc2Error::InvalidSdp(
+        return Err(ConfigError::InvalidSdp(
             "connection data is missing".to_owned(),
         ));
     };
@@ -117,19 +124,19 @@ pub fn create_rx_socket(sdp: &SessionDescription, local_ip: IpAddr) -> Aes67Vsc2
     let address = if let Some(address) = address {
         address
     } else {
-        return Err(Aes67Vsc2Error::InvalidSdp(
+        return Err(ConfigError::InvalidSdp(
             "connection-address is missing".to_owned(),
         ));
     };
 
     if address_type != "IP4" && address_type != "IP6" {
-        return Err(Aes67Vsc2Error::InvalidSdp(format!(
+        return Err(ConfigError::InvalidSdp(format!(
             "unsupported addrtype: {address_type}"
         )));
     }
 
     if network_type != "IN" {
-        return Err(Aes67Vsc2Error::InvalidSdp(format!(
+        return Err(ConfigError::InvalidSdp(format!(
             "unsupported nettype: {network_type}"
         )));
     }
@@ -143,10 +150,9 @@ pub fn create_rx_socket(sdp: &SessionDescription, local_ip: IpAddr) -> Aes67Vsc2
     let ip = split.next();
     let prefix = split.next();
     let ip_addr: IpAddr = if let (Some(ip), Some(_prefix)) = (ip, prefix) {
-        ip.parse()
-            .map_err(|_| Aes67Vsc2Error::InvalidSdp(format!("invalid ip address: {address}")))?
+        ip.parse()?
     } else {
-        return Err(Aes67Vsc2Error::InvalidSdp(format!(
+        return Err(ConfigError::InvalidSdp(format!(
             "invalid ip address: {address}"
         )));
     };
@@ -160,10 +166,10 @@ pub fn create_rx_socket(sdp: &SessionDescription, local_ip: IpAddr) -> Aes67Vsc2
         (IpAddr::V6(ipv6_addr), IpAddr::V6(local_ip)) => {
             create_ipv6_rx_socket(ipv6_addr, local_ip, port)?
         }
-        (IpAddr::V4(_), IpAddr::V6(_)) => Err(Aes67Vsc2Error::Other(
+        (IpAddr::V4(_), IpAddr::V6(_)) => Err(ConfigError::InvalidLocalIP(
             "Cannot receive IPv4 stream when bound to local IPv6 address".to_owned(),
         ))?,
-        (IpAddr::V6(_), IpAddr::V4(_)) => Err(Aes67Vsc2Error::Other(
+        (IpAddr::V6(_), IpAddr::V4(_)) => Err(ConfigError::InvalidLocalIP(
             "Cannot receive IPv6 stream when bound to local IPv4 address".to_owned(),
         ))?,
     };
@@ -173,7 +179,7 @@ pub fn create_rx_socket(sdp: &SessionDescription, local_ip: IpAddr) -> Aes67Vsc2
 }
 
 #[instrument]
-pub fn create_tx_socket(local_ip: IpAddr, port: u16) -> Aes67Vsc2Result<std::net::UdpSocket> {
+pub fn create_tx_socket(local_ip: IpAddr, port: u16) -> SenderInternalResult<std::net::UdpSocket> {
     let socket = match local_ip {
         IpAddr::V4(_) => Socket::new(Domain::IPV4, Type::DGRAM, Some(SockProto::UDP)),
         IpAddr::V6(_) => Socket::new(Domain::IPV6, Type::DGRAM, Some(SockProto::UDP)),
@@ -192,7 +198,7 @@ pub fn create_ipv4_rx_socket(
     ip_addr: Ipv4Addr,
     local_ip: Ipv4Addr,
     port: u16,
-) -> Aes67Vsc2Result<Socket> {
+) -> ConfigResult<Socket> {
     info!(
         "Creating IPv4 {} RX socket for stream {}:{} at {}:{}",
         if ip_addr.is_multicast() {
@@ -226,7 +232,7 @@ pub fn create_ipv6_rx_socket(
     ip_addr: Ipv6Addr,
     local_ip: Ipv6Addr,
     port: u16,
-) -> Aes67Vsc2Result<Socket> {
+) -> ConfigResult<Socket> {
     info!(
         "Creating IPv6 {} RX socket for stream {}:{} at {}:{}",
         if ip_addr.is_multicast() {
