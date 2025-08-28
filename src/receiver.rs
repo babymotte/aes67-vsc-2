@@ -34,7 +34,7 @@ use crate::{
     utils::AverageCalculationBuffer,
 };
 use rtp_rs::{RtpReader, Seq};
-use std::{net::SocketAddr, thread, time::Duration, u32};
+use std::{net::SocketAddr, thread, time::Duration};
 use tokio::{
     net::UdpSocket,
     runtime, select,
@@ -45,13 +45,11 @@ use tokio::{
 };
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle, Toplevel};
 use tracing::{debug, error, info, instrument, warn};
-use worterbuch_client::Worterbuch;
 
-#[instrument(skip(wb, clock))]
+#[instrument(skip(clock))]
 pub(crate) async fn start_receiver<C: MediaClock>(
     id: String,
     config: ReceiverConfig,
-    wb: Option<Worterbuch>,
     clock: C,
 ) -> ReceiverInternalResult<ReceiverApi> {
     let receiver_id = id.clone();
@@ -69,7 +67,7 @@ pub(crate) async fn start_receiver<C: MediaClock>(
                 return;
             }
         };
-        let receiver_future = Receiver::start(id, desc, config, wb, clock, api_rx, socket);
+        let receiver_future = Receiver::start(id, desc, config, clock, api_rx, socket);
         result_tx.send(Ok(())).ok();
         runtime.block_on(receiver_future);
     })?;
@@ -82,9 +80,7 @@ pub(crate) async fn start_receiver<C: MediaClock>(
 struct Receiver<C: MediaClock> {
     id: String,
     subsys: SubsystemHandle,
-    config: ReceiverConfig,
     desc: RxDescriptor,
-    wb: Option<Worterbuch>,
     clock: C,
     api_rx: mpsc::Receiver<ReceiverApiMessage>,
     last_timestamp: Option<u32>,
@@ -102,7 +98,6 @@ impl<C: MediaClock> Receiver<C> {
         id: String,
         desc: RxDescriptor,
         config: ReceiverConfig,
-        wb: Option<Worterbuch>,
         clock: C,
         api_rx: mpsc::Receiver<ReceiverApiMessage>,
         socket: UdpSocket,
@@ -122,8 +117,6 @@ impl<C: MediaClock> Receiver<C> {
                 id,
                 subsys: s,
                 desc,
-                config,
-                wb,
                 clock,
                 api_rx,
                 last_sequence_number: None,
@@ -186,7 +179,7 @@ impl<C: MediaClock> Receiver<C> {
         Ok(())
     }
 
-    fn write_out_buf(&mut self, req: AudioDataRequest) -> DataState {
+    fn write_out_buf(&mut self, mut req: AudioDataRequest) -> DataState {
         // get the playout buffer
         // this is safe because the thread from which we borrow this buffer is blocked until we send
         // the response back, so no concurrent reads and writes can occur

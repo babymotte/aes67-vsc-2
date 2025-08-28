@@ -50,11 +50,14 @@ impl AudioBufferPointer {
         unsafe { from_raw_parts(self.ptr as *const u8, self.len) }
     }
 
-    pub unsafe fn buffer_mut<T>(&self) -> &mut [T] {
+    pub unsafe fn buffer_mut<T>(&mut self) -> &mut [T] {
         unsafe { from_raw_parts_mut(self.ptr as *mut T, self.len) }
     }
 
-    pub unsafe fn audio_buffer<'a, 'b>(&'a self, desc: &'b RxDescriptor) -> AudioBuffer<'a, 'b> {
+    pub unsafe fn audio_buffer<'a, 'b>(
+        &'a mut self,
+        desc: &'b RxDescriptor,
+    ) -> AudioBuffer<'a, 'b> {
         unsafe {
             let buf = self.buffer_mut();
             AudioBuffer { buf, desc }
@@ -63,6 +66,10 @@ impl AudioBufferPointer {
 
     pub fn len(&self) -> usize {
         self.len
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
     }
 }
 
@@ -186,9 +193,9 @@ impl FloatingPointAudioBuffer {
     ) -> DataState {
         let channels = self.desc.audio_format.frame_format.channels;
         let chunk_size = self.buf.len() / channels;
-        let channel_partitions = self.buf.chunks(chunk_size);
+        let mut channel_partitions = self.buf.chunks(chunk_size);
 
-        let Some(rtp_buffer) = channel_partitions.skip(channel).next() else {
+        let Some(rtp_buffer) = channel_partitions.nth(channel) else {
             return DataState::InvalidChannelNumber;
         };
 

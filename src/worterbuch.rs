@@ -42,21 +42,21 @@ async fn worterbuch(
     config: Config,
 ) -> ConnectionResult<()> {
     wb.set_client_name(format!("{}/{}", config.app.name, config.app.instance.name))
-        .await;
+        .await?;
     wb.set_grave_goods(
         vec![topic!(config.app.name, config.app.instance.name, "#").as_ref()].as_ref(),
     )
-    .await;
+    .await?;
     wb.set_last_will(&[KeyValuePair::of(
         topic!(config.app.name, config.app.instance.name, "running"),
         false,
     )])
-    .await;
+    .await?;
     wb.set(
         topic!(config.app.name, config.app.instance.name, "running"),
         true,
     )
-    .await;
+    .await?;
     select! {
         _ = on_disconnect => {
             subsys.request_shutdown();

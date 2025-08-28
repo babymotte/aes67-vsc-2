@@ -141,7 +141,7 @@ impl<C: MediaClock> Player<C> {
 
     fn write_audio_data(
         &mut self,
-        audio_buffer: AudioBufferPointer,
+        mut audio_buffer: AudioBufferPointer,
     ) -> SenderInternalResult<(Seq, u64)> {
         if self.time == 0 {
             self.time = self.clock.current_media_time()?;

@@ -105,11 +105,11 @@ impl VirtualSoundCardApi {
 struct VirtualSoundCard {
     name: String,
     api_rx: mpsc::Receiver<VscApiMessage>,
-    txs: HashMap<u32, SenderApi>,
+    _txs: HashMap<u32, SenderApi>,
     rxs: HashMap<u32, ReceiverApi>,
-    tx_names: HashMap<u32, String>,
+    _tx_names: HashMap<u32, String>,
     rx_names: HashMap<u32, String>,
-    tx_counter: u32,
+    _tx_counter: u32,
     rx_counter: u32,
 }
 
@@ -118,11 +118,11 @@ impl VirtualSoundCard {
         VirtualSoundCard {
             name,
             api_rx,
-            txs: HashMap::new(),
+            _txs: HashMap::new(),
             rxs: HashMap::new(),
-            tx_names: HashMap::new(),
+            _tx_names: HashMap::new(),
             rx_names: HashMap::new(),
-            tx_counter: 0,
+            _tx_counter: 0,
             rx_counter: 0,
         }
     }
@@ -160,7 +160,7 @@ impl VirtualSoundCard {
 
         let desc = RxDescriptor::try_from(&config)?;
         let clock = SystemMediaClock::new(desc.audio_format);
-        let receiver_api = start_receiver(display_name.clone(), config, None, clock).await?;
+        let receiver_api = start_receiver(display_name.clone(), config, clock).await?;
 
         self.rx_names.insert(id, name.clone());
         self.rxs.insert(id, receiver_api.clone());

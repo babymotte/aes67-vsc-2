@@ -2,11 +2,10 @@
  * This is in large parts copied with some modifications from https://crates.io/crates/statime-linux
  */
 
-use crate::{error::SystemClockResult, time::system_time};
 use pnet::datalink::NetworkInterface;
 use rand::{SeedableRng, rngs::StdRng};
 use statime::{
-    Clock, OverlayClock, PtpInstance, PtpInstanceState, SharedClock,
+    OverlayClock, PtpInstance, PtpInstanceState, SharedClock,
     config::{ClockIdentity, InstanceConfig, SdoId, TimePropertiesDS, TimeSource},
     filters::{KalmanConfiguration, KalmanFilter},
     port::{
@@ -30,7 +29,6 @@ use std::{
     net::{IpAddr, SocketAddr},
     pin::{Pin, pin},
     sync::RwLock,
-    time::Duration,
 };
 use timestamped_socket::{
     interface::InterfaceName,
@@ -46,15 +44,6 @@ use tracing::{error, info, trace};
 use worterbuch_client::{Worterbuch, topic};
 
 pub type PtpClock = SharedClock<OverlayClock<LinuxClock>>;
-
-pub fn current_offset(clock: &PtpClock) -> SystemClockResult<i64> {
-    let ptp_time = clock.now();
-    let system_time = system_time()?;
-
-    let diff_s = ptp_time.secs() as i64 - system_time.tv_sec;
-    let diff_ns = ptp_time.subsec_nanos() as i64 - system_time.tv_nsec;
-    Ok(diff_s * Duration::from_secs(1).as_nanos() as i64 + diff_ns)
-}
 
 pin_project_lite::pin_project! {
     struct Timer {
