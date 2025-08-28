@@ -1,4 +1,7 @@
-use std::net::IpAddr;
+use std::{
+    collections::{HashMap, HashSet},
+    net::IpAddr,
+};
 
 use crate::{
     formats::Frames,
@@ -18,6 +21,7 @@ pub struct ReceiverStats {
     delay_buffer: AverageCalculationBuffer<Frames>,
     measured_link_offset: AverageCalculationBuffer<Frames>,
     timestamp_offset: Option<u64>,
+    skipped_packets: HashMap<Frames, Seq>,
 }
 
 impl ReceiverStats {
@@ -29,6 +33,7 @@ impl ReceiverStats {
             measured_link_offset: AverageCalculationBuffer::new(vec![0; 1000].into()),
             delay_buffer: AverageCalculationBuffer::new(vec![0; 1000].into()),
             timestamp_offset: None,
+            skipped_packets: HashMap::new(),
         }
     }
 
@@ -62,8 +67,17 @@ impl ReceiverStats {
                 )
                 .await;
             }
-            RxStats::OutOfOrderPacket(seq) => {
-                // TODO
+            RxStats::OutOfOrderPacket {
+                expected_timestamp,
+                expected_sequence_number,
+                actual_sequence_number,
+            } => {
+                self.process_out_of_order_packet(
+                    expected_timestamp,
+                    expected_sequence_number,
+                    actual_sequence_number,
+                )
+                .await;
             }
             RxStats::MalformedRtpPacket(e) => {
                 warn!("received malformed rtp packet: {e:?}");
@@ -142,6 +156,8 @@ impl ReceiverStats {
             info!("Network delay: {average} frames / {micros} µs / {packets:.1} packets");
             // TODO send observability event
         }
+
+        self.skipped_packets.remove(&ingress_timestamp);
     }
 
     async fn process_playout(
@@ -170,6 +186,29 @@ impl ReceiverStats {
                 );
             }
             // TODO send observability event
+        }
+
+        let mut missed_timestamps = vec![];
+
+        self.skipped_packets.retain(|ts, seq| {
+            let missed = ts > &playout_time;
+            if missed {
+                missed_timestamps.push((*ts, *seq));
+            }
+            !missed
+        });
+
+        if !missed_timestamps.is_empty() {
+            missed_timestamps.sort_by(|(ts_a, _), (ts_b, _)| ts_a.cmp(ts_b));
+            warn!(
+                "The following packets were late for playout or lost: {}",
+                missed_timestamps
+                    .iter()
+                    .map(|(ts, seq)| format!("seq {} / ts {}", u16::from(*seq), ts))
+                    .collect::<Vec<String>>()
+                    .join(", ")
+            );
+            // TODO report lost packets
         }
     }
 
@@ -232,5 +271,23 @@ impl ReceiverStats {
             delay
         );
         // TODO collect stats + publish
+    }
+
+    async fn process_out_of_order_packet(
+        &mut self,
+        expected_timestamp: Frames,
+        expected_sequence_number: Seq,
+        actual_sequence_number: Seq,
+    ) {
+        if actual_sequence_number > expected_sequence_number {
+            let diff = (actual_sequence_number - expected_sequence_number) as u32;
+            for i in 0..diff {
+                let skipped_timestamp = expected_timestamp + i as u64;
+                self.skipped_packets.insert(
+                    skipped_timestamp,
+                    expected_sequence_number + (i % u16::MAX as u32) as u16,
+                );
+            }
+        }
     }
 }

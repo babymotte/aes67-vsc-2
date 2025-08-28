@@ -325,20 +325,23 @@ impl<C: MediaClock> Receiver<C> {
                     u16::from(last_seq)
                 );
 
-                // TODO if sequence number was skipped, note down the skipped sequence number until it is either received or played out
-                // if it is played out before it is received, report lost packet
-
                 let diff = seq - expected_seq;
                 let consistent_ts = expected_ts as i64 + frames_in_packet as i64 * diff as i64;
                 if consistent_ts == ts as i64 {
                     info!(
                         "Timestamp of out-of-order packet is consistent with sequence id, queuing it for playout"
                     );
-                    self.monitoring
-                        .stats()
-                        .send(Stats::Rx(RxStats::OutOfOrderPacket(rtp.sequence_number())))
-                        .await
-                        .ok();
+                    if let Some(ts_offset) = self.timestamp_offset {
+                        self.monitoring
+                            .stats()
+                            .send(Stats::Rx(RxStats::OutOfOrderPacket {
+                                expected_timestamp: ts_offset + expected_ts as u64,
+                                expected_sequence_number: expected_seq,
+                                actual_sequence_number: rtp.sequence_number(),
+                            }))
+                            .await
+                            .ok();
+                    }
                 } else {
                     warn!(
                         "Timestamp of out-of-order packet is not consistent with sequence id, discarding it"

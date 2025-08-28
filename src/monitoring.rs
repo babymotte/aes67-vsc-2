@@ -87,7 +87,11 @@ pub enum RxStats {
         ingress_timestamp: Frames,
         media_time_at_reception: Frames,
     },
-    OutOfOrderPacket(Seq),
+    OutOfOrderPacket {
+        expected_timestamp: Frames,
+        expected_sequence_number: Seq,
+        actual_sequence_number: Seq,
+    },
     MalformedRtpPacket(RtpReaderError),
     LatePacket {
         seq: Seq,
