@@ -16,7 +16,7 @@ async fn main() {
     let session = SessionDescription::unmarshal(&mut Cursor::new(SDP)).expect("invalid SDP");
     let desc = RxDescriptor::new("minirec".to_owned(), &session, 1.0).expect("invalid session");
 
-    let clock = SystemMediaClock::new(desc.audio_format.clone());
+    let clock = SystemMediaClock::new(desc.audio_format);
 
     let sock = create_rx_socket(&session, LOCAL_IP.parse().expect("invalid IP"))
         .expect("could not create port");

@@ -44,7 +44,7 @@ use tokio::{
     },
 };
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle, Toplevel};
-use tracing::{debug, error, info, instrument, trace, warn};
+use tracing::{debug, error, info, instrument, warn};
 use worterbuch_client::Worterbuch;
 
 #[instrument(skip(wb, clock))]

@@ -159,7 +159,7 @@ impl VirtualSoundCard {
         info!("Creating receiver '{display_name}' …");
 
         let desc = RxDescriptor::try_from(&config)?;
-        let clock = SystemMediaClock::new(desc.audio_format.clone());
+        let clock = SystemMediaClock::new(desc.audio_format);
         let receiver_api = start_receiver(display_name.clone(), config, None, clock).await?;
 
         self.rx_names.insert(id, name.clone());

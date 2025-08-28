@@ -43,8 +43,7 @@ impl AudioBufferPointer {
     }
 
     pub fn from_slice<T>(slice: &[T]) -> Self {
-        let rf = slice.as_ref();
-        Self::new(rf.as_ptr() as usize, rf.len())
+        Self::new(slice.as_ptr() as usize, slice.len())
     }
 
     pub fn buffer(&self) -> &[u8] {

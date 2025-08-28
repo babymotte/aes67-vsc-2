@@ -15,20 +15,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use aes67_vsc_2::{
-    config::Config,
-    error::{Aes67Vsc2Error, Aes67Vsc2Result},
-    receiver::config::RxDescriptor,
-    telemetry,
-    time::{MediaClock, SystemMediaClock},
-    utils::request_response_channel,
-};
-use chrono::{DateTime, Local};
 use miette::Result;
-use std::time::{Duration, UNIX_EPOCH};
-use tokio::select;
-use tokio_graceful_shutdown::{SubsystemBuilder, Toplevel};
-use tracing::info;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {

@@ -49,7 +49,7 @@ async fn main() -> Result<()> {
     };
     let ptime = 1.0;
 
-    let clock = SystemMediaClock::new(audio_format.clone());
+    let clock = SystemMediaClock::new(audio_format);
 
     Toplevel::new(move |s| async move {
         s.start(SubsystemBuilder::new("aes67-vsc-2", move |s| async move {
@@ -145,15 +145,13 @@ impl<C: MediaClock> Player<C> {
     ) -> SenderInternalResult<(Seq, u64)> {
         if self.time == 0 {
             self.time = self.clock.current_media_time()?;
-        } else {
-            if let Some(delay) = self
-                .clock_drift_calculator
-                .update(self.clock.current_media_time()? as i64 - self.time as i64)
-            {
-                eprintln!("ingress delay: {delay}");
-                if delay < 0 {
-                    self.time = (self.time as i64 + delay).max(0) as u64
-                }
+        } else if let Some(delay) = self
+            .clock_drift_calculator
+            .update(self.clock.current_media_time()? as i64 - self.time as i64)
+        {
+            eprintln!("ingress delay: {delay}");
+            if delay < 0 {
+                self.time = (self.time as i64 + delay).max(0) as u64
             }
         }
 

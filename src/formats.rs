@@ -233,9 +233,9 @@ fn f32_to_bytes_2_bytes(sample: f32, bytes: &mut [u8]) {
 
 fn f32_to_bytes_3_bytes(sample: f32, bytes: &mut [u8]) {
     let sample_i32 = if sample > 0.0 {
-        (sample * i32::MAX as f32 as f32) as i32
+        (sample * i32::MAX as f32) as i32
     } else {
-        (sample * i32::MAX as f32 as f32) as i32 + 1
+        (sample * i32::MAX as f32) as i32 + 1
     };
     i32_to_bytes_3_bytes(sample_i32, bytes);
 }

@@ -100,7 +100,7 @@ impl SenderActor {
             .map_err(WrappedRtpPacketBuildError)?;
 
         self.socket
-            .send_to(&self.rtp_buffer[..len], &self.target_address)?;
+            .send_to(&self.rtp_buffer[..len], self.target_address)?;
 
         Ok(())
     }
