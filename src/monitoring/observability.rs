@@ -20,14 +20,20 @@ use worterbuch_client::{KeyValuePair, Worterbuch, topic};
 
 const ROOT_KEY: &str = "aes67-vsc";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ReceiverData {
-    config: RxDescriptor,
+struct ReceiverStats {
     clock_offset: u64,
     network_delay: u64,
     measured_link_offset_frames: u64,
     measured_link_offset_ms: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReceiverData {
+    config: RxDescriptor,
+    stats: ReceiverStats,
 }
 
 pub async fn observability(
@@ -194,14 +200,11 @@ impl ObservabilityActor {
 
     async fn receiver_created(&mut self, name: String, descriptor: RxDescriptor) {
         let data = ReceiverData {
-            clock_offset: 0,
-            network_delay: 0,
-            measured_link_offset_frames: 0,
-            measured_link_offset_ms: 0.0,
             config: descriptor.clone(),
+            stats: ReceiverStats::default(),
         };
         self.receivers.insert(name.clone(), data.clone());
-        self.publish_receiver(&name, data).await;
+        self.publish_receiver_config(&name, data.config).await;
     }
 
     async fn receiver_destroyed(&mut self, name: String) {
@@ -244,18 +247,18 @@ impl ObservabilityActor {
         let Some(receiver) = self.receivers.get_mut(&name) else {
             return;
         };
-        receiver.clock_offset = offset;
+        receiver.stats.clock_offset = offset;
         let data = receiver.clone();
-        self.publish_receiver(&name, data).await;
+        self.publish_receiver_stats(&name, data.stats).await;
     }
 
     async fn receiver_network_delay_changed(&mut self, name: String, delay: u64) {
         let Some(receiver) = self.receivers.get_mut(&name) else {
             return;
         };
-        receiver.network_delay = delay;
+        receiver.stats.network_delay = delay;
         let data = receiver.clone();
-        self.publish_receiver(&name, data).await;
+        self.publish_receiver_stats(&name, data.stats).await;
     }
 
     async fn receiver_measured_link_offset_changed(
@@ -267,10 +270,10 @@ impl ObservabilityActor {
         let Some(receiver) = self.receivers.get_mut(&name) else {
             return;
         };
-        receiver.measured_link_offset_frames = link_offset_frames;
-        receiver.measured_link_offset_ms = link_offset_ms;
+        receiver.stats.measured_link_offset_frames = link_offset_frames;
+        receiver.stats.measured_link_offset_ms = link_offset_ms;
         let data = receiver.clone();
-        self.publish_receiver(&name, data).await;
+        self.publish_receiver_stats(&name, data.stats).await;
     }
 
     async fn publish_vsc(&self) {
@@ -295,7 +298,19 @@ impl ObservabilityActor {
 
     async fn publish_receiver(&self, name: &str, data: ReceiverData) {
         if let Some(wb) = &self.wb {
-            publish_individual(wb, topic!(ROOT_KEY, name, "config"), data).await;
+            publish_individual(wb, topic!(ROOT_KEY, name), data).await;
+        };
+    }
+
+    async fn publish_receiver_config(&self, name: &str, config: RxDescriptor) {
+        if let Some(wb) = &self.wb {
+            publish_individual(wb, topic!(ROOT_KEY, name, "config"), config).await;
+        };
+    }
+
+    async fn publish_receiver_stats(&self, name: &str, stats: ReceiverStats) {
+        if let Some(wb) = &self.wb {
+            publish_individual(wb, topic!(ROOT_KEY, name, "stats"), stats).await;
         };
     }
 

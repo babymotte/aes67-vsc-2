@@ -4,12 +4,8 @@ use crate::{
     receiver::config::RxDescriptor,
     utils::AverageCalculationBuffer,
 };
-use miette::{IntoDiagnostic, Result};
 use rtp_rs::Seq;
-use std::{
-    collections::{HashMap, HashSet},
-    net::IpAddr,
-};
+use std::{collections::HashMap, net::IpAddr};
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
@@ -158,7 +154,8 @@ impl ReceiverStats {
                         delay,
                     },
                 )))
-                .await;
+                .await
+                .ok();
         }
 
         self.skipped_packets.remove(&ingress_timestamp);
@@ -197,7 +194,8 @@ impl ReceiverStats {
                         link_offset_ms,
                     },
                 )))
-                .await;
+                .await
+                .ok();
         }
 
         let mut missed_timestamps = vec![];
