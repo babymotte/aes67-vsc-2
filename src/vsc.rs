@@ -15,7 +15,6 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#[cfg(feature = "monitoring")]
 use crate::monitoring::{Monitoring, ObservabilityEvent, VscEvent, start_monitoring_service};
 use crate::{
     error::{
@@ -170,13 +169,11 @@ struct VirtualSoundCard {
     rx_names: HashMap<u32, String>,
     _tx_counter: u32,
     rx_counter: u32,
-    #[cfg(feature = "monitoring")]
     monitoring: Monitoring,
 }
 
 impl VirtualSoundCard {
     fn new(name: String, api_rx: mpsc::Receiver<VscApiMessage>) -> Self {
-        #[cfg(feature = "monitoring")]
         let monitoring = start_monitoring_service(name.clone());
         VirtualSoundCard {
             name,
@@ -187,7 +184,6 @@ impl VirtualSoundCard {
             rx_names: HashMap::new(),
             _tx_counter: 0,
             rx_counter: 0,
-            #[cfg(feature = "monitoring")]
             monitoring,
         }
     }
@@ -195,7 +191,6 @@ impl VirtualSoundCard {
     async fn run(mut self) {
         let vsc_id = self.name.clone();
 
-        #[cfg(feature = "monitoring")]
         self.monitoring
             .observability()
             .send(ObservabilityEvent::VscEvent(VscEvent::VscCreated))
@@ -236,7 +231,6 @@ impl VirtualSoundCard {
             display_name.clone(),
             config,
             clock,
-            #[cfg(feature = "monitoring")]
             self.monitoring.child(display_name.clone()),
         )
         .await?;

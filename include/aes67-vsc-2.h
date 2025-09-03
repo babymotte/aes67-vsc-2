@@ -28,35 +28,40 @@ static const unsigned int AES_VSC_ERROR_NO_DATA = 0x0C;
 extern "C" {
 #endif
 
+/** \brief
+ *  Configuration for an AES67 receiver
+ */
+typedef struct Aes67VscReceiverConfig {
+    /** \brief
+     *  Name of the receiver. Technically this does not have to be unique but stats are reported by receiver name,
+     *  so giving the same name to multiple receivers at the same time will make those hard to interpret.
+     */
+    char const * name;
+
+    /** \brief
+     *  The content of the SDP file of the sender that this receiver should subscribe to.
+     */
+    char const * sdp;
+
+    /** \brief
+     *  Link offset in milliseconds
+     */
+    float link_offset;
+
+    /** \brief
+     *  String representation of an IP address (e.g. "192.168.1.123") that is assigned to the network interface
+     *  this receiver should bind to.
+     */
+    char const * interface_ip;
+} Aes67VscReceiverConfig_t;
+
 
 #include <stddef.h>
 #include <stdint.h>
 
-/** <No documentation available> */
-typedef struct Aes67VscReceiverConfig {
-    /** <No documentation available> */
-    char const * id;
-
-    /** <No documentation available> */
-    char const * sdp;
-
-    /** <No documentation available> */
-    float link_offset;
-
-    /** <No documentation available> */
-    float buffer_time;
-
-    /** <No documentation available> */
-    uint32_t const * delay_calculation_interval;
-
-    /** <No documentation available> */
-    char const * interface_ip;
-} Aes67VscReceiverConfig_t;
-
 /** \brief
  *  Create a new AES67 receiver
- *  * `id` - A string pointer to the receiver ID, which must be unique within the process (not within the virtual sound card!)
- *  * `audio_format` - The receiver's audio format
+ *  * `config` - the configuration for the sender
  */
 int32_t
 aes67_vsc_create_receiver (
@@ -67,20 +72,55 @@ aes67_vsc_create_receiver (
  *  more audio packets and filling the assigned buffer. It will also de-allocate any memory the
  *  receiver has allocated during its creation.
  *
- *  * `vsc` - the virtual soundcard on which to destroy the receiver
- *  * `id` - the ID of the receiver to be destroyed
+ *  * `receiver_id` - the ID of the receiver to be destroyed
  */
 uint8_t
 aes67_vsc_destroy_receiver (
     uint32_t receiver_id);
 
-/** <No documentation available> */
+/** \brief
+ *  `&'lt mut [T]` but with a guaranteed `#[repr(C)]` layout.
+ *
+ *  # C layout (for some given type T)
+ *
+ *  ```c
+ *  typedef struct {
+ *  // Cannot be NULL
+ *  T * ptr;
+ *  size_t len;
+ *  } slice_T;
+ *  ```
+ *
+ *  # Nullable pointer?
+ *
+ *  If you want to support the above typedef, but where the `ptr` field is
+ *  allowed to be `NULL` (with the contents of `len` then being undefined)
+ *  use the `Option< slice_ptr<_> >` type.
+ */
+typedef struct slice_mut_float {
+    /** \brief
+     *  Pointer to the first element (if any).
+     */
+    float * ptr;
+
+    /** \brief
+     *  Element count
+     */
+    size_t len;
+} slice_mut_float_t;
+
+/** \brief
+ *  Fetch data from the specified receiver
+ *
+ *  * `receiver_id` - the receiver id as returned by the `aes67_vsc_create_receiver` function
+ *  * `playout_time` - the media clock timestamp of the first frame to fetch
+ *  * `buffer_ptr` - pointer to a float[] to which the fetched audio samples will be written
+ */
 uint8_t
 aes67_vsc_receive (
     uint32_t receiver_id,
     uint64_t playout_time,
-    size_t buffer_ptr,
-    size_t buffer_len);
+    slice_mut_float_t buffer_ptr);
 
 
 #ifdef __cplusplus

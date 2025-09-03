@@ -2,12 +2,12 @@ use crate::{
     formats::Frames,
     monitoring::{ObservabilityEvent, ReceiverStatsReport, RxStats, StatsReport},
     receiver::config::RxDescriptor,
-    utils::AverageCalculationBuffer,
+    utils::{AverageCalculationBuffer, U16_WRAP},
 };
 use rtp_rs::Seq;
-use std::{collections::HashMap, net::IpAddr};
+use std::{collections::HashMap, net::IpAddr, time::SystemTime};
 use tokio::sync::mpsc;
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 pub struct ReceiverStats {
     id: String,
@@ -16,6 +16,8 @@ pub struct ReceiverStats {
     measured_link_offset: AverageCalculationBuffer<Frames>,
     timestamp_offset: Option<u64>,
     skipped_packets: HashMap<Frames, Seq>,
+    lost_packet_counter: usize,
+    late_packet_counter: usize,
 }
 
 impl ReceiverStats {
@@ -27,6 +29,8 @@ impl ReceiverStats {
             delay_buffer: AverageCalculationBuffer::new(vec![0; 1000].into()),
             timestamp_offset: None,
             skipped_packets: HashMap::new(),
+            lost_packet_counter: 0,
+            late_packet_counter: 0,
         }
     }
 
@@ -42,7 +46,7 @@ impl ReceiverStats {
             RxStats::BufferUnderrun => {
                 // TODO
             }
-            RxStats::MulticastGroupPolluted => {
+            RxStats::InconsistentTimestamp => {
                 // TODO
             }
             RxStats::PacketReceived {
@@ -75,8 +79,13 @@ impl ReceiverStats {
             RxStats::MalformedRtpPacket(e) => {
                 warn!("received malformed rtp packet: {e:?}");
             }
-            RxStats::LatePacket { seq, delay } => {
-                self.process_late_packet(seq, delay, observ_tx).await;
+            RxStats::LatePacket {
+                seq,
+                delay,
+                timestamp,
+            } => {
+                self.process_late_packet(seq, timestamp, delay, observ_tx)
+                    .await;
             }
             RxStats::TimeTravellingPacket {
                 sequence_number,
@@ -144,19 +153,23 @@ impl ReceiverStats {
         let delay = media_time_at_reception - ingress_timestamp;
         let frames_in_packet = desc.frames_in_buffer(payload_len);
         if let Some(average) = self.delay_buffer.update(delay) {
-            let micros = (average * 1_000_000) / desc.audio_format.sample_rate as u64;
+            let delay_duration = desc.frames_to_duration(delay);
+            let micros = delay_duration.as_micros();
             let packets = average as f32 / frames_in_packet as f32;
-            info!("Network delay: {average} frames / {micros} µs / {packets:.1} packets");
+            debug!("Network delay: {average} frames / {micros} µs / {packets:.1} packets");
             observ_tx
                 .send(ObservabilityEvent::Stats(StatsReport::Receiver(
                     ReceiverStatsReport::NetworkDelay {
                         receiver: self.id.clone(),
-                        delay,
+                        delay_frames: delay,
+                        delay_millis: micros as f32 / 1_000.0,
                     },
                 )))
                 .await
                 .ok();
         }
+
+        // TODO collect and publish stats on delay ranges and late packets
 
         self.skipped_packets.remove(&ingress_timestamp);
     }
@@ -175,15 +188,15 @@ impl ReceiverStats {
 
         if let Some(measured_link_offset) = self.measured_link_offset.update(data_ready_since) {
             let link_offset_ms =
-                measured_link_offset as f32 / desc.audio_format.sample_rate as f32 * 1_000.0;
+                measured_link_offset as f32 * 1_000.0 / desc.audio_format.sample_rate as f32;
 
             if link_offset_ms < desc.link_offset {
-                info!(
-                    "Measured link offset: {measured_link_offset} frames / {link_offset_ms:.1} ms"
+                debug!(
+                    "Measured link offset: {measured_link_offset} frames / {link_offset_ms:.1} ms (ok)"
                 );
             } else {
-                warn!(
-                    "Measured link offset: {measured_link_offset} frames / {link_offset_ms:.1} ms"
+                debug!(
+                    "Measured link offset: {measured_link_offset} frames / {link_offset_ms:.1} ms (too high)"
                 );
             }
             observ_tx
@@ -211,14 +224,24 @@ impl ReceiverStats {
         if !missed_timestamps.is_empty() {
             missed_timestamps.sort_by(|(ts_a, _), (ts_b, _)| ts_a.cmp(ts_b));
             warn!(
-                "The following packets were late for playout or lost: {}",
+                "Lost packets: {}",
                 missed_timestamps
                     .iter()
-                    .map(|(ts, seq)| format!("seq {} / ts {}", u16::from(*seq), ts))
+                    .map(|(ts, seq)| format!("{{seq: {}, ts: {}}}", u16::from(*seq), ts))
                     .collect::<Vec<String>>()
                     .join(", ")
             );
-            // TODO report lost packets
+            self.lost_packet_counter += missed_timestamps.len();
+            observ_tx
+                .send(ObservabilityEvent::Stats(StatsReport::Receiver(
+                    ReceiverStatsReport::LostPackets {
+                        receiver: self.id.clone(),
+                        lost_packets: self.lost_packet_counter,
+                        timestamp: SystemTime::now(),
+                    },
+                )))
+                .await
+                .ok();
         }
     }
 
@@ -237,11 +260,11 @@ impl ReceiverStats {
                 );
                 true
             } else {
-                info!("Offset did not change ({offset})");
+                debug!("Offset did not change ({offset})");
                 false
             }
         } else {
-            info!("Offset: {offset}");
+            debug!("Offset: {offset}");
             true
         };
 
@@ -277,17 +300,35 @@ impl ReceiverStats {
     }
 
     async fn process_late_packet(
-        &self,
+        &mut self,
         seq: Seq,
+        timestamp: u64,
         delay: Frames,
         observ_tx: mpsc::Sender<ObservabilityEvent>,
     ) {
+        let Some(desc) = &self.desc else {
+            return;
+        };
+
+        let delay_usec = desc.frames_to_duration(delay).as_micros();
         warn!(
-            "Packet {} is {} frames late for playout.",
+            "Late packet: {{seq: {}, ts: {}}} (received {} frames / {} µs after playout time)",
             u16::from(seq),
-            delay
+            timestamp,
+            delay,
+            delay_usec
         );
-        // TODO collect stats + publish
+        self.late_packet_counter += 1;
+        observ_tx
+            .send(ObservabilityEvent::Stats(StatsReport::Receiver(
+                ReceiverStatsReport::LatePackets {
+                    receiver: self.id.clone(),
+                    late_packets: self.late_packet_counter,
+                    timestamp: SystemTime::now(),
+                },
+            )))
+            .await
+            .ok();
     }
 
     async fn process_out_of_order_packet(
@@ -302,7 +343,7 @@ impl ReceiverStats {
                 let skipped_timestamp = expected_timestamp + i as u64;
                 self.skipped_packets.insert(
                     skipped_timestamp,
-                    expected_sequence_number + (i % u16::MAX as u32) as u16,
+                    expected_sequence_number + (i % U16_WRAP) as u16,
                 );
             }
         }

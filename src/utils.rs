@@ -31,6 +31,10 @@ use thread_priority::{
 use tokio::sync::mpsc::{self, error::TryRecvError};
 use tracing::{info, warn};
 
+pub const U8_WRAP: u16 = 256;
+pub const U16_WRAP: u32 = 65536;
+pub const U32_WRAP: u64 = 4294967296;
+
 pub struct RequestResponseServerChannel<Req, Resp> {
     requests: mpsc::Receiver<Req>,
     responses: mpsc::Sender<Resp>,

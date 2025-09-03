@@ -2,4 +2,4 @@
 
 cargo build || exit 1
 cd ./test/alsa-receiver
-make BUILD=debug && make debug
+make clean && make BUILD=debug && make debug

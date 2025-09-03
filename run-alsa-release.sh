@@ -2,4 +2,4 @@
 
 cargo build --release || exit 1
 cd ./test/alsa-receiver
-make && make run
+make clean && make && make run

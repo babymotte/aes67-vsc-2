@@ -26,8 +26,6 @@ use std::{
 };
 use tokio::fs;
 use tracing::{info, instrument, warn};
-#[cfg(feature = "monitoring")]
-use worterbuch_client::topic;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about)]

@@ -7,7 +7,7 @@ ifeq ($(BUILD),debug)
 CFLAGS += -O0 -g
 else
 # "Release" build - optimization, and no debug symbols
-CFLAGS += -O3 -s -DNDEBUG
+CFLAGS += -O2 -s -DNDEBUG
 endif
 
 TARGET  = alsa-receiver

@@ -42,21 +42,25 @@ pub const AES_VSC_ERROR_CLOCK_SYNC_ERROR: u8 = 0x0A;
 pub const AES_VSC_ERROR_RECEIVER_NOT_READY_YET: u8 = 0x0B;
 pub const AES_VSC_ERROR_NO_DATA: u8 = 0x0C;
 
+/// Configuration for an AES67 receiver
 #[derive_ReprC]
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct Aes67VscReceiverConfig<'a> {
-    id: char_p::Ref<'a>,
+    /// Name of the receiver. Technically this does not have to be unique but stats are reported by receiver name,
+    /// so giving the same name to multiple receivers at the same time will make those hard to interpret.
+    name: char_p::Ref<'a>,
+    /// The content of the SDP file of the sender that this receiver should subscribe to.
     sdp: char_p::Ref<'a>,
+    /// Link offset in milliseconds
     link_offset: f32,
-    buffer_time: f32,
-    delay_calculation_interval: Option<&'a u32>,
+    /// String representation of an IP address (e.g. "192.168.1.123") that is assigned to the network interface
+    /// this receiver should bind to.
     interface_ip: char_p::Ref<'a>,
 }
 
 /// Create a new AES67 receiver
-/// * `id` - A string pointer to the receiver ID, which must be unique within the process (not within the virtual sound card!)
-/// * `audio_format` - The receiver's audio format
+/// * `config` - the configuration for the sender
 #[ffi_export]
 fn aes67_vsc_create_receiver<'a>(config: &'a Aes67VscReceiverConfig<'a>) -> i32 {
     match try_create_receiver(config) {
@@ -65,14 +69,18 @@ fn aes67_vsc_create_receiver<'a>(config: &'a Aes67VscReceiverConfig<'a>) -> i32 
     }
 }
 
+/// Fetch data from the specified receiver
+///
+/// * `receiver_id` - the receiver id as returned by the `aes67_vsc_create_receiver` function
+/// * `playout_time` - the media clock timestamp of the first frame to fetch
+/// * `buffer_ptr` - pointer to a float[] to which the fetched audio samples will be written
 #[ffi_export]
-fn aes67_vsc_receive(
+fn aes67_vsc_receive<'a>(
     receiver_id: u32,
     playout_time: u64,
-    buffer_ptr: usize,
-    buffer_len: usize,
+    buffer_ptr: c_slice::Mut<'a, f32>,
 ) -> u8 {
-    match try_receive(receiver_id, playout_time, buffer_ptr, buffer_len) {
+    match try_receive(receiver_id, playout_time, buffer_ptr) {
         Ok(it) => it,
         Err(err) => err.error_code(),
     }
@@ -82,8 +90,7 @@ fn aes67_vsc_receive(
 /// more audio packets and filling the assigned buffer. It will also de-allocate any memory the
 /// receiver has allocated during its creation.
 ///
-/// * `vsc` - the virtual soundcard on which to destroy the receiver
-/// * `id` - the ID of the receiver to be destroyed
+/// * `receiver_id` - the ID of the receiver to be destroyed
 #[ffi_export]
 fn aes67_vsc_destroy_receiver(receiver_id: u32) -> u8 {
     match try_destroy_receiver(receiver_id) {

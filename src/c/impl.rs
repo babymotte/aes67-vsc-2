@@ -54,12 +54,12 @@ fn try_init() -> VscInternalResult<()> {
 impl<'a> TryFrom<&Aes67VscReceiverConfig<'a>> for ReceiverConfig {
     type Error = ConfigError;
     fn try_from(value: &Aes67VscReceiverConfig<'a>) -> ConfigResult<Self> {
-        let id = value.id.to_string();
+        let id = value.name.to_string();
         let session = SessionDescription::unmarshal(&mut Cursor::new(value.sdp.to_str()))
             .map_err(|e| ConfigError::InvalidSdp(e.to_string()))?;
         let link_offset = value.link_offset;
-        let buffer_time = value.buffer_time;
-        let delay_calculation_interval = value.delay_calculation_interval.map(ToOwned::to_owned);
+        let buffer_time = 20.0 * link_offset;
+        let delay_calculation_interval = None;
         let interface_ip = value.interface_ip.to_str().parse()?;
 
         Ok(ReceiverConfig {
@@ -86,17 +86,16 @@ pub fn try_create_receiver(config: &Aes67VscReceiverConfig) -> ReceiverInternalR
     Ok(id as i32)
 }
 
-pub fn try_receive(
+pub fn try_receive<'a>(
     receiver_id: u32,
     playout_time: u64,
-    buffer_ptr: usize,
-    buffer_len: usize,
+    buffer_ptr: c_slice::Mut<'a, f32>,
 ) -> ReceiverApiResult<u8> {
     let Some(receiver) = RECEIVERS.get(&receiver_id) else {
         return Ok(AES_VSC_ERROR_RECEIVER_NOT_FOUND);
     };
 
-    match receiver.receive_all(playout_time, buffer_ptr, buffer_len)? {
+    match receiver.receive_all(playout_time, buffer_ptr.as_ptr() as usize, buffer_ptr.len())? {
         DataState::Ready => Ok(AES_VSC_OK),
         DataState::NotReady => Ok(AES_VSC_ERROR_NO_DATA),
         DataState::ReceiverNotReady => Ok(AES_VSC_ERROR_RECEIVER_NOT_READY_YET),

@@ -62,8 +62,8 @@ headers = ["safer-ffi/headers"]
 c = []
 statime = ["dep:statime", "statime-linux"]
 jack = ["dep:jack"]
-monitoring = ["worterbuch-client"]
-default = ["c", "monitoring"]
+worterbuch = ["worterbuch-client"]
+default = ["c", "worterbuch"]
 
 [profile.release]
 lto = "fat"

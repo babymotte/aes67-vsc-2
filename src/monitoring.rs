@@ -7,7 +7,12 @@ use crate::{
     receiver::config::RxDescriptor,
 };
 use rtp_rs::{RtpReaderError, Seq};
-use std::{io, net::IpAddr, thread, time::Duration};
+use std::{
+    io,
+    net::IpAddr,
+    thread,
+    time::{Duration, SystemTime},
+};
 use tokio::{
     runtime::{self},
     spawn,
@@ -67,12 +72,23 @@ pub enum ReceiverStatsReport {
     },
     NetworkDelay {
         receiver: String,
-        delay: Frames,
+        delay_frames: Frames,
+        delay_millis: MilliSeconds,
     },
     MeasuredLinkOffset {
         receiver: String,
         link_offset_frames: Frames,
         link_offset_ms: MilliSeconds,
+    },
+    LostPackets {
+        receiver: String,
+        lost_packets: usize,
+        timestamp: SystemTime,
+    },
+    LatePackets {
+        receiver: String,
+        late_packets: usize,
+        timestamp: SystemTime,
     },
 }
 
@@ -92,7 +108,7 @@ pub enum TxStats {
 pub enum RxStats {
     Started(RxDescriptor),
     BufferUnderrun,
-    MulticastGroupPolluted,
+    InconsistentTimestamp,
     PacketReceived {
         seq: Seq,
         payload_len: usize,
@@ -107,6 +123,7 @@ pub enum RxStats {
     MalformedRtpPacket(RtpReaderError),
     LatePacket {
         seq: Seq,
+        timestamp: Frames,
         delay: Frames,
     },
     TimeTravellingPacket {

@@ -11,7 +11,7 @@ use crate::monitoring::{
 use std::collections::{HashMap, hash_map::Entry};
 use tokio::{select, sync::mpsc};
 use tokio_graceful_shutdown::SubsystemHandle;
-use tracing::{info, warn};
+use tracing::info;
 
 pub async fn stats(
     subsys: SubsystemHandle,

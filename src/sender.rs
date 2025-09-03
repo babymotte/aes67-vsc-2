@@ -22,7 +22,7 @@ use crate::{
     error::{SenderInternalResult, WrappedRtpPacketBuildError},
     formats::{AudioFormat, MilliSeconds},
     socket::create_tx_socket,
-    utils::RequestResponseClientChannel,
+    utils::{RequestResponseClientChannel, U32_WRAP},
 };
 use rtp_rs::{RtpPacketBuilder, Seq};
 use std::net::{IpAddr, SocketAddr, UdpSocket};
@@ -94,7 +94,7 @@ impl SenderActor {
         let len = RtpPacketBuilder::new()
             .payload_type(97)
             .sequence(seq)
-            .timestamp(((ingress_time) % u32::MAX as u64) as u32)
+            .timestamp(((ingress_time) % U32_WRAP) as u32)
             .payload(buf)
             .build_into(&mut self.rtp_buffer)
             .map_err(WrappedRtpPacketBuildError)?;

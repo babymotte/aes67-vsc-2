@@ -8,7 +8,10 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{collections::HashMap, time::Duration};
+use std::{
+    collections::HashMap,
+    time::{Duration, SystemTime},
+};
 use tokio::{
     select, spawn,
     sync::mpsc,
@@ -22,11 +25,23 @@ const ROOT_KEY: &str = "aes67-vsc";
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct LostPackets {
+    count: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(with = "serde_millis")]
+    last: Option<SystemTime>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ReceiverStats {
     clock_offset: u64,
-    network_delay: u64,
+    network_delay_frames: u64,
+    network_delay_millis: f32,
     measured_link_offset_frames: u64,
-    measured_link_offset_ms: f32,
+    measured_link_offset_millis: f32,
+    lost_packets: LostPackets,
+    late_packets: LostPackets,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -225,8 +240,13 @@ impl ObservabilityActor {
             ReceiverStatsReport::MediaClockOffsetChanged { receiver, offset } => {
                 self.receiver_clock_offset_changed(receiver, offset).await;
             }
-            ReceiverStatsReport::NetworkDelay { receiver, delay } => {
-                self.receiver_network_delay_changed(receiver, delay).await;
+            ReceiverStatsReport::NetworkDelay {
+                receiver,
+                delay_frames,
+                delay_millis,
+            } => {
+                self.receiver_network_delay_changed(receiver, delay_frames, delay_millis)
+                    .await;
             }
             ReceiverStatsReport::MeasuredLinkOffset {
                 receiver,
@@ -240,6 +260,22 @@ impl ObservabilityActor {
                 )
                 .await;
             }
+            ReceiverStatsReport::LostPackets {
+                receiver,
+                lost_packets,
+                timestamp,
+            } => {
+                self.receiver_lost_packets_changed(receiver, lost_packets, timestamp)
+                    .await;
+            }
+            ReceiverStatsReport::LatePackets {
+                receiver,
+                late_packets,
+                timestamp,
+            } => {
+                self.receiver_late_packets_changed(receiver, late_packets, timestamp)
+                    .await;
+            }
         }
     }
 
@@ -248,17 +284,23 @@ impl ObservabilityActor {
             return;
         };
         receiver.stats.clock_offset = offset;
-        let data = receiver.clone();
-        self.publish_receiver_stats(&name, data.stats).await;
+        let stats = receiver.stats.clone();
+        self.publish_receiver_stats(&name, stats).await;
     }
 
-    async fn receiver_network_delay_changed(&mut self, name: String, delay: u64) {
+    async fn receiver_network_delay_changed(
+        &mut self,
+        name: String,
+        delay_frames: Frames,
+        delay_millis: f32,
+    ) {
         let Some(receiver) = self.receivers.get_mut(&name) else {
             return;
         };
-        receiver.stats.network_delay = delay;
-        let data = receiver.clone();
-        self.publish_receiver_stats(&name, data.stats).await;
+        receiver.stats.network_delay_frames = delay_frames;
+        receiver.stats.network_delay_millis = delay_millis;
+        let stats = receiver.stats.clone();
+        self.publish_receiver_stats(&name, stats).await;
     }
 
     async fn receiver_measured_link_offset_changed(
@@ -271,9 +313,43 @@ impl ObservabilityActor {
             return;
         };
         receiver.stats.measured_link_offset_frames = link_offset_frames;
-        receiver.stats.measured_link_offset_ms = link_offset_ms;
-        let data = receiver.clone();
-        self.publish_receiver_stats(&name, data.stats).await;
+        receiver.stats.measured_link_offset_millis = link_offset_ms;
+        let stats = receiver.stats.clone();
+        self.publish_receiver_stats(&name, stats).await;
+    }
+
+    async fn receiver_lost_packets_changed(
+        &mut self,
+        name: String,
+        lost_packets: usize,
+        timestamp: SystemTime,
+    ) {
+        let Some(receiver) = self.receivers.get_mut(&name) else {
+            return;
+        };
+        receiver.stats.lost_packets = LostPackets {
+            count: lost_packets,
+            last: Some(timestamp),
+        };
+        let stats = receiver.stats.clone();
+        self.publish_receiver_stats(&name, stats).await;
+    }
+
+    async fn receiver_late_packets_changed(
+        &mut self,
+        name: String,
+        late_packets: usize,
+        timestamp: SystemTime,
+    ) {
+        let Some(receiver) = self.receivers.get_mut(&name) else {
+            return;
+        };
+        receiver.stats.late_packets = LostPackets {
+            count: late_packets,
+            last: Some(timestamp),
+        };
+        let stats = receiver.stats.clone();
+        self.publish_receiver_stats(&name, stats).await;
     }
 
     async fn publish_vsc(&self) {
