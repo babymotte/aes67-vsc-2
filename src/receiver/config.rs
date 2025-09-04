@@ -213,6 +213,7 @@ impl RxDescriptor {
         )
     }
 
+    #[deprecated = "link offset is a configuration that may change during playout, it is not acceptable to read this from a static object"]
     pub(crate) fn frames_in_link_offset(&self) -> usize {
         formats::duration_to_frames(
             Duration::from_micros((self.link_offset * 1_000.0).round() as u64),
@@ -221,8 +222,8 @@ impl RxDescriptor {
         .round() as usize
     }
 
-    pub(crate) fn frames_in_buffer(&self, buffer_len: usize) -> usize {
-        buffer_len / self.bytes_per_frame()
+    pub(crate) fn frames_in_buffer(&self, buffer_len: usize) -> u64 {
+        buffer_len as u64 / self.bytes_per_frame() as u64
     }
 
     pub fn to_link_offset(&self, samples: usize) -> usize {

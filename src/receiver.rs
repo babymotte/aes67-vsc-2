@@ -310,14 +310,6 @@ impl<C: MediaClock> Receiver<C> {
 
         self.report_packet_received(media_time_at_reception, &rtp, seq, ingress_timestamp);
 
-        let playout_time = ingress_timestamp + self.desc.frames_in_link_offset() as u64;
-        if playout_time < self.latest_played_frame {
-            let delay = media_time_at_reception - playout_time;
-            self.report_late_packet(&rtp, delay, ingress_timestamp)
-                .await;
-            return Ok(());
-        }
-
         if ingress_timestamp > media_time_at_reception {
             self.report_time_travelling_packet(media_time_at_reception, &rtp, ingress_timestamp)
                 .await;
@@ -484,23 +476,6 @@ mod monitoring {
                     expected_timestamp: ts_offset + expected_ts as u64,
                     expected_sequence_number: expected_seq,
                     actual_sequence_number: rtp.sequence_number(),
-                }))
-                .await
-                .ok();
-        }
-
-        pub(crate) async fn report_late_packet(
-            &mut self,
-            rtp: &RtpReader<'_>,
-            delay: u64,
-            timestamp: u64,
-        ) {
-            self.monitoring
-                .stats()
-                .send(Stats::Rx(RxStats::LatePacket {
-                    delay,
-                    seq: rtp.sequence_number(),
-                    timestamp,
                 }))
                 .await
                 .ok();

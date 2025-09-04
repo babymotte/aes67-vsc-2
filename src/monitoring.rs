@@ -121,11 +121,6 @@ pub enum RxStats {
         actual_sequence_number: Seq,
     },
     MalformedRtpPacket(RtpReaderError),
-    LatePacket {
-        seq: Seq,
-        timestamp: Frames,
-        delay: Frames,
-    },
     TimeTravellingPacket {
         sequence_number: Seq,
         ingress_timestamp: Frames,

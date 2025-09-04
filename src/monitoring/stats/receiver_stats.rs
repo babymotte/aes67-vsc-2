@@ -79,14 +79,6 @@ impl ReceiverStats {
             RxStats::MalformedRtpPacket(e) => {
                 warn!("received malformed rtp packet: {e:?}");
             }
-            RxStats::LatePacket {
-                seq,
-                delay,
-                timestamp,
-            } => {
-                self.process_late_packet(seq, timestamp, delay, observ_tx)
-                    .await;
-            }
             RxStats::TimeTravellingPacket {
                 sequence_number,
                 ingress_timestamp,
@@ -147,11 +139,16 @@ impl ReceiverStats {
         media_time_at_reception: Frames,
         observ_tx: mpsc::Sender<ObservabilityEvent>,
     ) {
+        // TODO detect and monitor late packets
+
         let Some(desc) = &self.desc else {
             return;
         };
-        let delay = media_time_at_reception - ingress_timestamp;
+
+        // TODO monitor and report packet time
         let frames_in_packet = desc.frames_in_buffer(payload_len);
+
+        let delay = media_time_at_reception - ingress_timestamp - frames_in_packet;
         if let Some(average) = self.delay_buffer.update(delay) {
             let delay_duration = desc.frames_to_duration(delay);
             let micros = delay_duration.as_micros();
@@ -183,8 +180,8 @@ impl ReceiverStats {
         let Some(desc) = &self.desc else {
             return;
         };
-        let data_ready_since =
-            latest_received_frame + desc.frames_in_link_offset() as u64 - playout_time;
+
+        let data_ready_since = latest_received_frame - playout_time;
 
         if let Some(measured_link_offset) = self.measured_link_offset.update(data_ready_since) {
             let link_offset_ms =

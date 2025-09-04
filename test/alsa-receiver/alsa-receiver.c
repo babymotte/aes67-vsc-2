@@ -16,12 +16,12 @@ static const char RTPMAP_REGEX_SUFFIX[] = " (L[0-9]+)\\/([0-9]+)\\/([0-9]+)";
 
 // TODO read config from file
 static const char RECEIVER_ID[] = "alsa-1";
-static const char INTERFACE_IP[] = "192.168.178.39";
-static const float LINK_OFFSET = 4.0;
-static const unsigned int ALSA_FRAMES_PER_CYCLE = 48;
+static const char INTERFACE_IP[] = "192.168.178.36";
+static const float LINK_OFFSET = 2.0;
+static const unsigned int ALSA_FRAMES_PER_CYCLE = 24;
 
 // AVIO Bluetooth
-static char SDP[] = "v=0\r\no=- 10943522194 10943522206 IN IP4 192.168.178.97\r\ns=AVIO-Bluetooth : 2\r\ni=2 channels: Left, Right\r\nc=IN IP4 239.69.232.56/32\r\nt=0 0\r\na=keywds:Dante\r\na=recvonly\r\nm=audio 5004 RTP/AVP 97\r\na=rtpmap:97 L24/48000/2\r\na=ptime:1\r\na=ts-refclk:ptp=IEEE1588-2008:00-1D-C1-FF-FE-0E-10-C4:0\r\na=mediaclk:direct=0\r\n";
+static char SDP[] = "v=0\r\no=- 10943522194 10943522212 IN IP4 192.168.178.97\r\ns=AVIO-Bluetooth : 2\r\ni=2 channels: Left, Right\r\nc=IN IP4 239.69.232.56/32\r\nt=0 0\r\na=keywds:Dante\r\na=recvonly\r\nm=audio 5004 RTP/AVP 97\r\na=rtpmap:97 L24/48000/2\r\na=ptime:1\r\na=ts-refclk:ptp=IEEE1588-2008:00-1D-C1-FF-FE-0E-10-C4:0\r\na=mediaclk:direct=0\r\n";
 // XCEL 1201
 // static const char SDP[] = "v=0\r\no=- 18311622000 18311622019 IN IP4 192.168.178.114\r\ns=XCEL-1201 : 32\r\ni=2 channels: DANTE TX 01, DANTE TX 02\r\nc=IN IP4 239.69.224.56/32\r\nt=0 0\r\na=keywds:Dante\r\na=recvonly\r\nm=audio 5004 RTP/AVP 97\r\na=rtpmap:97 L24/48000/2\r\na=ptime:1\r\na=ts-refclk:ptp=IEEE1588-2008:2C-CF-67-FF-FE-75-93-93:0\r\na=mediaclk:direct=0\r\n";
 // NUC
@@ -261,13 +261,23 @@ int main(int argc, char *argv[])
         buffer[i] = 0.0;
     }
 
-    uint64_t media_time = (current_time_media(&now, srate) / ALSA_FRAMES_PER_CYCLE) * ALSA_FRAMES_PER_CYCLE;
+    // pre-roll for the duration of the link offset, from then on we will just play the latest packets as fast as possible
+    for (int i = 0; i < link_offset_frames;)
+    {
+        int written = snd_pcm_writei(pcm_handle, buffer, ALSA_FRAMES_PER_CYCLE);
+        if (written > 0)
+        {
+            i += written;
+        }
+    }
+
+    // uint64_t media_time = (current_time_media(&now, srate) / ALSA_FRAMES_PER_CYCLE) * ALSA_FRAMES_PER_CYCLE;
+    uint64_t playout_time = current_time_media(&now, srate);
 
     int muted = 0;
 
     while (keep_running)
     {
-        uint64_t playout_time = media_time - link_offset_frames;
 
         uint8_t res = aes67_vsc_receive(receiver, playout_time, buffer_ptr);
 
@@ -308,7 +318,7 @@ int main(int argc, char *argv[])
             {
                 fprintf(stderr, "underrun occurred\n");
             }
-            mute(&muted);
+            // mute(&muted);
             snd_pcm_prepare(pcm_handle);
         }
         else if (rc < 0)
@@ -318,11 +328,11 @@ int main(int argc, char *argv[])
 
         if (rc > 0)
         {
-            media_time += rc;
+            playout_time += rc;
         }
         else
         {
-            media_time += ALSA_FRAMES_PER_CYCLE;
+            playout_time += ALSA_FRAMES_PER_CYCLE;
         }
     }
 
