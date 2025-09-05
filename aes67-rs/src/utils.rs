@@ -54,41 +54,6 @@ impl<Req, Resp> RequestResponseServerChannel<Req, Resp> {
     }
 }
 
-pub struct RequestResponseClientChannel<Req, Resp> {
-    requests: mpsc::Sender<Req>,
-    responses: mpsc::Receiver<Resp>,
-}
-
-impl<Req, Resp> RequestResponseClientChannel<Req, Resp> {
-    pub async fn request(&mut self, req: Req) -> Option<Resp> {
-        self.requests.send(req).await.ok()?;
-        self.responses.recv().await
-    }
-
-    pub fn request_blocking(&mut self, req: Req) -> Option<Resp> {
-        self.requests.blocking_send(req).ok()?;
-        self.responses.blocking_recv()
-    }
-}
-
-pub fn request_response_channel<Req, Resp>() -> (
-    RequestResponseServerChannel<Req, Resp>,
-    RequestResponseClientChannel<Req, Resp>,
-) {
-    let (request_tx, request_rx) = mpsc::channel(1);
-    let (response_tx, response_rx) = mpsc::channel(1);
-    (
-        RequestResponseServerChannel {
-            requests: request_rx,
-            responses: response_tx,
-        },
-        RequestResponseClientChannel {
-            requests: request_tx,
-            responses: response_rx,
-        },
-    )
-}
-
 pub fn panic_to_string(panic: Box<dyn Any + Send>) -> String {
     if let Some(s) = panic.downcast_ref::<&'static str>() {
         s.to_string()

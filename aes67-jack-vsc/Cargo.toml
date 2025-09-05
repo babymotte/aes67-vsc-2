@@ -1,0 +1,11 @@
+[package]
+name = "aes67-jack-vsc"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+aes67-rs = { path = "../aes67-rs" }
+miette = { version = "7.6.0", features = ["fancy"] }
+tokio = { version = "1.47.1", features = ["full"] }
+tokio-graceful-shutdown = { version = "0.16.0", features = ["tracing"] }
+tracing = "0.1.41"

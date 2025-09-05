@@ -1,0 +1,11 @@
+app:
+  name: AES67-VSC-2 Receiver
+  instance:
+    name: thinkpad-p14s/1
+telemetry:
+  endpoint: !grpc http://127.0.0.1:4317
+playoutConfig:
+receiverConfig:
+  session: http://192.168.178.124/by-id/2101
+  linkOffset: 4.0
+  interfaceIp: 192.168.178.39

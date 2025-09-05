@@ -108,7 +108,7 @@ impl<C: MediaClock> Receiver<C> {
         let recv_id = id.clone();
 
         let desc_rx = desc.clone();
-        let packet_buffer_len = desc.audio_format.samples_in_buffer(config.buffer_time);
+        let packet_buffer_len = desc.audio_format.samples_in_buffer(config.buffer_time());
 
         let subsystem_name = id.clone();
         let subsystem = move |s: SubsystemHandle| async move {

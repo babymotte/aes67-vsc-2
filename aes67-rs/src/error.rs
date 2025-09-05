@@ -139,6 +139,8 @@ pub enum ConfigError {
     UnsupportedSampleFormat(String),
     #[error("NIC with specified IP not found: {0}")]
     NoSuchNIC(String),
+    #[error("Receiver not configured")]
+    MissingReceiverConfig,
 }
 
 #[derive(Error, Debug, Diagnostic)]

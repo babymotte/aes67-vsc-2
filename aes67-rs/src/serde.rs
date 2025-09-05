@@ -15,10 +15,9 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use std::io::Cursor;
-
 use sdp::SessionDescription;
 use serde::{Deserialize, Deserializer, Serializer};
+use std::io::Cursor;
 use tracing::instrument;
 
 #[instrument(skip(deserializer))]
@@ -27,7 +26,11 @@ where
     D: Deserializer<'de>,
 {
     let s = String::deserialize(deserializer)?;
-    SessionDescription::unmarshal(&mut Cursor::new(&s)).map_err(serde::de::Error::custom)
+    let resp = reqwest::blocking::get(s)
+        .map_err(serde::de::Error::custom)?
+        .text()
+        .map_err(serde::de::Error::custom)?;
+    SessionDescription::unmarshal(&mut Cursor::new(&resp)).map_err(serde::de::Error::custom)
 }
 
 #[instrument(skip(serializer))]

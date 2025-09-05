@@ -38,11 +38,11 @@ fn init_vsc() -> VscApiResult<Arc<VirtualSoundCardApi>> {
 }
 
 fn try_init() -> VscInternalResult<()> {
+    let config = Config::load()?;
     let runtime = runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
     let init_future = async {
-        let config = Config::load().await?;
         telemetry::init(&config).await?;
         Ok::<(), VscInternalError>(())
     };
@@ -54,11 +54,10 @@ fn try_init() -> VscInternalResult<()> {
 impl<'a> TryFrom<&Aes67VscReceiverConfig<'a>> for ReceiverConfig {
     type Error = ConfigError;
     fn try_from(value: &Aes67VscReceiverConfig<'a>) -> ConfigResult<Self> {
-        let id = value.name.to_string();
+        let id = value.name.map(|it| it.to_string());
         let session = SessionDescription::unmarshal(&mut Cursor::new(value.sdp.to_str()))
             .map_err(|e| ConfigError::InvalidSdp(e.to_string()))?;
         let link_offset = value.link_offset;
-        let buffer_time = 20.0 * link_offset;
         let delay_calculation_interval = None;
         let interface_ip = value.interface_ip.to_str().parse()?;
 
@@ -66,7 +65,6 @@ impl<'a> TryFrom<&Aes67VscReceiverConfig<'a>> for ReceiverConfig {
             id,
             session,
             link_offset,
-            buffer_time,
             delay_calculation_interval,
             interface_ip,
         })

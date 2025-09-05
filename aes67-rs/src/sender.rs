@@ -22,7 +22,7 @@ use crate::{
     error::{SenderInternalResult, WrappedRtpPacketBuildError},
     formats::{AudioFormat, MilliSeconds},
     socket::create_tx_socket,
-    utils::{RequestResponseClientChannel, U32_WRAP},
+    utils::U32_WRAP,
 };
 use rtp_rs::{RtpPacketBuilder, Seq};
 use std::net::{IpAddr, SocketAddr, UdpSocket};
@@ -31,7 +31,7 @@ use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
 
 pub async fn start_sender(
     subsys: &SubsystemHandle,
-    requests: RequestResponseClientChannel<AudioBufferPointer, (Seq, u64)>,
+    // requests: RequestResponseClientChannel<AudioBufferPointer, (Seq, u64)>,
     local_ip: IpAddr,
     port: u16,
     target_address: SocketAddr,
@@ -42,7 +42,7 @@ pub async fn start_sender(
 
     subsys.start(SubsystemBuilder::new("sender", move |s| async move {
         SenderActor {
-            requests,
+            // requests,
             subsys: s,
             socket,
             target_address,
@@ -57,7 +57,7 @@ pub async fn start_sender(
 
 struct SenderActor {
     subsys: SubsystemHandle,
-    requests: RequestResponseClientChannel<AudioBufferPointer, (Seq, u64)>,
+    // requests: RequestResponseClientChannel<AudioBufferPointer, (Seq, u64)>,
     socket: UdpSocket,
     target_address: SocketAddr,
     rtp_buffer: [u8; 1500],
@@ -76,7 +76,7 @@ impl SenderActor {
         loop {
             let audio_buffer_ptr = AudioBufferPointer::from_slice(&audio_buffer[..]);
             select! {
-                Some((seq, ingress_time)) = self.requests.request(audio_buffer_ptr) => self.data_received(seq, ingress_time, &audio_buffer)?,
+                // Some((seq, ingress_time)) = self.requests.request(audio_buffer_ptr) => self.data_received(seq, ingress_time, &audio_buffer)?,
                 _ = self.subsys.on_shutdown_requested() => break,
                 else => break,
             }

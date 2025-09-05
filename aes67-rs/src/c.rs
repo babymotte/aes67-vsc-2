@@ -24,7 +24,6 @@ use crate::{
     error::GetErrorCode,
 };
 use ::safer_ffi::prelude::*;
-use tracing::error;
 
 #[cfg(feature = "headers")]
 pub use r#impl::generate_headers;
@@ -50,7 +49,7 @@ pub const AES_VSC_ERROR_NO_DATA: u8 = 0x0C;
 pub struct Aes67VscReceiverConfig<'a> {
     /// Name of the receiver. Technically this does not have to be unique but stats are reported by receiver name,
     /// so giving the same name to multiple receivers at the same time will make those hard to interpret.
-    name: char_p::Ref<'a>,
+    name: Option<char_p::Ref<'a>>,
     /// The content of the SDP file of the sender that this receiver should subscribe to.
     sdp: char_p::Ref<'a>,
     /// Link offset in milliseconds

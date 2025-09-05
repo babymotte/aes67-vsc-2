@@ -20,11 +20,11 @@ use clap::Parser;
 use gethostname::gethostname;
 use serde::{Deserialize, Serialize};
 use std::{
-    net::{IpAddr, Ipv4Addr},
+    fs,
+    net::IpAddr,
     path::{Path, PathBuf},
     time::Duration,
 };
-use tokio::fs;
 use tracing::{info, instrument, warn};
 
 #[derive(Parser)]
@@ -33,22 +33,6 @@ pub struct Args {
     /// Path to config file
     #[arg(short, long, env = "AES67_VSC_2_CONFIG")]
     config: Option<PathBuf>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WebServerConfig {
-    pub bind_address: IpAddr,
-    pub port: u16,
-}
-
-impl Default for WebServerConfig {
-    fn default() -> Self {
-        Self {
-            bind_address: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-            port: 3000,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -116,7 +100,7 @@ pub struct SocketConfig {
     pub user_timeout: Option<Duration>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Config {
     #[serde(default = "AppConfig::default")]
@@ -125,7 +109,6 @@ pub struct Config {
     pub telemetry: Option<TelemetryConfig>,
     #[serde(default)]
     pub receiver_config: Option<ReceiverConfig>,
-    pub interface_ip: IpAddr,
 }
 
 impl Default for Config {
@@ -134,28 +117,27 @@ impl Default for Config {
             app: Default::default(),
             telemetry: Default::default(),
             receiver_config: Default::default(),
-            interface_ip: IpAddr::V4(Ipv4Addr::LOCALHOST),
         }
     }
 }
 
 impl Config {
     #[instrument]
-    pub async fn load() -> ConfigResult<Config> {
+    pub fn load() -> ConfigResult<Config> {
         let args = Args::parse();
 
         info!("Loading config …");
 
-        let config = Config::load_from_file(args.config.as_deref()).await?;
+        let config = Config::load_from_file(args.config.as_deref())?;
 
         Ok(config)
     }
 
     #[instrument]
-    async fn load_from_file(path: Option<&Path>) -> ConfigResult<Config> {
+    fn load_from_file(path: Option<&Path>) -> ConfigResult<Config> {
         match path {
             Some(path) => {
-                let content = fs::read_to_string(&path).await?;
+                let content = fs::read_to_string(&path)?;
                 let config = serde_yaml::from_str(&content)?;
                 info!("Config loaded from {}", path.to_string_lossy());
                 Ok(config)
@@ -170,7 +152,7 @@ impl Config {
                     warn!("No config file specified, using {it}");
                     it
                 };
-                match fs::read_to_string(path).await {
+                match fs::read_to_string(path) {
                     Ok(it) => {
                         let config = serde_yaml::from_str(&it)?;
                         info!("Config loaded from {path}");

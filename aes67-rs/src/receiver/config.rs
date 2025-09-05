@@ -38,20 +38,26 @@ lazy_static! {
         Regex::new(r"([0-9]+) channels: (.+)").expect("no dynammic input, can't fail");
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReceiverConfig {
-    pub id: String,
-    #[serde(
-        deserialize_with = "crate::serde::deserialize_sdp",
-        serialize_with = "crate::serde::serialize_sdp"
-    )]
+    pub id: Option<String>,
+    #[serde(deserialize_with = "crate::serde::deserialize_sdp")]
     pub session: SessionDescription,
     pub link_offset: MilliSeconds,
-    pub buffer_time: MilliSeconds,
     #[serde(default)]
     pub delay_calculation_interval: Option<Seconds>,
     pub interface_ip: IpAddr,
+}
+
+impl ReceiverConfig {
+    pub fn id(&self) -> &str {
+        self.id.as_ref().unwrap_or(&self.session.session_name)
+    }
+
+    pub fn buffer_time(&self) -> MilliSeconds {
+        (self.link_offset * 20.0).max(20.0)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -72,7 +78,7 @@ pub struct RxDescriptor {
 impl TryFrom<&ReceiverConfig> for RxDescriptor {
     type Error = ConfigError;
     fn try_from(rx_config: &ReceiverConfig) -> ConfigResult<Self> {
-        let id = rx_config.id.to_owned();
+        let id = rx_config.id().to_owned();
         let descriptor = RxDescriptor::new(id, &rx_config.session, rx_config.link_offset)?;
         Ok(descriptor)
     }

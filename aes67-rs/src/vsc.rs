@@ -106,7 +106,7 @@ impl VirtualSoundCardApi {
         let (tx, rx) = oneshot::channel();
         self.api_tx
             .blocking_send(VscApiMessage::CreateReceiver(
-                config.id.clone(),
+                config.id().to_owned(),
                 Box::new(config),
                 tx,
             ))
@@ -121,7 +121,7 @@ impl VirtualSoundCardApi {
         let (tx, rx) = oneshot::channel();
         self.api_tx
             .send(VscApiMessage::CreateReceiver(
-                config.id.clone(),
+                config.id().to_owned(),
                 Box::new(config),
                 tx,
             ))
