@@ -13,7 +13,7 @@ pub struct ReceiverStats {
     id: String,
     tx: mpsc::Sender<Report>,
     desc: Option<RxDescriptor>,
-    delay_buffer: AverageCalculationBuffer<Frames>,
+    delay_buffer: AverageCalculationBuffer<i64>,
     measured_link_offset: AverageCalculationBuffer<Frames>,
     timestamp_offset: Option<u64>,
     skipped_packets: HashMap<Frames, Seq>,
@@ -140,9 +140,10 @@ impl ReceiverStats {
         };
 
         // TODO monitor and report packet time
-        let frames_in_packet = desc.frames_in_buffer(payload_len);
+        let frames_in_packet = desc.frames_in_buffer(payload_len) as i64;
 
-        let delay = media_time_at_reception - ingress_timestamp;
+        let delay =
+            media_time_at_reception as i64 - ingress_timestamp as i64 - frames_in_packet as i64;
 
         if delay < frames_in_packet {
             // TODO report clock sync issue
@@ -153,7 +154,7 @@ impl ReceiverStats {
         }
 
         if let Some(average) = self.delay_buffer.update(delay) {
-            let delay_duration = desc.frames_to_duration(delay);
+            let delay_duration = desc.frames_to_duration_float(delay as f64);
             let micros = delay_duration.as_micros();
             let packets = average as f32 / frames_in_packet as f32;
             debug!("Network delay: {average} frames / {micros} µs / {packets:.1} packets");

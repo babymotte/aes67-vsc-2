@@ -16,12 +16,12 @@ static const char RTPMAP_REGEX_SUFFIX[] = " (L[0-9]+)\\/([0-9]+)\\/([0-9]+)";
 
 // TODO read config from file
 static const char RECEIVER_ID[] = "alsa-1";
-static const char INTERFACE_IP[] = "10.1.255.247";
-static const float LINK_OFFSET = 4.0;
-static const unsigned int ALSA_FRAMES_PER_CYCLE = 48;
+static const char INTERFACE_IP[] = "192.168.178.39";
+static const float LINK_OFFSET = 2.0;
+static const unsigned int ALSA_FRAMES_PER_CYCLE = 24;
 
 // AVIO Bluetooth
-static char SDP[] = "v=0\no=- 65 0 IN IP4 10.1.255.254\ns=HapiMkII_95393_65\nc=IN IP4 239.1.255.254/15\nt=0 0\na=clock-domain:PTPv2 0\na=ts-refclk:ptp=IEEE1588-2008:00-1D-C1-FF-FE-1F-A5-C6:0\na=mediaclk:direct=0\nm=audio 5004 RTP/AVP 98\nc=IN IP4 239.1.255.254/15\na=rtpmap:98 L24/48000/2\na=source-filter: incl IN IP4 239.1.255.254 10.1.255.254\na=clock-domain:PTPv2 0\na=sync-time:0\na=framecount:12\na=palign:0\na=ptime:0.25\na=ts-refclk:ptp=IEEE1588-2008:00-1D-C1-FF-FE-1F-A5-C6:0\na=mediaclk:direct=0\na=recvonly\na=midi-pre2:50040 0,0;0,1\n";
+static char SDP[] = "v=0\no=- 2101 0 IN IP4 192.168.178.124\ns=Anubis_611465_2101\nc=IN IP4 239.1.178.124/15\nt=0 0\na=clock-domain:PTPv2 0\na=ts-refclk:ptp=IEEE1588-2008:2C-CF-67-FF-FE-75-93-93:0\na=mediaclk:direct=0\nm=audio 5004 RTP/AVP 98\nc=IN IP4 239.1.178.124/15\na=rtpmap:98 L24/48000/2\na=source-filter: incl IN IP4 239.1.178.124 192.168.178.124\na=clock-domain:PTPv2 0\na=sync-time:0\na=framecount:6\na=palign:0\na=ptime:0.125\na=ts-refclk:ptp=IEEE1588-2008:2C-CF-67-FF-FE-75-93-93:0\na=mediaclk:direct=0\na=recvonly\na=midi-pre2:50040 0,0;0,1\n";
 // XCEL 1201
 // static const char SDP[] = "v=0\r\no=- 18311622000 18311622019 IN IP4 192.168.178.114\r\ns=XCEL-1201 : 32\r\ni=2 channels: DANTE TX 01, DANTE TX 02\r\nc=IN IP4 239.69.224.56/32\r\nt=0 0\r\na=keywds:Dante\r\na=recvonly\r\nm=audio 5004 RTP/AVP 97\r\na=rtpmap:97 L24/48000/2\r\na=ptime:1\r\na=ts-refclk:ptp=IEEE1588-2008:2C-CF-67-FF-FE-75-93-93:0\r\na=mediaclk:direct=0\r\n";
 // NUC
@@ -318,7 +318,7 @@ int main(int argc, char *argv[])
             {
                 fprintf(stderr, "underrun occurred\n");
             }
-            // mute(&muted);
+            mute(&muted);
             snd_pcm_prepare(pcm_handle);
         }
         else if (rc < 0)

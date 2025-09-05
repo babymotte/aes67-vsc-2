@@ -294,6 +294,10 @@ pub fn frames_to_duration(frames: Frames, sample_rate: FramesPerSecond) -> Durat
     Duration::from_micros(((frames as f64 / sample_rate as f64) * 1_000_000.0).round() as u64)
 }
 
+pub fn frames_to_duration_float(frames: f64, sample_rate: FramesPerSecond) -> Duration {
+    Duration::from_micros(((frames / sample_rate as f64) * 1_000_000.0).round() as u64)
+}
+
 pub fn packets_in_link_offset(link_offset: MilliSeconds, packet_time: MilliSeconds) -> usize {
     (link_offset / packet_time).round() as usize
 }

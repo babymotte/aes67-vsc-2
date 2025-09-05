@@ -88,7 +88,7 @@ pub enum ReceiverStatsReport {
     },
     NetworkDelay {
         receiver: String,
-        delay_frames: Frames,
+        delay_frames: i64,
         delay_millis: MilliSeconds,
     },
     MeasuredLinkOffset {

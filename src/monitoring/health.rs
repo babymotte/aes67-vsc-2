@@ -82,7 +82,6 @@ impl HealthActor {
     }
 
     async fn process_report(&mut self, report: Report) {
-        info!("Report received: {report:?}");
         match report {
             Report::State(e) => {
                 _ = {

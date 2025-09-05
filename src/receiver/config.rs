@@ -237,4 +237,8 @@ impl RxDescriptor {
     pub fn frames_to_duration(&self, frames: Frames) -> Duration {
         formats::frames_to_duration(frames, self.audio_format.sample_rate)
     }
+
+    pub fn frames_to_duration_float(&self, frames: f64) -> Duration {
+        formats::frames_to_duration_float(frames, self.audio_format.sample_rate)
+    }
 }

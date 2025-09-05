@@ -37,7 +37,7 @@ struct LostPackets {
 #[serde(rename_all = "camelCase")]
 struct ReceiverStats {
     clock_offset: u64,
-    network_delay_frames: u64,
+    network_delay_frames: i64,
     network_delay_millis: f32,
     measured_link_offset_frames: u64,
     measured_link_offset_millis: f32,
@@ -157,7 +157,6 @@ impl ObservabilityActor {
     }
 
     async fn process_event(&mut self, evt: Report) {
-        info!("Event received: {evt:?}");
         match evt {
             Report::State(state) => self.process_state(state).await,
             Report::Stats(stats) => self.process_stats_report(stats).await,
@@ -305,7 +304,7 @@ impl ObservabilityActor {
     async fn receiver_network_delay_changed(
         &mut self,
         name: String,
-        delay_frames: Frames,
+        delay_frames: i64,
         delay_millis: f32,
     ) {
         let Some(receiver) = self.receivers.get_mut(&name) else {
