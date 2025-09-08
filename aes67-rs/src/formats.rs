@@ -223,6 +223,12 @@ fn bytes_to_f32_3_bytes(bytes: &[u8]) -> f32 {
 }
 
 fn f32_to_bytes_2_bytes(sample: f32, bytes: &mut [u8]) {
+    debug_assert_eq!(
+        bytes.len(),
+        2,
+        "target buffer must be 2 bytes long, but was {}",
+        bytes.len()
+    );
     let sample_i32 = if sample > 0.0 {
         (sample * i16::MAX as f32) as i16
     } else {
@@ -232,6 +238,12 @@ fn f32_to_bytes_2_bytes(sample: f32, bytes: &mut [u8]) {
 }
 
 fn f32_to_bytes_3_bytes(sample: f32, bytes: &mut [u8]) {
+    debug_assert_eq!(
+        bytes.len(),
+        3,
+        "target buffer must be 3 bytes long, but was {}",
+        bytes.len()
+    );
     let sample_i32 = if sample > 0.0 {
         (sample * i32::MAX as f32) as i32
     } else {
@@ -241,10 +253,22 @@ fn f32_to_bytes_3_bytes(sample: f32, bytes: &mut [u8]) {
 }
 
 fn bytes_to_i32_2_bytes(bytes: &[u8]) -> i32 {
+    debug_assert_eq!(
+        bytes.len(),
+        2,
+        "target buffer must be 2 bytes long, but was {}",
+        bytes.len()
+    );
     i16::from_be_bytes([bytes[0], bytes[1]]) as i32
 }
 
 fn bytes_to_i32_3_bytes(bytes: &[u8]) -> i32 {
+    debug_assert_eq!(
+        bytes.len(),
+        3,
+        "target buffer must be 3 bytes long, but was {}",
+        bytes.len()
+    );
     let mut value = ((bytes[0] as i32) << 16) | ((bytes[1] as i32) << 8) | (bytes[2] as i32);
 
     // Sign extend from 24-bit to 32-bit

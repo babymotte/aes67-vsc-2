@@ -6,6 +6,7 @@ use crate::{
         VscHealthReport, VscState, VscStatsReport,
     },
     receiver::config::RxDescriptor,
+    sender::config::TxDescriptor,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -35,6 +36,9 @@ struct LostPackets {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct SenderStats {}
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ReceiverStats {
     clock_offset: u64,
     network_delay_frames: i64,
@@ -43,6 +47,13 @@ struct ReceiverStats {
     measured_link_offset_millis: f32,
     lost_packets: LostPackets,
     late_packets: LostPackets,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SenderData {
+    config: TxDescriptor,
+    stats: SenderStats,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,7 +77,7 @@ struct ObservabilityActor {
     client_name: String,
     rx: broadcast::Receiver<Report>,
     wb: Option<Worterbuch>,
-    senders: HashMap<String, String>,
+    senders: HashMap<String, SenderData>,
     receivers: HashMap<String, ReceiverData>,
     running: bool,
 }
@@ -148,8 +159,8 @@ impl ObservabilityActor {
         if self.running {
             self.publish_vsc().await;
         }
-        for (name, sdp) in &self.senders {
-            self.publish_sender(name, sdp.to_owned()).await;
+        for (name, data) in &self.senders {
+            self.publish_sender(name, data.clone()).await;
         }
         for (name, data) in &self.receivers {
             self.publish_receiver(name, data.clone()).await;
@@ -180,7 +191,9 @@ impl ObservabilityActor {
 
     async fn process_sender_event(&mut self, e: SenderState) {
         match e {
-            SenderState::SenderCreated { name, sdp } => self.sender_created(name, sdp).await,
+            SenderState::SenderCreated { name, descriptor } => {
+                self.sender_created(name, descriptor).await
+            }
             SenderState::SenderDestroyed { name } => self.sender_destroyed(name).await,
         }
     }
@@ -216,9 +229,13 @@ impl ObservabilityActor {
         self.publish_vsc().await;
     }
 
-    async fn sender_created(&mut self, name: String, sdp: String) {
-        self.senders.insert(name.clone(), sdp.clone());
-        self.publish_sender(&name, sdp).await;
+    async fn sender_created(&mut self, name: String, descriptor: TxDescriptor) {
+        let data = SenderData {
+            config: descriptor.clone(),
+            stats: SenderStats::default(),
+        };
+        self.senders.insert(name.clone(), data.clone());
+        self.publish_sender(&name, data).await;
     }
 
     async fn sender_destroyed(&mut self, name: String) {
@@ -385,15 +402,15 @@ impl ObservabilityActor {
         };
     }
 
-    async fn publish_sender(&self, name: &str, sdp: String) {
+    async fn publish_sender(&self, name: &str, data: SenderData) {
         if let Some(wb) = &self.wb {
-            wb.set_async(topic!(ROOT_KEY, name, "sdp"), sdp).await.ok();
+            publish_individual(wb, topic!(ROOT_KEY, name), data).await;
         };
     }
 
     async fn unpublish_sender(&mut self, name: &str) {
         if let Some(wb) = &self.wb {
-            wb.delete_async(topic!(ROOT_KEY, name, "sdp")).await.ok();
+            wb.delete_async(topic!(ROOT_KEY, name)).await.ok();
         };
     }
 

@@ -7,8 +7,8 @@
  *                                         *
  *******************************************/
 
-#ifndef __RUST_AES67_VSC_2__
-#define __RUST_AES67_VSC_2__
+#ifndef __RUST_AES67_RS__
+#define __RUST_AES67_RS__
 
 static const unsigned int AES_VSC_OK = 0x00;
 static const unsigned int AES_VSC_ERROR_NOT_INITIALIZED = 0x01;
@@ -127,4 +127,4 @@ aes67_vsc_receive (
 } /* extern \"C\" */
 #endif
 
-#endif /* __RUST_AES67_VSC_2__ */
+#endif /* __RUST_AES67_RS__ */

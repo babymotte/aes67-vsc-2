@@ -6,6 +6,7 @@ use crate::{
     formats::{Frames, MilliSeconds},
     monitoring::{health::health, observability::observability, stats::stats},
     receiver::config::RxDescriptor,
+    sender::config::TxDescriptor,
 };
 use rtp_rs::Seq;
 use std::{
@@ -52,8 +53,13 @@ pub enum VscState {
 
 #[derive(Debug, Clone)]
 pub enum SenderState {
-    SenderCreated { name: String, sdp: String },
-    SenderDestroyed { name: String },
+    SenderCreated {
+        name: String,
+        descriptor: TxDescriptor,
+    },
+    SenderDestroyed {
+        name: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -134,6 +140,8 @@ pub enum Stats {
 #[derive(Debug, Clone)]
 pub enum TxStats {
     BufferUnderrun,
+    PacketTime(u64),
+    PacketSize(usize),
 }
 
 #[derive(Debug, Clone)]
@@ -227,9 +235,9 @@ impl Monitoring {
             .ok();
     }
 
-    pub fn sender_stats(&self, stats: RxStats) {
+    pub fn sender_stats(&self, stats: TxStats) {
         if let Err(TrySendError::Full(_)) =
-            self.tx.try_send(MonitoringEvent::Stats(Stats::Rx(stats)))
+            self.tx.try_send(MonitoringEvent::Stats(Stats::Tx(stats)))
         {
             warn!("Dropping sender stats, buffer is full!");
         }

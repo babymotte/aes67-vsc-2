@@ -1,0 +1,45 @@
+app:
+  name: AES67-VSC
+  instance:
+    name: thinkpad-p14s
+telemetry:
+  # endpoint: !grpc http://127.0.0.1:4317
+playoutConfig:
+receivers:
+  # - session: http://192.168.178.124/by-id/2101
+  #   linkOffset: 4.0
+  #   # interfaceIp: 192.168.178.39
+  #   interfaceIp: 172.50.0.177
+senders:
+  - id: aes67-vsc-jack-1
+    interfaceIp: 192.168.178.39
+    # interfaceIp: 10.1.255.247
+    target: 239.1.178.124:5004
+    audioFormat:
+      sampleRate: 48000
+      frameFormat:
+        channels: 8
+        sampleFormat: L24
+    payloadType: 98
+
+  - id: aes67-vsc-jack-2
+    interfaceIp: 192.168.178.39
+    # interfaceIp: 10.1.255.247
+    target: 239.1.178.125:5004
+    audioFormat:
+      sampleRate: 48000
+      frameFormat:
+        channels: 2
+        sampleFormat: L24
+    payloadType: 98
+
+  - id: aes67-vsc-jack-3
+    interfaceIp: 192.168.178.39
+    # interfaceIp: 10.1.255.247
+    target: 239.1.178.126:5004
+    audioFormat:
+      sampleRate: 48000
+      frameFormat:
+        channels: 2
+        sampleFormat: L24
+    payloadType: 98

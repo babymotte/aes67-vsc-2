@@ -93,6 +93,14 @@ pub enum SenderInternalError {
     IoError(#[from] io::Error),
     #[error("RTP packet builder error: {0:?}")]
     RtpPacketBuildError(#[from] WrappedRtpPacketBuildError),
+    #[error("Channel error.")]
+    ChannelError(#[from] oneshot::error::RecvError),
+    #[error(
+        "Channel count mismatch: {configured} channels configured, but data for {provided} channels was provided."
+    )]
+    ChannelCountMismatch { configured: usize, provided: usize },
+    #[error("RTP packet is too large: {0}. MTU is 1500.")]
+    MaxMTUExceeded(usize),
 }
 
 #[derive(Error, Debug, Diagnostic)]

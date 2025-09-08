@@ -5,7 +5,11 @@ edition = "2024"
 
 [dependencies]
 aes67-rs = { path = "../aes67-rs" }
+dirs = "6.0.0"
+jack = "0.13.3"
 miette = { version = "7.6.0", features = ["fancy"] }
+serde = "1.0.219"
+serde_yaml = "0.9.34"
 tokio = { version = "1.47.1", features = ["full"] }
 tokio-graceful-shutdown = { version = "0.16.0", features = ["tracing"] }
 tracing = "0.1.41"

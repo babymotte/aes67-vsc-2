@@ -15,7 +15,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{error::ConfigResult, receiver::config::ReceiverConfig};
+use crate::{error::ConfigResult, receiver::config::ReceiverConfig, sender::config::SenderConfig};
 use clap::Parser;
 use gethostname::gethostname;
 use serde::{Deserialize, Serialize};
@@ -108,7 +108,9 @@ pub struct Config {
     #[serde(default)]
     pub telemetry: Option<TelemetryConfig>,
     #[serde(default)]
-    pub receiver_config: Option<ReceiverConfig>,
+    pub receivers: Vec<ReceiverConfig>,
+    #[serde(default)]
+    pub senders: Vec<SenderConfig>,
 }
 
 impl Default for Config {
@@ -116,7 +118,8 @@ impl Default for Config {
         Self {
             app: Default::default(),
             telemetry: Default::default(),
-            receiver_config: Default::default(),
+            receivers: Default::default(),
+            senders: Default::default(),
         }
     }
 }

@@ -16,6 +16,12 @@ impl SenderStats {
             TxStats::BufferUnderrun => {
                 // TODO
             }
+            TxStats::PacketTime(_) => {
+                // TODO
+            }
+            TxStats::PacketSize(_) => {
+                // TODO
+            }
         }
     }
 }

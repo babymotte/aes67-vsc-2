@@ -15,19 +15,20 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+mod play;
+mod record;
+mod session_manager;
+
+use crate::{play::start_playout, record::start_recording};
 use aes67_rs::{
-    config::Config,
-    error::{Aes67Vsc2Error, Aes67Vsc2Result, ConfigError, ToBoxedResult},
-    receiver::{api::ReceiverApi, config::RxDescriptor},
-    telemetry,
-    time::SystemMediaClock,
-    vsc::VirtualSoundCardApi,
+    config::Config, receiver::config::RxDescriptor, sender::config::TxDescriptor, telemetry,
+    time::SystemMediaClock, vsc::VirtualSoundCardApi,
 };
 use miette::IntoDiagnostic;
 use std::time::Duration;
 use tokio::runtime;
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle, Toplevel};
-use tracing::info;
+use tracing::{error, info};
 
 fn main() -> miette::Result<()> {
     let config = Config::load().into_diagnostic()?;
@@ -55,39 +56,53 @@ async fn async_main(config: Config) -> miette::Result<()> {
     Ok(())
 }
 
-async fn run(subsys: SubsystemHandle, mut config: Config) -> Aes67Vsc2Result<()> {
-    let Some(rx_config) = config.receiver_config.take() else {
-        return Err(Aes67Vsc2Error::ConfigError(Box::new(
-            ConfigError::MissingReceiverConfig,
-        )));
-    };
-
+async fn run(subsys: SubsystemHandle, config: Config) -> miette::Result<()> {
     let id = config.instance_name();
 
     info!(
-        "Starting {} instance '{}' with session description:\n{}",
-        config.app.name,
-        config.app.instance.name,
-        rx_config.session.marshal()
+        "Starting {} instance '{}' …",
+        config.app.name, config.app.instance.name
     );
 
-    let vsc = VirtualSoundCardApi::new(id).await.boxed()?;
-    let descriptor = RxDescriptor::try_from(&rx_config).boxed()?;
+    let vsc = VirtualSoundCardApi::new(id).await.into_diagnostic()?;
 
-    let system_clock = SystemMediaClock::new(descriptor.audio_format);
-    let (receiver, _) = vsc.create_receiver(rx_config).await.boxed()?;
+    for tx_config in config.senders {
+        let descriptor = TxDescriptor::try_from(&tx_config).into_diagnostic()?;
+        let vsc = vsc.clone();
+        subsys.start(SubsystemBuilder::new(
+            format!("sender/{}", descriptor.id),
+            |s| async move {
+                match vsc.create_sender(tx_config).await.into_diagnostic() {
+                    Ok((sender, _)) => {
+                        // TODO make clock source configurable
+                        let clock = SystemMediaClock::new(descriptor.audio_format.clone());
+                        start_recording(s, sender, descriptor, clock).await
+                    }
+                    Err(e) => {
+                        error!("Error creating sender '{}': {}", descriptor.id, e);
+                        Ok(())
+                    }
+                }
+            },
+        ));
+    }
 
-    start_playout(subsys, receiver, descriptor).await?;
-
-    Ok(())
-}
-
-async fn start_playout(
-    subsys: SubsystemHandle,
-    receiver: ReceiverApi,
-    descriptor: RxDescriptor,
-) -> Aes67Vsc2Result<()> {
-    // TODO
+    for rx_config in config.receivers {
+        let descriptor = RxDescriptor::try_from(&rx_config).into_diagnostic()?;
+        let vsc = vsc.clone();
+        subsys.start(SubsystemBuilder::new(
+            format!("receiver/{}", descriptor.id),
+            |s| async move {
+                match vsc.create_receiver(rx_config).await.into_diagnostic() {
+                    Ok((receiver, _)) => start_playout(s, receiver, descriptor).await,
+                    Err(e) => {
+                        error!("Error creating receiver '{}': {}", descriptor.id, e);
+                        Ok(())
+                    }
+                }
+            },
+        ));
+    }
 
     subsys.on_shutdown_requested().await;
 

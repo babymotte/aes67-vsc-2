@@ -22,7 +22,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::{
     fmt::Debug,
-    slice::{from_raw_parts, from_raw_parts_mut},
+    slice::{Chunks, from_raw_parts, from_raw_parts_mut},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -46,8 +46,8 @@ impl AudioBufferPointer {
         Self::new(slice.as_ptr() as usize, slice.len())
     }
 
-    pub fn buffer(&self) -> &[u8] {
-        unsafe { from_raw_parts(self.ptr as *const u8, self.len) }
+    pub fn buffer<T>(&self) -> &[T] {
+        unsafe { from_raw_parts(self.ptr as *const T, self.len) }
     }
 
     /// Gets the actual audio buffer from the pointer as a mutable slice.
@@ -225,4 +225,11 @@ impl FloatingPointAudioBuffer {
         }
         DataState::Ready
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AudioBufferArrayPointer {
+    ptr: usize,
+    buffer_len: usize,
+    len: usize,
 }
