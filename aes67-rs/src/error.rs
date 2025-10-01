@@ -101,6 +101,8 @@ pub enum SenderInternalError {
     ChannelCountMismatch { configured: usize, provided: usize },
     #[error("RTP packet is too large: {0}. MTU is 1500.")]
     MaxMTUExceeded(usize),
+    #[error("Producer closed.")]
+    ProducerClosed,
 }
 
 #[derive(Error, Debug, Diagnostic)]

@@ -14,7 +14,7 @@ senders:
   - id: aes67-vsc-jack-1
     interfaceIp: 192.168.178.39
     # interfaceIp: 10.1.255.247
-    target: 239.1.178.124:5004
+    target: 239.1.178.224:5004
     audioFormat:
       sampleRate: 48000
       frameFormat:
@@ -25,7 +25,7 @@ senders:
   - id: aes67-vsc-jack-2
     interfaceIp: 192.168.178.39
     # interfaceIp: 10.1.255.247
-    target: 239.1.178.125:5004
+    target: 239.1.178.225:5004
     audioFormat:
       sampleRate: 48000
       frameFormat:
@@ -36,7 +36,7 @@ senders:
   - id: aes67-vsc-jack-3
     interfaceIp: 192.168.178.39
     # interfaceIp: 10.1.255.247
-    target: 239.1.178.126:5004
+    target: 239.1.178.226:5004
     audioFormat:
       sampleRate: 48000
       frameFormat:

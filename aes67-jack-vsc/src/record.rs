@@ -1,9 +1,3 @@
-use std::{
-    ptr::slice_from_raw_parts,
-    slice::{from_raw_parts, from_raw_parts_mut},
-    time::Instant,
-};
-
 use crate::session_manager::{SessionManagerNotificationHandler, start_session_manager};
 use aes67_rs::{
     buffer::AudioBufferPointer,
@@ -15,6 +9,7 @@ use jack::{
     AudioIn, Client, ClientOptions, Control, Port, ProcessScope, contrib::ClosureProcessHandler,
 };
 use miette::IntoDiagnostic;
+use std::time::Instant;
 use tokio::sync::mpsc;
 use tokio_graceful_shutdown::SubsystemHandle;
 use tracing::{error, info};
@@ -66,7 +61,7 @@ pub async fn start_recording<C: MediaClock>(
         sender,
         ports,
         channel_bufs: vec![
-            AudioBufferPointer::new(0, 1);
+            AudioBufferPointer::new(0, 0);
             descriptor.audio_format.frame_format.channels
         ]
         .into(),
@@ -131,7 +126,7 @@ fn process<C: MediaClock>(state: &mut State<C>, client: &Client, ps: &ProcessSco
 
     state
         .sender
-        .send_blocking(state.channel_bufs.clone(), ingress_time);
+        .send_blocking(&state.channel_bufs, ingress_time);
 
     let post_req = Instant::now();
 

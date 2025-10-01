@@ -1,33 +1,28 @@
-use crate::{buffer::AudioBufferPointer, formats::Frames};
+use crate::{
+    buffer::{AudioBufferPointer, SenderBufferProducer},
+    formats::Frames,
+};
 use tokio::sync::mpsc;
 
 #[derive(Debug)]
-pub struct SendRequest {
-    pub channel_buffers: Box<[AudioBufferPointer]>,
-    pub ingress_time: u64,
-}
-
-#[derive(Debug)]
 pub enum SenderApiMessage {
-    Send(SendRequest),
     Stop,
 }
 
 #[derive(Debug, Clone)]
 pub struct SenderApi {
     api_tx: mpsc::Sender<SenderApiMessage>,
+    tx: SenderBufferProducer,
 }
 
 impl SenderApi {
-    pub fn new(api_tx: mpsc::Sender<SenderApiMessage>) -> Self {
-        Self { api_tx }
+    pub fn new(api_tx: mpsc::Sender<SenderApiMessage>, tx: SenderBufferProducer) -> Self {
+        Self { api_tx, tx }
     }
 
-    pub fn send_blocking(&self, channel_buffers: Box<[AudioBufferPointer]>, ingress_time: Frames) {
-        let req = SendRequest {
-            channel_buffers,
-            ingress_time,
-        };
-        self.api_tx.blocking_send(SenderApiMessage::Send(req)).ok();
+    pub fn send_blocking(&mut self, channel_buffers: &[AudioBufferPointer], ingress_time: Frames) {
+        unsafe {
+            self.tx.write(channel_buffers, ingress_time);
+        }
     }
 }

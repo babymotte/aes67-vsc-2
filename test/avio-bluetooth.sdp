@@ -1,13 +1,13 @@
 v=0
-o=- 10943522194 10943522219 IN IP4 192.168.178.97
-s=AVIO-Bluetooth : 2
-i=2 channels: Left, Right
-c=IN IP4 239.69.232.56/32
+o=- 10943522194 10943522219 IN IP4 192.168.178.39
+s=AES67-VSC : 8
+i=8 channels: 1,2,3,4,5,6,7,8
+c=IN IP4 239.1.178.124/32
 t=0 0
-a=keywds:Dante
+a=keywds:AES67-VSC
 a=recvonly
-m=audio 5004 RTP/AVP 97
-a=rtpmap:97 L24/48000/2
+m=audio 5004 RTP/AVP 98
+a=rtpmap:98 L24/48000/8
 a=ptime:1
-a=ts-refclk:ptp=IEEE1588-2008:00-1D-C1-FF-FE-0E-10-C4:0
+a=ts-refclk:ptp=IEEE1588-2008:2C-CF-67-FF-FE-75-93-93:0
 a=mediaclk:direct=0

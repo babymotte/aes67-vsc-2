@@ -15,6 +15,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+use crate::buffer::sender_buffer_channel;
 use crate::error::{SenderInternalError, SenderInternalResult};
 use crate::monitoring::{Monitoring, VscState, start_monitoring_service};
 use crate::sender::config::{SenderConfig, TxDescriptor};
@@ -278,6 +279,8 @@ impl VirtualSoundCard {
         let id = self.tx_counter;
         let display_name = format!("{}/tx/{}", self.name, name);
         info!("Creating sender '{display_name}' …");
+
+        let descriptor = TxDescriptor::try_from(&config)?;
 
         let desc = TxDescriptor::try_from(&config)?;
         let clock = SystemMediaClock::new(desc.audio_format);

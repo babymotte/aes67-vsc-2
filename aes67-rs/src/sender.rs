@@ -19,12 +19,12 @@ pub mod api;
 pub mod config;
 
 use crate::{
-    buffer::AudioBufferPointer,
+    buffer::{SenderBufferConsumer, sender_buffer_channel},
     error::{SenderInternalError, SenderInternalResult, WrappedRtpPacketBuildError},
-    formats::{Frames, SampleWriter},
+    formats::Frames,
     monitoring::Monitoring,
     sender::{
-        api::{SendRequest, SenderApi, SenderApiMessage},
+        api::{SenderApi, SenderApiMessage},
         config::{SenderConfig, TxDescriptor},
     },
     socket::create_tx_socket,
@@ -50,6 +50,7 @@ pub(crate) async fn start_sender(
     let (result_tx, result_rx) = oneshot::channel();
     let (api_tx, api_rx) = mpsc::channel(1024);
     let desc = TxDescriptor::try_from(&config)?;
+    let (tx, rx) = sender_buffer_channel(desc.clone());
     let socket = create_tx_socket(config.target, config.interface_ip)?;
     thread::Builder::new().name(id.clone()).spawn(move || {
         // set_realtime_priority();
@@ -61,14 +62,14 @@ pub(crate) async fn start_sender(
                 return;
             }
         };
-        let sender_future = Sender::start(id, desc, config, api_rx, socket, monitoring);
+        let sender_future = Sender::start(id, desc, config, api_rx, socket, monitoring, rx);
         result_tx.send(Ok(())).ok();
         runtime.block_on(sender_future);
     })?;
 
     result_rx.await??;
     info!("Sender '{sender_id}' started successfully.");
-    Ok(SenderApi::new(api_tx))
+    Ok(SenderApi::new(api_tx, tx))
 }
 
 struct Sender {
@@ -77,7 +78,7 @@ struct Sender {
     desc: TxDescriptor,
     api_rx: mpsc::Receiver<SenderApiMessage>,
     sequence_number: Seq,
-    audio_buffer: [u8; 65536],
+    rx: SenderBufferConsumer,
     rtp_buffer: [u8; 65536],
     socket: UdpSocket,
     target_address: SocketAddr,
@@ -93,6 +94,7 @@ impl Sender {
         api_rx: mpsc::Receiver<SenderApiMessage>,
         socket: UdpSocket,
         monitoring: Monitoring,
+        rx: SenderBufferConsumer,
     ) {
         let send_id = id.clone();
         let subsystem_name = id.clone();
@@ -103,7 +105,7 @@ impl Sender {
                 desc,
                 api_rx,
                 sequence_number: Seq::from(rand::random::<u16>()),
-                audio_buffer: [0u8; 65536],
+                rx,
                 rtp_buffer: [0u8; 65536],
                 socket,
                 target_address: config.target,
@@ -133,6 +135,7 @@ impl Sender {
                 Some(api_msg) = self.api_rx.recv() => {
                     self.handle_api_message(api_msg).await?;
                 },
+                Ok(recv) = self.rx.read() => self.send(recv.0, recv.1, recv.2).await?,
                 _ = self.subsys.on_shutdown_requested() => break,
                 else => break,
             }
@@ -147,31 +150,25 @@ impl Sender {
 
     async fn handle_api_message(&mut self, api_msg: SenderApiMessage) -> SenderInternalResult<()> {
         match api_msg {
-            SenderApiMessage::Send(req) => _ = self.send(req).await,
             SenderApiMessage::Stop => self.subsys.request_shutdown(),
         }
         Ok(())
     }
 
-    async fn send(&mut self, req: SendRequest) -> SenderInternalResult<()> {
-        if req.channel_buffers.len() != self.desc.audio_format.frame_format.channels {
-            return Err(SenderInternalError::ChannelCountMismatch {
-                configured: self.desc.audio_format.frame_format.channels,
-                provided: req.channel_buffers.len(),
-            });
-        }
-
-        let (payload_len, ptime_frames) = self.interlace(&req.channel_buffers);
-        // TODO send response
-
+    async fn send(
+        &mut self,
+        payload_len: usize,
+        ptime_frames: Frames,
+        ingress_time: Frames,
+    ) -> SenderInternalResult<()> {
         let payload_type = self.desc.payload_type;
         let seq = self.sequence_number;
         self.sequence_number = seq.next();
-        let timestamp = (req.ingress_time % U32_WRAP) as u32;
-
-        let payload = &self.audio_buffer[..payload_len];
+        let timestamp = (ingress_time % U32_WRAP) as u32;
 
         self.report_packet_time(ptime_frames).await;
+
+        let payload = &self.rx.buffer[..payload_len];
 
         let len = RtpPacketBuilder::new()
             .payload_type(payload_type)
@@ -193,53 +190,6 @@ impl Sender {
             .await?;
 
         Ok(())
-    }
-
-    fn interlace<'a>(&mut self, channel_buffers: &[AudioBufferPointer]) -> (usize, Frames) {
-        let channels = self.desc.audio_format.frame_format.channels;
-
-        debug_assert_eq!(
-            channels,
-            channel_buffers.len(),
-            "expected {} buffers, but got {}",
-            channels,
-            channel_buffers.len()
-        );
-
-        let target_bytes_per_sample = self
-            .desc
-            .audio_format
-            .frame_format
-            .sample_format
-            .bytes_per_sample();
-
-        let buffer_len = channel_buffers.first().expect("cannot be empty").len();
-
-        let output_len = buffer_len * channels * target_bytes_per_sample;
-
-        for (ch, buf) in channel_buffers.iter().enumerate() {
-            debug_assert_eq!(
-                buf.len(),
-                buffer_len,
-                "provided channel buffers have inconsistent lengths"
-            );
-
-            let buf = buf.buffer::<f32>();
-
-            for (sample_index, source_sample) in buf.iter().enumerate() {
-                let target_index = sample_index * target_bytes_per_sample * channels
-                    + ch * target_bytes_per_sample;
-                let dest_buf =
-                    &mut self.audio_buffer[target_index..target_index + target_bytes_per_sample];
-                self.desc
-                    .audio_format
-                    .frame_format
-                    .sample_format
-                    .write_sample(*source_sample, dest_buf);
-            }
-        }
-
-        (output_len, buffer_len as Frames)
     }
 }
 
