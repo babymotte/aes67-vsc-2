@@ -114,7 +114,7 @@ impl<'a, 'b> AudioBuffer<'a, 'b> {
         } else {
             let modulo = end_index - self.buf.len();
 
-            if modulo % bpf != 0 {
+            if !modulo.is_multiple_of(bpf) {
                 panic!("wrap within frame");
             }
 
@@ -132,7 +132,7 @@ pub struct FloatingPointAudioBuffer {
 
 impl FloatingPointAudioBuffer {
     pub fn new(buf: Box<[f32]>, desc: RxDescriptor) -> Self {
-        if buf.len() % desc.audio_format.frame_format.channels != 0 {
+        if !buf.len().is_multiple_of(desc.audio_format.frame_format.channels) {
             panic!("buffer length must be a multiple of the number of channels")
         }
         Self { buf, desc }

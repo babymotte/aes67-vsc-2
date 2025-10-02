@@ -15,13 +15,8 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{
-    buffer::{AudioBufferPointer, ReceiverBufferConsumer, ReceiverBufferProducer},
-    error::{ReceiverApiResult, ReceiverInternalResult},
-    formats::Frames,
-    receiver::config::RxDescriptor,
-};
-use tokio::sync::{mpsc, oneshot};
+use crate::{buffer::ReceiverBufferConsumer, error::ReceiverInternalResult, formats::Frames};
+use tokio::sync::mpsc;
 use tracing::instrument;
 
 #[derive(Debug, PartialEq)]

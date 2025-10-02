@@ -45,7 +45,7 @@ use tokio::{
     },
 };
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle, Toplevel};
-use tracing::{debug, error, info, instrument, trace, warn};
+use tracing::{debug, error, info, instrument, warn};
 
 #[instrument(skip(clock, monitoring))]
 pub(crate) async fn start_receiver(
@@ -70,8 +70,7 @@ pub(crate) async fn start_receiver(
                 return;
             }
         };
-        let receiver_future =
-            Receiver::start(id, desc, config, clock, api_rx, socket, monitoring, tx);
+        let receiver_future = Receiver::start(id, desc, clock, api_rx, socket, monitoring, tx);
         result_tx.send(Ok(())).ok();
         runtime.block_on(receiver_future);
     })?;
@@ -90,9 +89,7 @@ struct Receiver {
     last_timestamp: Option<u32>,
     last_sequence_number: Option<Seq>,
     timestamp_offset: Option<u64>,
-    // rtp_packet_buffer: FloatingPointAudioBuffer,
     latest_received_frame: u64,
-    latest_played_frame: u64,
     socket: UdpSocket,
     monitoring: Monitoring,
     tx: ReceiverBufferProducer,
@@ -102,7 +99,6 @@ impl Receiver {
     async fn start(
         id: String,
         desc: RxDescriptor,
-        config: ReceiverConfig,
         clock: Box<dyn MediaClock>,
         api_rx: mpsc::Receiver<ReceiverApiMessage>,
         socket: UdpSocket,
@@ -125,12 +121,7 @@ impl Receiver {
                 last_sequence_number: None,
                 last_timestamp: None,
                 timestamp_offset: None,
-                // rtp_packet_buffer: FloatingPointAudioBuffer::new(
-                //     vec![0f32; packet_buffer_len].into(),
-                //     desc_rx,
-                // ),
                 latest_received_frame: 0,
-                latest_played_frame: 0,
                 socket,
                 monitoring,
                 tx,

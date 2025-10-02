@@ -15,13 +15,10 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::error::{ConfigError, ConfigResult};
-use pnet::datalink::{self, NetworkInterface};
 use std::{
     any::Any,
     fmt::Debug,
     iter::Sum,
-    net::IpAddr,
     ops::{Add, Div},
 };
 use thread_priority::{

@@ -28,15 +28,13 @@ use crate::{
     config::PtpMode,
     error::{ClockError, ClockResult, ConfigResult},
     formats::{AudioFormat, Frames},
-    nic::find_nic_with_name,
+    nic::{find_nic_with_name, phc_device_for_interface_ethtool},
 };
 use clock_steering::{Clock, Timestamp, unix::UnixClock};
 use libc::{clock_gettime, clockid_t, timespec};
-use pnet::datalink::NetworkInterface;
 use std::{
     io,
-    path::{Path, PathBuf},
-    process::Command,
+    path::Path,
     time::{Duration, SystemTime},
 };
 use tracing::{error, info};
@@ -101,7 +99,7 @@ impl MediaClock for UnixMediaClock {
 }
 
 pub fn to_duration(ts: Timestamp) -> Duration {
-    Duration::new(ts.seconds as u64, ts.nanos as u32)
+    Duration::new(ts.seconds as u64, ts.nanos)
 }
 
 pub fn to_system_time(ts: Timestamp) -> SystemTime {
@@ -133,43 +131,15 @@ pub fn get_clock(
     audio_format: AudioFormat,
 ) -> ConfigResult<Box<dyn MediaClock>> {
     match ptp_mode {
-        Some(PtpMode::System) => return Ok(Box::new(UnixMediaClock::system_clock(audio_format))),
+        Some(PtpMode::System) => Ok(Box::new(UnixMediaClock::system_clock(audio_format))),
         Some(PtpMode::Phc { nic }) => {
             let iface = find_nic_with_name(&nic)?;
             info!("Creating new PHC clock …");
             let Some(path) = phc_device_for_interface_ethtool(&iface)? else {
                 return Err(ClockError::PtpNotSupported(iface.name.clone()).into());
             };
-            return Ok(Box::new(UnixMediaClock::phc_clock(audio_format, path)?));
+            Ok(Box::new(UnixMediaClock::phc_clock(audio_format, path)?))
         }
-        None => return Ok(Box::new(UnixMediaClock::system_clock(audio_format))),
+        None => Ok(Box::new(UnixMediaClock::system_clock(audio_format))),
     }
-}
-
-/// Returns Some("/dev/ptpX") if the interface has a PHC, None if not
-pub fn phc_device_for_interface_ethtool(iface: &NetworkInterface) -> io::Result<Option<PathBuf>> {
-    let output = Command::new("ethtool")
-        .arg("-T")
-        .arg(&iface.name)
-        .output()?;
-
-    if !output.status.success() {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
-            format!("ethtool failed for {}", iface.name),
-        ));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    for line in stdout.lines() {
-        if let Some(idx_str) = line.strip_prefix("Hardware timestamp provider index:") {
-            let idx_str = idx_str.trim();
-            if let Ok(idx) = idx_str.parse::<u32>() {
-                return Ok(Some(PathBuf::from(format!("/dev/ptp{}", idx))));
-            }
-        }
-    }
-
-    // No PHC index found
-    Ok(None)
 }

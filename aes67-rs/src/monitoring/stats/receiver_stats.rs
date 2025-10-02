@@ -3,7 +3,7 @@ use crate::{
     monitoring::{ReceiverStatsReport, Report, RxStats, StatsReport},
     receiver::config::RxDescriptor,
     time::{
-        MICROS_PER_MILLI, MICROS_PER_MILLI_F, MICROS_PER_SEC, MILLIS_PER_SEC, MILLIS_PER_SEC_F,
+        MICROS_PER_MILLI_F, MICROS_PER_SEC, MILLIS_PER_SEC_F,
     },
     utils::{AverageCalculationBuffer, U16_WRAP},
 };
@@ -147,7 +147,7 @@ impl ReceiverStats {
         let frames_in_packet = desc.frames_in_buffer(payload_len) as i64;
 
         let delay =
-            media_time_at_reception as i64 - ingress_timestamp as i64 - frames_in_packet as i64;
+            media_time_at_reception as i64 - ingress_timestamp as i64 - frames_in_packet;
 
         if delay < frames_in_packet {
             // TODO report clock sync issue

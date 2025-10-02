@@ -91,7 +91,7 @@ fn buffer_change(_: &mut State, client: &Client, buffer_len: jack::Frames) -> Co
     Control::Continue
 }
 
-fn process(state: &mut State, client: &Client, ps: &ProcessScope) -> Control {
+fn process(state: &mut State, _: &Client, ps: &ProcessScope) -> Control {
     let start = Instant::now();
 
     let ingress_time = match state.clock.update_clock(ps) {

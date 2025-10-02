@@ -165,8 +165,8 @@ async fn handle_notification(client: &Client, notification: Notification) -> mie
             // TODO check if this affects our persisted connection table
         }
         Notification::PortConnected(port_id_a, port_id_b, are_connected) => {
-            if let Some(port) = client.port_by_id(port_id_b) {
-                if client.is_mine(&port) {
+            if let Some(port) = client.port_by_id(port_id_b)
+                && client.is_mine(&port) {
                     if are_connected {
                         info!("JACK sender ports connected: {port_id_a} -> {port_id_b}")
                     } else {
@@ -174,10 +174,9 @@ async fn handle_notification(client: &Client, notification: Notification) -> mie
                     }
                     store_connection(client, port_id_a, port_id_b, are_connected).await;
                 }
-            }
 
-            if let Some(port) = client.port_by_id(port_id_a) {
-                if client.is_mine(&port) {
+            if let Some(port) = client.port_by_id(port_id_a)
+                && client.is_mine(&port) {
                     if are_connected {
                         info!("JACK receiver ports connected: {port_id_a} -> {port_id_b}")
                     } else {
@@ -185,12 +184,12 @@ async fn handle_notification(client: &Client, notification: Notification) -> mie
                     }
                     store_connection(client, port_id_a, port_id_b, are_connected).await;
                 }
-            }
         }
         Notification::GraphReorder => {
             info!("JACK graph reorder");
         }
         Notification::XRun => {
+            // TODO report playout xrun
             warn!("JACK buffer xrun");
         }
     }

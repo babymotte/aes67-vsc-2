@@ -40,6 +40,9 @@ use tokio::{
 };
 use tracing::info;
 
+type ResultReceiver<T, E> = oneshot::Receiver<Result<T, E>>;
+type ApiMessageSender = mpsc::Sender<VscApiMessage>;
+
 enum VscApiMessage {
     CreateSender(
         String,
@@ -86,13 +89,7 @@ impl VirtualSoundCardApi {
 
     fn create_vsc(
         name: String,
-    ) -> Result<
-        (
-            oneshot::Receiver<Result<(), VscInternalError>>,
-            mpsc::Sender<VscApiMessage>,
-        ),
-        VscInternalError,
-    > {
+    ) -> Result<(ResultReceiver<(), VscInternalError>, ApiMessageSender), VscInternalError> {
         let (result_tx, result_rx) = oneshot::channel();
         let (api_tx, api_rx) = mpsc::channel(1024);
         thread::Builder::new()

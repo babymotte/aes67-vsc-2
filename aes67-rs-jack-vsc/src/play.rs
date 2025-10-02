@@ -4,7 +4,7 @@ use crate::{
 };
 use aes67_rs::{
     receiver::{api::ReceiverApi, config::RxDescriptor},
-    time::{MILLIS_PER_SEC, MILLIS_PER_SEC_F, MediaClock},
+    time::{MILLIS_PER_SEC_F, MediaClock},
 };
 use jack::{
     AudioOut, Client, ClientOptions, Control, Port, ProcessScope, contrib::ClosureProcessHandler,
@@ -77,7 +77,7 @@ fn buffer_change(_: &mut State, client: &Client, buffer_len: jack::Frames) -> Co
     Control::Continue
 }
 
-fn process(state: &mut State, client: &Client, ps: &ProcessScope) -> Control {
+fn process(state: &mut State, _: &Client, ps: &ProcessScope) -> Control {
     let start = Instant::now();
 
     let playout_time = match state.clock.update_clock(ps) {

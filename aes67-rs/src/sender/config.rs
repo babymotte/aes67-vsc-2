@@ -31,7 +31,7 @@ impl TryFrom<&SenderConfig> for TxDescriptor {
             .collect::<Vec<Option<String>>>();
         Ok(Self {
             id: value.id.clone(),
-            audio_format: value.audio_format.clone(),
+            audio_format: value.audio_format,
             payload_type: value.payload_type,
             channel_labels: labels,
         })

@@ -10,10 +10,10 @@ pub fn phc_device_for_interface_ethtool(iface: &NetworkInterface) -> io::Result<
         .output()?;
 
     if !output.status.success() {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
-            format!("ethtool failed for {}", iface.name),
-        ));
+        return Err(io::Error::other(format!(
+            "ethtool failed for {}",
+            iface.name
+        )));
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -49,6 +49,7 @@ pub fn find_nic_with_name(name: &String) -> ConfigResult<NetworkInterface> {
 
     Err(ConfigError::NoSuchNIC(name.to_owned()))
 }
+
 pub fn find_nic_for_ip(ip: IpAddr) -> ConfigResult<NetworkInterface> {
     for iface in datalink::interfaces() {
         for ipn in &iface.ips {

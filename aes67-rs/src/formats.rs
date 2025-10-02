@@ -18,7 +18,7 @@
 use crate::{
     error::ConfigError,
     receiver::config::RxDescriptor,
-    time::{MICROS_PER_SEC, MILLIS_PER_SEC, MILLIS_PER_SEC_F},
+    time::{MICROS_PER_SEC, MILLIS_PER_SEC_F},
 };
 use serde::{Deserialize, Serialize};
 use std::{str::FromStr, time::Duration};

@@ -160,7 +160,7 @@ impl Config {
     fn load_from_file(path: Option<&Path>) -> ConfigResult<Config> {
         match path {
             Some(path) => {
-                let content = fs::read_to_string(&path)?;
+                let content = fs::read_to_string(path)?;
                 let config = serde_yaml::from_str(&content)?;
                 info!("Config loaded from {}", path.to_string_lossy());
                 Ok(config)

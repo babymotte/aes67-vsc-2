@@ -1,14 +1,12 @@
 use crate::{
-    AES_VSC_ERROR_CLOCK_SYNC_ERROR, AES_VSC_ERROR_INVALID_CHANNEL, AES_VSC_ERROR_NO_DATA,
-    AES_VSC_ERROR_RECEIVER_BUFFER_UNDERRUN, AES_VSC_ERROR_RECEIVER_NOT_FOUND,
-    AES_VSC_ERROR_RECEIVER_NOT_READY_YET, AES_VSC_OK, Aes67VscReceiverConfig,
+    AES_VSC_ERROR_RECEIVER_NOT_FOUND, AES_VSC_OK, Aes67VscReceiverConfig,
     config::{Config, PtpMode},
     error::{
         ConfigError, ConfigResult, GetErrorCode, ReceiverApiResult, ReceiverInternalResult,
         ToBoxedResult, VscApiResult, VscInternalError, VscInternalResult,
     },
     receiver::{
-        api::{DataState, ReceiverApi},
+        api::ReceiverApi,
         config::ReceiverConfig,
     },
     telemetry,

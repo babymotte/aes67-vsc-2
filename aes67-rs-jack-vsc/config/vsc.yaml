@@ -9,8 +9,16 @@ ptp: !phc
   nic: enp0s13f0u1
 ptpMode:
 receivers:
+  - session: http://worterbuch.local/api/v1/get/discovery/sap/192.168.178.114/53144?raw
+    linkOffset: 1.0
+    interfaceIp: 192.168.178.39
+    # interfaceIp: 172.50.0.177
+  - session: http://worterbuch.local/api/v1/get/discovery/sap/192.168.178.190/9582?raw
+    linkOffset: 1.0
+    interfaceIp: 192.168.178.39
+    # interfaceIp: 172.50.0.177
   - session: http://worterbuch.local/api/v1/get/discovery/sap/192.168.178.97/11911?raw
-    linkOffset: 4.0
+    linkOffset: 1.0
     interfaceIp: 192.168.178.39
     # interfaceIp: 172.50.0.177
 senders:

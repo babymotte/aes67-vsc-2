@@ -18,7 +18,7 @@
 use crate::{
     error::{ConfigError, ConfigResult},
     formats::{self, AudioFormat, FrameFormat, Frames, MilliSeconds, Seconds},
-    time::{MICROS_PER_MILLI_F, MILLIS_PER_SEC_F},
+    time::MICROS_PER_MILLI_F,
 };
 use lazy_static::lazy_static;
 use regex::Regex;
