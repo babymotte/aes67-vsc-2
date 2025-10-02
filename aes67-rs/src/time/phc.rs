@@ -49,6 +49,8 @@ impl PhcClock {
                         };
 
                         LAST_OFFSET.store(offset, Ordering::Release);
+
+                        thread::sleep(Duration::from_secs(1));
                     }
                 });
 
