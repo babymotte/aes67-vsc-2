@@ -21,8 +21,6 @@ impl SenderApi {
     }
 
     pub fn send_blocking(&mut self, channel_buffers: &[AudioBufferPointer], ingress_time: Frames) {
-        unsafe {
-            self.tx.write(channel_buffers, ingress_time);
-        }
+        self.tx.write(channel_buffers, ingress_time);
     }
 }

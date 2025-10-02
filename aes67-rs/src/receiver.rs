@@ -89,7 +89,6 @@ struct Receiver {
     last_timestamp: Option<u32>,
     last_sequence_number: Option<Seq>,
     timestamp_offset: Option<u64>,
-    latest_received_frame: u64,
     socket: UdpSocket,
     monitoring: Monitoring,
     tx: ReceiverBufferProducer,
@@ -121,7 +120,6 @@ impl Receiver {
                 last_sequence_number: None,
                 last_timestamp: None,
                 timestamp_offset: None,
-                latest_received_frame: 0,
                 socket,
                 monitoring,
                 tx,
@@ -258,11 +256,6 @@ impl Receiver {
         if ingress_time > media_time_at_reception {
             self.report_time_travelling_packet(media_time_at_reception, &rtp, ingress_time);
             return Ok(());
-        }
-
-        let last_received_frame = ingress_time + frames_in_packet as u64 - 1;
-        if last_received_frame > self.latest_received_frame {
-            self.latest_received_frame = last_received_frame;
         }
 
         self.tx.write(rtp.payload(), ingress_time).await;

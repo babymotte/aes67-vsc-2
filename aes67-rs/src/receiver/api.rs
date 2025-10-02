@@ -50,12 +50,11 @@ impl ReceiverApi {
         self.api_tx.send(ReceiverApiMessage::Stop).await.ok();
     }
 
-    #[must_use]
     pub fn receive_blocking<'a>(
         &mut self,
         buffers: impl Iterator<Item = Option<&'a mut [f32]>>,
         ingress_time: Frames,
     ) -> ReceiverInternalResult<bool> {
-        unsafe { Ok(self.rx.read(buffers, ingress_time)?) }
+        self.rx.read(buffers, ingress_time)
     }
 }

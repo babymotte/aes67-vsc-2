@@ -313,8 +313,7 @@ impl ReceiverBufferProducer {
 
 impl ReceiverBufferConsumer {
     /// Write data from the shared buffer. Before reading, this function will block until the requested data is available.
-    #[must_use]
-    pub unsafe fn read<'a>(
+    pub fn read<'a>(
         &mut self,
         buffers: impl Iterator<Item = Option<&'a mut [f32]>>,
         ingress_time: Frames,
@@ -360,7 +359,7 @@ impl ReceiverBufferConsumer {
             }
 
             let oldest_frame_in_buffer =
-                latest_received_frame - self.descriptor.frames_in_buffer(buf.len()) as u64 + 1;
+                latest_received_frame - self.descriptor.frames_in_buffer(buf.len()) + 1;
             if oldest_frame_in_buffer > ingress_time {
                 warn!(
                     "The requested data is not in the receiver buffer anymore (requested frames: [{}; {}]; oldest frame in buffer: {}; {} frames late)!",
@@ -431,7 +430,7 @@ pub struct SenderBufferConsumer {
 // TODO return proper errors
 // TODO generalize start and end indices/packet time
 impl SenderBufferProducer {
-    pub unsafe fn write(&mut self, channel_buffers: &[AudioBufferPointer], ingress_time: Frames) {
+    pub fn write(&mut self, channel_buffers: &[AudioBufferPointer], ingress_time: Frames) {
         let channels = self.descriptor.audio_format.frame_format.channels;
 
         debug_assert_eq!(
