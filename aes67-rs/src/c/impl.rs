@@ -5,10 +5,7 @@ use crate::{
         ConfigError, ConfigResult, GetErrorCode, ReceiverApiResult, ReceiverInternalResult,
         ToBoxedResult, VscApiResult, VscInternalError, VscInternalResult,
     },
-    receiver::{
-        api::ReceiverApi,
-        config::ReceiverConfig,
-    },
+    receiver::{api::ReceiverApi, config::ReceiverConfig},
     telemetry,
     vsc::VirtualSoundCardApi,
 };
@@ -77,7 +74,8 @@ pub fn try_create_receiver(
         Ok(it) => it,
         Err(err) => return Ok(-(err.error_code() as i32)),
     };
-    let (receiver_api, id) = match VIRTUAL_SOUND_CARD.create_receiver_blocking(config, ptp_mode) {
+    let (receiver_api, _, id) = match VIRTUAL_SOUND_CARD.create_receiver_blocking(config, ptp_mode)
+    {
         Ok(it) => it,
         Err(err) => return Ok(-(err.error_code() as i32)),
     };

@@ -1,5 +1,5 @@
 use crate::{
-    common::JackClock,
+    common::{ClockState, JackClock},
     session_manager::{SessionManagerNotificationHandler, start_session_manager},
 };
 use aes67_rs::{
@@ -95,7 +95,11 @@ fn process(state: &mut State, _: &Client, ps: &ProcessScope) -> Control {
     let start = Instant::now();
 
     let ingress_time = match state.clock.update_clock(ps) {
-        Ok(it) => it,
+        Ok(ClockState::Stable(it)) => it,
+        Ok(ClockState::Unstable) => {
+            // TODO send empty packet
+            return Control::Continue;
+        }
         Err(e) => {
             error!("Could not get current media time: {e}");
             return Control::Quit;

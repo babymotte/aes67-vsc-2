@@ -186,24 +186,10 @@ pub fn create_tx_socket(target: SocketAddr, local_ip: IpAddr) -> SenderInternalR
     }?;
     let socket_addr = SockAddr::from(SocketAddr::new(local_ip, 0));
     socket.bind(&socket_addr)?;
-    // socket.set_broadcast(target.is_multicast())?;
     socket.set_reuse_address(true)?;
     socket.set_nonblocking(true)?;
 
     Ok(UdpSocket::from_std(socket.into())?)
-}
-
-trait IsMulticast {
-    fn is_multicast(&self) -> bool;
-}
-
-impl IsMulticast for SocketAddr {
-    fn is_multicast(&self) -> bool {
-        match self.ip() {
-            IpAddr::V4(it) => it.is_multicast(),
-            IpAddr::V6(it) => it.is_multicast(),
-        }
-    }
 }
 
 #[instrument]

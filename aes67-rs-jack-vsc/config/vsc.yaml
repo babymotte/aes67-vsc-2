@@ -9,21 +9,44 @@ ptp: !phc
   nic: enp0s13f0u1
 ptpMode:
 receivers:
-  - session: http://worterbuch.local/api/v1/get/discovery/sap/192.168.178.114/53144?raw
-    linkOffset: 1.0
-    interfaceIp: 192.168.178.39
+  # XCEL
+  - session: http://worterbuch.local/api/v1/get/discovery/sap/192.168.178.114/10409?raw
+    linkOffset: 4.0
+    # interfaceIp: 192.168.178.39
+    interfaceIp: 192.168.178.103
     # interfaceIp: 172.50.0.177
+  - session: http://worterbuch.local/api/v1/get/discovery/sap/192.168.178.114/37720?raw
+    linkOffset: 4.0
+    # interfaceIp: 192.168.178.39
+    interfaceIp: 192.168.178.103
+    # interfaceIp: 172.50.0.177
+  - session: http://worterbuch.local/api/v1/get/discovery/sap/192.168.178.114/50772?raw
+    linkOffset: 4.0
+    # interfaceIp: 192.168.178.39
+    interfaceIp: 192.168.178.103
+    # interfaceIp: 172.50.0.177
+  - session: http://worterbuch.local/api/v1/get/discovery/sap/192.168.178.114/55511?raw
+    linkOffset: 4.0
+    # interfaceIp: 192.168.178.39
+    interfaceIp: 192.168.178.103
+    # interfaceIp: 172.50.0.177
+  # NUC
   - session: http://worterbuch.local/api/v1/get/discovery/sap/192.168.178.190/9582?raw
-    linkOffset: 1.0
-    interfaceIp: 192.168.178.39
+    linkOffset: 4.0
+    # interfaceIp: 192.168.178.39
+    interfaceIp: 192.168.178.103
     # interfaceIp: 172.50.0.177
+
+    # Bluetooth
   - session: http://worterbuch.local/api/v1/get/discovery/sap/192.168.178.97/11911?raw
-    linkOffset: 1.0
-    interfaceIp: 192.168.178.39
+    linkOffset: 4.0
+    # interfaceIp: 192.168.178.39
+    interfaceIp: 192.168.178.103
     # interfaceIp: 172.50.0.177
 senders:
   - id: aes67-vsc-jack-1
-    interfaceIp: 192.168.178.39
+    # interfaceIp: 192.168.178.39
+    interfaceIp: 192.168.178.103
     # interfaceIp: 172.50.0.177
     target: 239.1.178.224:5004
     audioFormat:
@@ -34,7 +57,8 @@ senders:
     payloadType: 98
 
   - id: aes67-vsc-jack-2
-    interfaceIp: 192.168.178.39
+    # interfaceIp: 192.168.178.39
+    interfaceIp: 192.168.178.103
     # interfaceIp: 172.50.0.177
     target: 239.1.178.225:5004
     audioFormat:
@@ -45,7 +69,8 @@ senders:
     payloadType: 98
 
   - id: aes67-vsc-jack-3
-    interfaceIp: 192.168.178.39
+    # interfaceIp: 192.168.178.39
+    interfaceIp: 192.168.178.103
     # interfaceIp: 172.50.0.177
     target: 239.1.178.226:5004
     audioFormat:

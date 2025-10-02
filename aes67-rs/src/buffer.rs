@@ -17,7 +17,8 @@
 
 use crate::{
     error::{ReceiverInternalResult, SenderInternalError, SenderInternalResult},
-    formats::{BufferFormat, Frames, SampleReader, SampleWriter},
+    formats::{BufferFormat, Frames, SampleReader, SampleWriter, frames_to_duration},
+    monitoring::Monitoring,
     receiver::{api::DataState, config::RxDescriptor},
     sender::config::TxDescriptor,
 };
@@ -25,10 +26,10 @@ use serde::{Deserialize, Serialize};
 use std::{
     fmt::Debug,
     slice::{from_raw_parts, from_raw_parts_mut},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::sync::{mpsc, watch};
-use tracing::{error, warn};
+use tracing::{debug, error, warn};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BufferConfig {
@@ -132,7 +133,10 @@ pub struct FloatingPointAudioBuffer {
 
 impl FloatingPointAudioBuffer {
     pub fn new(buf: Box<[f32]>, desc: RxDescriptor) -> Self {
-        if !buf.len().is_multiple_of(desc.audio_format.frame_format.channels) {
+        if !buf
+            .len()
+            .is_multiple_of(desc.audio_format.frame_format.channels)
+        {
             panic!("buffer length must be a multiple of the number of channels")
         }
         Self { buf, desc }
@@ -234,6 +238,7 @@ impl FloatingPointAudioBuffer {
 
 pub fn receiver_buffer_channel(
     descriptor: RxDescriptor,
+    monitoring: Monitoring,
 ) -> (ReceiverBufferProducer, ReceiverBufferConsumer) {
     let buffer_len = descriptor.duration_to_frames(Duration::from_secs(1)) as usize;
     let (tx, rx) = watch::channel(0);
@@ -249,7 +254,7 @@ pub fn receiver_buffer_channel(
             buffer_pointer,
             descriptor,
             rx,
-            // last_received_frame: 0,
+            monitoring,
         },
     )
 }
@@ -266,7 +271,7 @@ pub struct ReceiverBufferConsumer {
     buffer_pointer: AudioBufferPointer,
     descriptor: RxDescriptor,
     rx: watch::Receiver<Frames>,
-    // last_received_frame: Frames,
+    monitoring: Monitoring,
 }
 
 impl ReceiverBufferProducer {
@@ -305,14 +310,18 @@ impl ReceiverBufferProducer {
 }
 
 // TODO return proper errors
+
 impl ReceiverBufferConsumer {
     /// Write data from the shared buffer. Before reading, this function will block until the requested data is available.
+    #[must_use]
     pub unsafe fn read<'a>(
         &mut self,
         buffers: impl Iterator<Item = Option<&'a mut [f32]>>,
         ingress_time: Frames,
-    ) -> ReceiverInternalResult<()> {
+    ) -> ReceiverInternalResult<bool> {
         let buf = self.buffer_pointer.buffer::<f32>();
+
+        let mut latest_received_frame = 0;
 
         for (channel, output_buffer) in buffers.enumerate() {
             let Some(output_buffer) = output_buffer else {
@@ -320,18 +329,47 @@ impl ReceiverBufferConsumer {
             };
 
             let last_requested_frame = ingress_time + output_buffer.len() as Frames - 1;
-            let last_received_frame = *self.rx.borrow();
+            latest_received_frame = *self.rx.borrow();
 
-            if last_received_frame < last_requested_frame {
-                warn!(
-                    "Requested frame {last_requested_frame} has not been received yet (last received frame is {last_received_frame})."
+            if latest_received_frame < last_requested_frame {
+                debug!(
+                    "Requested frame {} has not been received yet (latest received frame is {}, need to wait for {} frames/{} µs).",
+                    last_requested_frame,
+                    latest_received_frame,
+                    last_requested_frame - latest_received_frame,
+                    frames_to_duration(
+                        last_requested_frame - latest_received_frame,
+                        self.descriptor.audio_format.sample_rate
+                    )
+                    .as_micros()
                 );
+                let wait_start = Instant::now();
                 // TODO report underrun
-                futures::executor::block_on(
-                    self.rx.wait_for(|last_received_frame| {
-                        last_received_frame >= &last_requested_frame
-                    }),
-                )?;
+                futures::executor::block_on(async {
+                    while latest_received_frame < last_requested_frame {
+                        self.rx.changed().await?;
+                        latest_received_frame = *self.rx.borrow();
+                    }
+                    Ok::<(), watch::error::RecvError>(())
+                })?;
+                let wait_end = Instant::now();
+                debug!(
+                    "Waited for data for {} µs.",
+                    (wait_end - wait_start).as_micros()
+                );
+            }
+
+            let oldest_frame_in_buffer =
+                latest_received_frame - self.descriptor.frames_in_buffer(buf.len()) as u64 + 1;
+            if oldest_frame_in_buffer > ingress_time {
+                warn!(
+                    "The requested data is not in the receiver buffer anymore (requested frames: [{}; {}]; oldest frame in buffer: {}; {} frames late)!",
+                    ingress_time,
+                    last_requested_frame,
+                    oldest_frame_in_buffer,
+                    oldest_frame_in_buffer - ingress_time
+                );
+                return Ok(false);
             }
 
             let channels = self.descriptor.audio_format.frame_format.channels;
@@ -354,7 +392,11 @@ impl ReceiverBufferConsumer {
             }
         }
 
-        Ok(())
+        if latest_received_frame > 0 {
+            self.report_playout(ingress_time, latest_received_frame);
+        }
+
+        Ok(true)
     }
 }
 
@@ -370,11 +412,7 @@ pub fn sender_buffer_channel(
             descriptor: descriptor.clone(),
             tx,
         },
-        SenderBufferConsumer {
-            buffer,
-            descriptor,
-            rx,
-        },
+        SenderBufferConsumer { buffer, rx },
     )
 }
 
@@ -387,7 +425,6 @@ pub struct SenderBufferProducer {
 
 pub struct SenderBufferConsumer {
     pub buffer: Box<[u8]>,
-    descriptor: TxDescriptor,
     rx: mpsc::Receiver<(usize, Frames, Frames)>,
 }
 
@@ -459,5 +496,24 @@ impl SenderBufferConsumer {
         };
 
         Ok(data)
+    }
+}
+
+mod monitoring {
+    use crate::monitoring::RxStats;
+
+    use super::*;
+
+    impl ReceiverBufferConsumer {
+        pub(crate) fn report_playout(
+            &mut self,
+            ingress_time: Frames,
+            latest_received_frame: Frames,
+        ) {
+            self.monitoring.receiver_stats(RxStats::Playout {
+                ingress_time,
+                latest_received_frame,
+            });
+        }
     }
 }

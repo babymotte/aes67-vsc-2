@@ -2,9 +2,7 @@ use crate::{
     formats::Frames,
     monitoring::{ReceiverStatsReport, Report, RxStats, StatsReport},
     receiver::config::RxDescriptor,
-    time::{
-        MICROS_PER_MILLI_F, MICROS_PER_SEC, MILLIS_PER_SEC_F,
-    },
+    time::{MICROS_PER_MILLI_F, MICROS_PER_SEC, MILLIS_PER_SEC_F},
     utils::{AverageCalculationBuffer, U16_WRAP},
 };
 use rtp_rs::Seq;
@@ -22,6 +20,7 @@ pub struct ReceiverStats {
     skipped_packets: HashMap<Frames, Seq>,
     lost_packet_counter: usize,
     late_packet_counter: usize,
+    muted: bool,
 }
 
 impl ReceiverStats {
@@ -36,6 +35,7 @@ impl ReceiverStats {
             skipped_packets: HashMap::new(),
             lost_packet_counter: 0,
             late_packet_counter: 0,
+            muted: false,
         }
     }
 
@@ -53,13 +53,13 @@ impl ReceiverStats {
             RxStats::PacketReceived {
                 seq,
                 payload_len,
-                ingress_timestamp,
+                ingress_time,
                 media_time_at_reception,
             } => {
                 self.process_packet_reception(
                     seq,
                     payload_len,
-                    ingress_timestamp,
+                    ingress_time,
                     media_time_at_reception,
                 )
                 .await;
@@ -81,21 +81,21 @@ impl ReceiverStats {
             }
             RxStats::TimeTravellingPacket {
                 sequence_number,
-                ingress_timestamp,
+                ingress_time,
                 media_time_at_reception,
             } => {
                 self.process_time_travelling_packet(
                     sequence_number,
-                    ingress_timestamp,
+                    ingress_time,
                     media_time_at_reception,
                 )
                 .await;
             }
             RxStats::Playout {
-                playout_time,
+                ingress_time,
                 latest_received_frame,
             } => {
-                self.process_playout(playout_time, latest_received_frame)
+                self.process_playout(ingress_time, latest_received_frame)
                     .await;
             }
             RxStats::Stopped => {
@@ -108,19 +108,20 @@ impl ReceiverStats {
             RxStats::PacketFromWrongSender(ip) => {
                 self.process_packet_from_wrong_sender(ip).await;
             }
+            RxStats::Muted(muted) => self.process_muted(muted).await,
         }
     }
 
     async fn process_time_travelling_packet(
         &mut self,
         sequence_number: Seq,
-        ingress_timestamp: u64,
+        ingress_time: u64,
         media_time_at_reception: u64,
     ) {
         let Some(desc) = &self.desc else {
             return;
         };
-        let diff = ingress_timestamp - media_time_at_reception;
+        let diff = ingress_time - media_time_at_reception;
         let diff_usec =
             (diff as f64 * MICROS_PER_SEC as f64 / desc.audio_format.sample_rate as f64) as u64;
         warn!(
@@ -134,7 +135,7 @@ impl ReceiverStats {
         &mut self,
         seq: Seq,
         payload_len: usize,
-        ingress_timestamp: Frames,
+        ingress_time: Frames,
         media_time_at_reception: Frames,
     ) {
         // TODO detect and monitor late packets
@@ -146,8 +147,7 @@ impl ReceiverStats {
         // TODO monitor and report packet time
         let frames_in_packet = desc.frames_in_buffer(payload_len) as i64;
 
-        let delay =
-            media_time_at_reception as i64 - ingress_timestamp as i64 - frames_in_packet;
+        let delay = media_time_at_reception as i64 - ingress_time as i64 - frames_in_packet;
 
         if delay < frames_in_packet {
             // TODO report clock sync issue
@@ -177,15 +177,19 @@ impl ReceiverStats {
 
         // TODO collect and publish stats on delay ranges and late packets
 
-        self.skipped_packets.remove(&ingress_timestamp);
+        self.skipped_packets.remove(&ingress_time);
     }
 
-    async fn process_playout(&mut self, playout_time: Frames, latest_received_frame: Frames) {
+    async fn process_playout(&mut self, ingress_time: Frames, latest_received_frame: Frames) {
         let Some(desc) = &self.desc else {
             return;
         };
 
-        let data_ready_since = latest_received_frame - playout_time;
+        if ingress_time > latest_received_frame {
+            return;
+        }
+
+        let data_ready_since = latest_received_frame - ingress_time;
 
         if let Some(measured_link_offset) = self.measured_link_offset.update(data_ready_since) {
             let link_offset_ms = measured_link_offset as f32 * MILLIS_PER_SEC_F
@@ -215,7 +219,7 @@ impl ReceiverStats {
         let mut missed_timestamps = vec![];
 
         self.skipped_packets.retain(|ts, seq| {
-            let missed = ts > &playout_time;
+            let missed = ts > &ingress_time;
             if missed {
                 missed_timestamps.push((*ts, *seq));
             }
@@ -287,6 +291,22 @@ impl ReceiverStats {
             ip, desc.origin_ip
         );
         // TODO collect stats + publish
+    }
+
+    async fn process_muted(&mut self, muted: bool) {
+        let already_muted = self.muted;
+        if already_muted != muted {
+            self.muted = muted;
+            self.tx
+                .send(Report::Stats(StatsReport::Receiver(
+                    ReceiverStatsReport::Muted {
+                        receiver: self.id.clone(),
+                        muted,
+                    },
+                )))
+                .await
+                .ok();
+        }
     }
 
     async fn process_late_packet(&mut self, seq: Seq, timestamp: u64, delay: Frames) {

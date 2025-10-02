@@ -1,8 +1,9 @@
 use crate::{
-    common::JackClock,
+    common::{ClockState, JackClock},
     session_manager::{SessionManagerNotificationHandler, start_session_manager},
 };
 use aes67_rs::{
+    monitoring::Monitoring,
     receiver::{api::ReceiverApi, config::RxDescriptor},
     time::{MILLIS_PER_SEC_F, MediaClock},
 };
@@ -20,6 +21,8 @@ struct State {
     receiver: ReceiverApi,
     clock: JackClock,
     descriptor: RxDescriptor,
+    muted: bool,
+    monitoring: Monitoring,
 }
 
 impl State {}
@@ -29,6 +32,7 @@ pub async fn start_playout(
     receiver: ReceiverApi,
     descriptor: RxDescriptor,
     clock: Box<dyn MediaClock>,
+    monitoring: Monitoring,
 ) -> miette::Result<()> {
     // TODO evaluate client status
     let (client, status) =
@@ -57,6 +61,8 @@ pub async fn start_playout(
         receiver,
         clock: JackClock::new(clock),
         descriptor,
+        muted: false,
+        monitoring,
     };
     let process_handler =
         ClosureProcessHandler::with_state(process_handler_state, process, buffer_change);
@@ -81,14 +87,18 @@ fn process(state: &mut State, _: &Client, ps: &ProcessScope) -> Control {
     let start = Instant::now();
 
     let playout_time = match state.clock.update_clock(ps) {
-        Ok(it) => it,
+        Ok(ClockState::Stable(it)) => it,
+        Ok(ClockState::Unstable) => {
+            muted(state, ps);
+            return Control::Continue;
+        }
         Err(e) => {
             error!("Could not get current media time: {e}");
             return Control::Quit;
         }
     };
 
-    // TODO get link offset from current config
+    // TODO read current link offset from dynamic config
     let link_offset_frames = state.descriptor.frames_in_link_offset() as u64;
     let ingress_time = playout_time - link_offset_frames;
 
@@ -96,9 +106,17 @@ fn process(state: &mut State, _: &Client, ps: &ProcessScope) -> Control {
 
     let pre_req = Instant::now();
 
-    if let Err(e) = state.receiver.receive_blocking(buffers, ingress_time) {
-        error!("Error receiving audio data: {e}");
-        return Control::Quit;
+    match state.receiver.receive_blocking(buffers, ingress_time) {
+        Ok(true) => {
+            unmuted(state);
+        }
+        Ok(false) => {
+            muted(state, ps);
+        }
+        Err(e) => {
+            error!("Error receiving audio data: {e}");
+            return Control::Quit;
+        }
     }
 
     let post_req = Instant::now();
@@ -108,10 +126,41 @@ fn process(state: &mut State, _: &Client, ps: &ProcessScope) -> Control {
     let total = post_req.duration_since(start).as_micros();
     let req = post_req.duration_since(pre_req).as_micros();
 
-    if total > 100 {
-        eprintln!("latency playout req: {req} µs");
-        eprintln!("latency playout total: {total} µs");
-    }
+    // if total > 100 {
+    //     eprintln!("latency playout req: {req} µs");
+    //     eprintln!("latency playout total: {total} µs");
+    // }
 
     Control::Continue
+}
+
+fn muted(state: &mut State, ps: &ProcessScope) {
+    if !state.muted {
+        state.muted = true;
+        state.report_muted(true);
+    }
+
+    for port in state.ports.iter_mut() {
+        let buf = port.as_mut_slice(ps);
+        buf.fill(0.0);
+    }
+}
+
+fn unmuted(state: &mut State) {
+    if state.muted {
+        state.muted = false;
+        state.report_muted(false);
+    }
+}
+
+mod monitoring {
+    use aes67_rs::monitoring::RxStats;
+
+    use super::*;
+
+    impl State {
+        pub fn report_muted(&self, muted: bool) {
+            self.monitoring.receiver_stats(RxStats::Muted(muted));
+        }
+    }
 }

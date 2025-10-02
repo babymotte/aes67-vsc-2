@@ -58,7 +58,7 @@ pub(crate) async fn start_receiver(
     let (result_tx, result_rx) = oneshot::channel();
     let (api_tx, api_rx) = mpsc::channel(1024);
     let desc = RxDescriptor::try_from(&config)?;
-    let (tx, rx) = receiver_buffer_channel(desc.clone());
+    let (tx, rx) = receiver_buffer_channel(desc.clone(), monitoring.clone());
     let socket = create_rx_socket(&config.session, config.interface_ip)?;
     thread::Builder::new().name(id.clone()).spawn(move || {
         // set_realtime_priority();
@@ -177,49 +177,6 @@ impl Receiver {
         Ok(())
     }
 
-    // async fn write_out_buf(&mut self, mut req: AudioDataRequest) -> DataState {
-    //     // get the playout buffer
-    //     // this is safe because the thread from which we borrow this buffer is blocked until we send
-    //     // the response back, so no concurrent reads and writes can occur
-    //     let buf = unsafe { req.buffer.buffer_mut::<f32>() };
-
-    //     if self.latest_received_frame == 0 {
-    //         return DataState::NotReady;
-    //     }
-
-    //     let buf_frames = buf.len() / self.desc.audio_format.frame_format.channels;
-    //     let last_frame_in_request_buffer = req.playout_time + buf_frames as u64 - 1;
-
-    //     if last_frame_in_request_buffer > self.latest_received_frame {
-    //         // we have not received enough data to fill the buffer yet
-    //         trace!(
-    //             "Not all requested frames have been received yet (requested frames: [{}; {}]; last received frame: {})!",
-    //             req.playout_time, last_frame_in_request_buffer, self.latest_received_frame
-    //         );
-    //         return DataState::NotReady;
-    //     }
-
-    //     if last_frame_in_request_buffer > self.latest_played_frame {
-    //         self.latest_played_frame = last_frame_in_request_buffer;
-    //     }
-
-    //     let oldest_frame_in_buffer =
-    //         self.latest_received_frame - self.rtp_packet_buffer.frames() as u64 + 1;
-    //     if oldest_frame_in_buffer > req.playout_time {
-    //         warn!(
-    //             "The requested data is not in the receiver buffer anymore (requested frames: [{}; {}]; oldest frame in buffer: {})!",
-    //             req.playout_time, last_frame_in_request_buffer, oldest_frame_in_buffer
-    //         );
-    //         return DataState::Missed;
-    //     }
-
-    //     let state = self.rtp_packet_buffer.read(buf, req.playout_time);
-
-    //     self.report_playout(&req).await;
-
-    //     state
-    // }
-
     async fn rtp_data_received(
         &mut self,
         data: &[u8],
@@ -227,14 +184,14 @@ impl Receiver {
         media_time_at_reception: u64,
     ) -> ReceiverInternalResult<()> {
         if addr.ip() != self.desc.origin_ip {
-            self.report_packet_from_wrong_sender(addr).await;
+            self.report_packet_from_wrong_sender(addr);
             return Ok(());
         }
 
         let rtp = match RtpReader::new(data) {
             Ok(it) => it,
             Err(e) => {
-                self.report_malformed_packet(e).await;
+                self.report_malformed_packet(e);
                 return Ok(());
             }
         };
@@ -264,15 +221,14 @@ impl Receiver {
                         "Timestamp of out-of-order packet is consistent with sequence id, queuing it for playout"
                     );
                     if let Some(ts_offset) = self.timestamp_offset {
-                        self.report_out_of_order_packet(&rtp, expected_seq, expected_ts, ts_offset)
-                            .await;
+                        self.report_out_of_order_packet(&rtp, expected_seq, expected_ts, ts_offset);
                     }
                 } else {
                     warn!(
                         "Timestamp of out-of-order packet {} is not consistent with sequence id, discarding it",
                         u16::from(rtp.sequence_number())
                     );
-                    self.report_inconsistent_timestamp().await;
+                    self.report_inconsistent_timestamp();
                     return Ok(());
                 }
             }
@@ -293,28 +249,23 @@ impl Receiver {
         self.last_sequence_number = Some(seq);
         self.last_timestamp = Some(ts);
 
-        let Some(ingress_timestamp) = self.unwrapped_timestamp(&rtp) else {
+        let Some(ingress_time) = self.unwrapped_timestamp(&rtp) else {
             return Ok(());
         };
 
-        self.report_packet_received(media_time_at_reception, &rtp, seq, ingress_timestamp);
+        self.report_packet_received(media_time_at_reception, &rtp, seq, ingress_time);
 
-        if ingress_timestamp > media_time_at_reception {
-            self.report_time_travelling_packet(media_time_at_reception, &rtp, ingress_timestamp)
-                .await;
+        if ingress_time > media_time_at_reception {
+            self.report_time_travelling_packet(media_time_at_reception, &rtp, ingress_time);
             return Ok(());
         }
 
-        let last_received_frame = ingress_timestamp + frames_in_packet as u64 - 1;
+        let last_received_frame = ingress_time + frames_in_packet as u64 - 1;
         if last_received_frame > self.latest_received_frame {
             self.latest_received_frame = last_received_frame;
         }
 
-        self.tx.write(rtp.payload(), ingress_timestamp).await;
-
-        // self
-        //     .rtp_packet_buffer
-        //     .insert(rtp.payload(), ingress_timestamp);
+        self.tx.write(rtp.payload(), ingress_time).await;
 
         Ok(())
     }
@@ -349,8 +300,7 @@ impl Receiver {
         // unwrapped media clock timestamp of an rtp packet
         let offset = timestamp_wraps * U32_WRAP;
 
-        self.report_media_clock_offset_changed(offset, rtp_timestamp)
-            .await;
+        self.report_media_clock_offset_changed(offset, rtp_timestamp);
 
         self.timestamp_offset = Some(offset);
 
@@ -376,24 +326,17 @@ mod monitoring {
             media_time_at_reception: u64,
             rtp: &RtpReader<'_>,
             seq: Seq,
-            ingress_timestamp: u64,
+            ingress_time: u64,
         ) {
             self.monitoring.receiver_stats(RxStats::PacketReceived {
                 seq,
                 payload_len: rtp.payload().len(),
-                ingress_timestamp,
+                ingress_time,
                 media_time_at_reception,
             });
         }
 
-        // pub(crate) async fn report_playout(&mut self, req: &AudioDataRequest) {
-        //     self.monitoring.receiver_stats(RxStats::Playout {
-        //         playout_time: req.playout_time,
-        //         latest_received_frame: self.latest_received_frame,
-        //     });
-        // }
-
-        pub(crate) async fn report_media_clock_offset_changed(
+        pub(crate) fn report_media_clock_offset_changed(
             &mut self,
             offset: u64,
             rtp_timestamp: u32,
@@ -402,22 +345,22 @@ mod monitoring {
                 .receiver_stats(RxStats::MediaClockOffsetChanged(offset, rtp_timestamp));
         }
 
-        pub(crate) async fn report_packet_from_wrong_sender(&mut self, addr: SocketAddr) {
+        pub(crate) fn report_packet_from_wrong_sender(&mut self, addr: SocketAddr) {
             self.monitoring
                 .receiver_stats(RxStats::PacketFromWrongSender(addr.ip()));
         }
 
-        pub(crate) async fn report_malformed_packet(&mut self, e: rtp_rs::RtpReaderError) {
+        pub(crate) fn report_malformed_packet(&mut self, e: rtp_rs::RtpReaderError) {
             self.monitoring
                 .receiver_stats(RxStats::MalformedRtpPacket(format!("{e:?}")));
         }
 
-        pub(crate) async fn report_inconsistent_timestamp(&mut self) {
+        pub(crate) fn report_inconsistent_timestamp(&mut self) {
             self.monitoring
                 .receiver_stats(RxStats::InconsistentTimestamp);
         }
 
-        pub(crate) async fn report_out_of_order_packet(
+        pub(crate) fn report_out_of_order_packet(
             &mut self,
             rtp: &RtpReader<'_>,
             expected_seq: Seq,
@@ -431,16 +374,16 @@ mod monitoring {
             });
         }
 
-        pub(crate) async fn report_time_travelling_packet(
+        pub(crate) fn report_time_travelling_packet(
             &mut self,
             media_time_at_reception: u64,
             rtp: &RtpReader<'_>,
-            ingress_timestamp: u64,
+            ingress_time: u64,
         ) {
             self.monitoring
                 .receiver_stats(RxStats::TimeTravellingPacket {
                     sequence_number: rtp.sequence_number(),
-                    ingress_timestamp,
+                    ingress_time,
                     media_time_at_reception,
                 });
         }

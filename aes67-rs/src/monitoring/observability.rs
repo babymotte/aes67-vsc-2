@@ -43,10 +43,11 @@ struct ReceiverStats {
     clock_offset: u64,
     network_delay_frames: i64,
     network_delay_millis: f32,
-    measured_link_offset_frames: u64,
+    measured_link_offset_frames: Frames,
     measured_link_offset_millis: f32,
     lost_packets: LostPackets,
     late_packets: LostPackets,
+    muted: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -306,6 +307,9 @@ impl ObservabilityActor {
                 self.receiver_late_packets_changed(receiver, late_packets, timestamp)
                     .await;
             }
+            ReceiverStatsReport::Muted { receiver, muted } => {
+                self.receiver_muted_changed(receiver, muted).await
+            }
         }
     }
 
@@ -378,6 +382,15 @@ impl ObservabilityActor {
             count: late_packets,
             last: Some(timestamp),
         };
+        let stats = receiver.stats.clone();
+        self.publish_receiver_stats(&name, stats).await;
+    }
+
+    async fn receiver_muted_changed(&mut self, name: String, muted: bool) {
+        let Some(receiver) = self.receivers.get_mut(&name) else {
+            return;
+        };
+        receiver.stats.muted = muted;
         let stats = receiver.stats.clone();
         self.publish_receiver_stats(&name, stats).await;
     }

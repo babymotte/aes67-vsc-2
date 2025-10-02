@@ -112,6 +112,10 @@ pub enum ReceiverStatsReport {
         late_packets: usize,
         timestamp: SystemTime,
     },
+    Muted {
+        receiver: String,
+        muted: bool,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -152,7 +156,7 @@ pub enum RxStats {
     PacketReceived {
         seq: Seq,
         payload_len: usize,
-        ingress_timestamp: Frames,
+        ingress_time: Frames,
         media_time_at_reception: Frames,
     },
     OutOfOrderPacket {
@@ -163,16 +167,17 @@ pub enum RxStats {
     MalformedRtpPacket(String),
     TimeTravellingPacket {
         sequence_number: Seq,
-        ingress_timestamp: Frames,
+        ingress_time: Frames,
         media_time_at_reception: Frames,
     },
     Playout {
-        playout_time: Frames,
+        ingress_time: Frames,
         latest_received_frame: Frames,
     },
     Stopped,
     MediaClockOffsetChanged(Frames, u32),
     PacketFromWrongSender(IpAddr),
+    Muted(bool),
 }
 
 #[derive(Debug, Clone)]
@@ -180,6 +185,7 @@ pub enum PoStats {
     BufferUnderrun,
 }
 
+#[derive(Debug, Clone)]
 struct MonitoringParent(mpsc::Sender<(MonitoringEvent, String)>);
 
 impl MonitoringParent {
@@ -204,6 +210,7 @@ impl MonitoringParent {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct Monitoring {
     parent: MonitoringParent,
     tx: mpsc::Sender<MonitoringEvent>,

@@ -76,11 +76,7 @@ async fn run(subsys: SubsystemHandle, config: Config) -> miette::Result<()> {
         subsys.start(SubsystemBuilder::new(
             format!("sender/{}", descriptor.id),
             |s| async move {
-                match vsc
-                    .create_sender(tx_config, ptp_mode.clone())
-                    .await
-                    .into_diagnostic()
-                {
+                match vsc.create_sender(tx_config).await.into_diagnostic() {
                     Ok((sender, _)) => {
                         let clock = get_clock(ptp_mode, descriptor.audio_format)?;
                         start_recording(s, sender, descriptor, clock).await
@@ -106,9 +102,9 @@ async fn run(subsys: SubsystemHandle, config: Config) -> miette::Result<()> {
                     .await
                     .into_diagnostic()
                 {
-                    Ok((receiver, _)) => {
+                    Ok((receiver, monitoring, _)) => {
                         let clock = get_clock(ptp_mode, descriptor.audio_format)?;
-                        start_playout(s, receiver, descriptor, clock).await
+                        start_playout(s, receiver, descriptor, clock, monitoring).await
                     }
                     Err(e) => {
                         error!("Error creating receiver '{}': {}", descriptor.id, e);

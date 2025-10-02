@@ -21,23 +21,24 @@
 //! - phc: used with PTP compatible network interfaces in combination with a ptp daemon like ptp4l
 //! - statime: used when PTP is required but there is no external synchronization. Only possible if PTP port is not already used
 
+mod phc;
 #[cfg(feature = "statime")]
-pub mod statime;
+mod statime;
 
 use crate::{
     config::PtpMode,
     error::{ClockError, ClockResult, ConfigResult},
     formats::{AudioFormat, Frames},
     nic::{find_nic_with_name, phc_device_for_interface_ethtool},
+    time::phc::PhcClock,
 };
 use clock_steering::{Clock, Timestamp, unix::UnixClock};
 use libc::{clock_gettime, clockid_t, timespec};
 use std::{
     io,
-    path::Path,
-    time::{Duration, SystemTime},
+    time::{Duration, Instant, SystemTime},
 };
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 pub const NANOS_PER_SEC: u128 = 1_000_000_000;
 pub const NANOS_PER_MILLI: u64 = 1_000_000;
@@ -53,10 +54,10 @@ pub const NANOS_PER_MICRO_F: f64 = 1_000.0;
 pub const MILLIS_PER_SEC_F: f32 = 1_000.0;
 pub const MICROS_PER_SEC_F: f64 = 1_000_000.0;
 
-pub trait MediaClock: Send + Sync + 'static {
-    fn current_media_time(&self) -> ClockResult<Frames>;
+pub trait MediaClock: Send + 'static {
+    fn current_media_time(&mut self) -> ClockResult<Frames>;
 
-    fn current_ptp_time_millis(&self) -> ClockResult<u64>;
+    fn current_ptp_time_millis(&mut self) -> ClockResult<u64>;
 }
 
 pub struct UnixMediaClock {
@@ -71,43 +72,49 @@ impl UnixMediaClock {
             audio_format,
         }
     }
-
-    fn phc_clock(audio_format: AudioFormat, path: impl AsRef<Path>) -> ClockResult<Self> {
-        Ok(UnixMediaClock {
-            unix_clock: UnixClock::open(path)?,
-            audio_format,
-        })
-    }
 }
 
 impl MediaClock for UnixMediaClock {
-    fn current_media_time(&self) -> ClockResult<Frames> {
-        let ptp_time = match self.unix_clock.now() {
+    fn current_media_time(&mut self) -> ClockResult<Frames> {
+        let start = Instant::now();
+        let now = self.unix_clock.now();
+        let end = Instant::now();
+
+        let time = (end - start).as_micros();
+        if time > 500 {
+            warn!("Getting time took {time} µs",);
+        }
+
+        let ptp_time = match now {
             Ok(it) => it,
             Err(e) => return Err(ClockError::other(e)),
         };
         Ok(to_media_time(ptp_time, &self.audio_format))
     }
 
-    fn current_ptp_time_millis(&self) -> ClockResult<u64> {
+    fn current_ptp_time_millis(&mut self) -> ClockResult<u64> {
         let ptp_time = match self.unix_clock.now() {
             Ok(it) => it,
             Err(e) => return Err(ClockError::other(e)),
         };
-        Ok(to_duration(ptp_time).as_millis() as u64)
+        Ok(timestamp_to_duration(ptp_time).as_millis() as u64)
     }
 }
 
-pub fn to_duration(ts: Timestamp) -> Duration {
+pub fn timestamp_to_duration(ts: Timestamp) -> Duration {
     Duration::new(ts.seconds as u64, ts.nanos)
 }
 
+pub fn timespec_to_duration(tp: timespec) -> Duration {
+    Duration::new(tp.tv_sec as u64, tp.tv_nsec as u32)
+}
+
 pub fn to_system_time(ts: Timestamp) -> SystemTime {
-    SystemTime::UNIX_EPOCH + to_duration(ts)
+    SystemTime::UNIX_EPOCH + timestamp_to_duration(ts)
 }
 
 pub fn to_media_time(ptp_time: Timestamp, audio_format: &AudioFormat) -> u64 {
-    let ptp_nanos = to_duration(ptp_time).as_nanos();
+    let ptp_nanos = timestamp_to_duration(ptp_time).as_nanos();
     let total_frames = (ptp_nanos * audio_format.sample_rate as u128) / NANOS_PER_SEC;
     total_frames as u64
 }
@@ -138,8 +145,12 @@ pub fn get_clock(
             let Some(path) = phc_device_for_interface_ethtool(&iface)? else {
                 return Err(ClockError::PtpNotSupported(iface.name.clone()).into());
             };
-            Ok(Box::new(UnixMediaClock::phc_clock(audio_format, path)?))
+            Ok(Box::new(PhcClock::open(path, audio_format)?))
         }
         None => Ok(Box::new(UnixMediaClock::system_clock(audio_format))),
     }
+}
+
+pub fn to_nanos(tp: timespec) -> i128 {
+    tp.tv_sec as i128 * NANOS_PER_SEC as i128 + tp.tv_nsec as i128
 }

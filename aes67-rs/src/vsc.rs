@@ -18,7 +18,7 @@
 use crate::config::PtpMode;
 use crate::error::{SenderInternalError, SenderInternalResult};
 use crate::monitoring::{Monitoring, VscState, start_monitoring_service};
-use crate::sender::config::{SenderConfig, TxDescriptor};
+use crate::sender::config::SenderConfig;
 use crate::sender::start_sender;
 use crate::time::get_clock;
 use crate::{
@@ -47,7 +47,6 @@ enum VscApiMessage {
     CreateSender(
         String,
         Box<SenderConfig>,
-        Option<PtpMode>,
         oneshot::Sender<SenderInternalResult<(SenderApi, u32)>>,
     ),
     DestroySenderById(u32, oneshot::Sender<SenderInternalResult<()>>),
@@ -55,7 +54,7 @@ enum VscApiMessage {
         String,
         Box<ReceiverConfig>,
         Option<PtpMode>,
-        oneshot::Sender<ReceiverInternalResult<(ReceiverApi, u32)>>,
+        oneshot::Sender<ReceiverInternalResult<(ReceiverApi, Monitoring, u32)>>,
     ),
     DestroyReceiverById(u32, oneshot::Sender<ReceiverInternalResult<()>>),
     Stop(oneshot::Sender<()>),
@@ -109,34 +108,24 @@ impl VirtualSoundCardApi {
         Ok((result_rx, api_tx))
     }
 
-    pub fn create_sender_blocking(
-        &self,
-        config: SenderConfig,
-        ptp_mode: Option<PtpMode>,
-    ) -> VscApiResult<(SenderApi, u32)> {
+    pub fn create_sender_blocking(&self, config: SenderConfig) -> VscApiResult<(SenderApi, u32)> {
         let (tx, rx) = oneshot::channel();
         self.api_tx
             .blocking_send(VscApiMessage::CreateSender(
                 config.id.to_owned(),
                 Box::new(config),
-                ptp_mode,
                 tx,
             ))
             .ok();
         Ok(rx.blocking_recv().map_err(SenderInternalError::from)??)
     }
 
-    pub async fn create_sender(
-        &self,
-        config: SenderConfig,
-        ptp_mode: Option<PtpMode>,
-    ) -> VscApiResult<(SenderApi, u32)> {
+    pub async fn create_sender(&self, config: SenderConfig) -> VscApiResult<(SenderApi, u32)> {
         let (tx, rx) = oneshot::channel();
         self.api_tx
             .send(VscApiMessage::CreateSender(
                 config.id.to_owned(),
                 Box::new(config),
-                ptp_mode,
                 tx,
             ))
             .await
@@ -165,7 +154,7 @@ impl VirtualSoundCardApi {
         &self,
         config: ReceiverConfig,
         ptp_mode: Option<PtpMode>,
-    ) -> VscApiResult<(ReceiverApi, u32)> {
+    ) -> VscApiResult<(ReceiverApi, Monitoring, u32)> {
         let (tx, rx) = oneshot::channel();
         self.api_tx
             .blocking_send(VscApiMessage::CreateReceiver(
@@ -182,7 +171,7 @@ impl VirtualSoundCardApi {
         &self,
         config: ReceiverConfig,
         ptp_mode: Option<PtpMode>,
-    ) -> VscApiResult<(ReceiverApi, u32)> {
+    ) -> VscApiResult<(ReceiverApi, Monitoring, u32)> {
         let (tx, rx) = oneshot::channel();
         self.api_tx
             .send(VscApiMessage::CreateReceiver(
@@ -261,9 +250,8 @@ impl VirtualSoundCard {
 
         while let Some(msg) = self.api_rx.recv().await {
             match msg {
-                VscApiMessage::CreateSender(id, config, ptp_mode, tx) => {
-                    tx.send(self.create_sender(id, *config, ptp_mode).await)
-                        .ok();
+                VscApiMessage::CreateSender(id, config, tx) => {
+                    tx.send(self.create_sender(id, *config).await).ok();
                 }
                 VscApiMessage::DestroySenderById(id, tx) => {
                     tx.send(self.destroy_sender(id).await).ok();
@@ -289,17 +277,12 @@ impl VirtualSoundCard {
         &mut self,
         name: String,
         config: SenderConfig,
-        ptp_mode: Option<PtpMode>,
     ) -> SenderInternalResult<(SenderApi, u32)> {
         self.tx_counter += 1;
         let id = self.tx_counter;
         let display_name = format!("{}/tx/{}", self.name, name);
         info!("Creating sender '{display_name}' …");
 
-        let descriptor = TxDescriptor::try_from(&config)?;
-
-        let desc = TxDescriptor::try_from(&config)?;
-        let clock = get_clock(ptp_mode, desc.audio_format)?;
         let sender_api = start_sender(
             display_name.clone(),
             config,
@@ -327,7 +310,7 @@ impl VirtualSoundCard {
         name: String,
         config: ReceiverConfig,
         ptp_mode: Option<PtpMode>,
-    ) -> ReceiverInternalResult<(ReceiverApi, u32)> {
+    ) -> ReceiverInternalResult<(ReceiverApi, Monitoring, u32)> {
         self.rx_counter += 1;
         let id = self.rx_counter;
         let display_name = format!("{}/rx/{}", self.name, name);
@@ -335,19 +318,15 @@ impl VirtualSoundCard {
 
         let desc = RxDescriptor::try_from(&config)?;
         let clock = get_clock(ptp_mode, desc.audio_format)?;
-        let receiver_api = start_receiver(
-            display_name.clone(),
-            config,
-            clock,
-            self.monitoring.child(display_name.clone()),
-        )
-        .await?;
+        let monitoring = self.monitoring.child(display_name.clone());
+        let receiver_api =
+            start_receiver(display_name.clone(), config, clock, monitoring.clone()).await?;
 
         self.rx_names.insert(id, name.clone());
         self.rxs.insert(id, receiver_api.clone());
 
         info!("Receiver '{display_name}' successfully created.");
-        Ok((receiver_api, id))
+        Ok((receiver_api, monitoring, id))
     }
 
     async fn destroy_receiver(&mut self, id: u32) -> ReceiverInternalResult<()> {
