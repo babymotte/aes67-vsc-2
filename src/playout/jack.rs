@@ -361,7 +361,7 @@ fn buffer_change<C: MediaClock>(
     client: &Client,
     buffer_len: jack::Frames,
 ) -> Control {
-    let buffer_ms = buffer_len as f32 * 1_000.0 / client.sample_rate() as f32;
+    let buffer_ms = buffer_len as f32 * MILLIS_PER_SEC_F / client.sample_rate() as f32;
     info!("JACK buffer size changed to {buffer_len} frames / {buffer_ms:.1} ms");
     Control::Continue
 }
@@ -390,12 +390,12 @@ fn process<C: MediaClock>(
 
     if let Some(wallclock_offset_usec) = state
         .wallclock_offset_calculator
-        .update((wallclock_monotonic_offset_nanos().unwrap() / 1_000) as u64)
+        .update((wallclock_monotonic_offset_nanos().unwrap() / NANOS_PER_MICRO) as u64)
     {
         let cycle_start_monotonic_usec = cycle_times.current_usecs;
         let cycle_start_wallclock_usec = cycle_start_monotonic_usec + wallclock_offset_usec;
         let cycle_start_media_time =
-            (cycle_start_wallclock_usec as f64 * client.sample_rate() as f64 / 1_000_000.0).round()
+            (cycle_start_wallclock_usec as f64 * client.sample_rate() as f64 / MICROS_PER_SEC_F).round()
                 as u64;
         let offset = cycle_start_media_time - current_frames;
         // info!("Calibrating clock, current JACK media clock offset is {offset}");
@@ -466,14 +466,14 @@ fn process<C: MediaClock>(
     let jack_clock_lag = system_media_time as i64 - jack_media_time as i64;
     if let Some(lag) = state.clock_lag_calculator.update(jack_clock_lag) {
         if lag > 0 {
-            let lag_usec = (lag as f64 * 1_000_000.0 / client.sample_rate() as f64).round() as u64;
+            let lag_usec = (lag as f64 * MICROS_PER_SEC_F / client.sample_rate() as f64).round() as u64;
             warn!(
                 "JACK media clock is behind system media clock by {lag} frames / {lag_usec} µs (expected to be ahead)!",
             );
         } else {
             let ahead = -lag;
             let ahead_usec =
-                (ahead as f64 * 1_000_000.0 / client.sample_rate() as f64).round() as u64;
+                (ahead as f64 * MICROS_PER_SEC_F / client.sample_rate() as f64).round() as u64;
             info!(
                 "JACK media clock is ahead of system media clock by {ahead} frames / {ahead_usec} µs.",
             );

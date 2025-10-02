@@ -45,6 +45,6 @@ impl MediaClock for StatimePtpMediaClock {
 
     fn current_ptp_time_millis(&self) -> SystemClockResult<u64> {
         let ptp_time = self.statime_ptp_clock.now();
-        Ok(ptp_time.secs() * 1_000 + ptp_time.subsec_nanos() as u64 / 1_000_000)
+        Ok(to_duration(ptp_time).as_millis() as u64)
     }
 }

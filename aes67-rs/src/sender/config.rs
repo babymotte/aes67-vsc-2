@@ -1,8 +1,6 @@
-use std::net::{IpAddr, SocketAddr};
-
-use serde::{Deserialize, Serialize};
-
 use crate::{error::ConfigError, formats::AudioFormat};
+use serde::{Deserialize, Serialize};
+use std::net::{IpAddr, SocketAddr};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]

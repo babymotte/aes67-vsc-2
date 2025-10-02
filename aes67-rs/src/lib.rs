@@ -20,6 +20,7 @@ pub mod config;
 pub mod error;
 pub mod formats;
 pub mod monitoring;
+pub mod nic;
 pub mod receiver;
 pub mod sender;
 pub mod serde;

@@ -2,6 +2,9 @@ use crate::{
     formats::Frames,
     monitoring::{ReceiverStatsReport, Report, RxStats, StatsReport},
     receiver::config::RxDescriptor,
+    time::{
+        MICROS_PER_MILLI, MICROS_PER_MILLI_F, MICROS_PER_SEC, MILLIS_PER_SEC, MILLIS_PER_SEC_F,
+    },
     utils::{AverageCalculationBuffer, U16_WRAP},
 };
 use rtp_rs::Seq;
@@ -118,7 +121,8 @@ impl ReceiverStats {
             return;
         };
         let diff = ingress_timestamp - media_time_at_reception;
-        let diff_usec = (diff as f64 * 1_000_000.0 / desc.audio_format.sample_rate as f64) as u64;
+        let diff_usec =
+            (diff as f64 * MICROS_PER_SEC as f64 / desc.audio_format.sample_rate as f64) as u64;
         warn!(
             "Packet {} was received {diff} frames / {diff_usec} µs before it was sent, sender and receiver clocks must be out of sync.",
             u16::from(sequence_number)
@@ -164,7 +168,7 @@ impl ReceiverStats {
                     ReceiverStatsReport::NetworkDelay {
                         receiver: self.id.clone(),
                         delay_frames: delay,
-                        delay_millis: micros as f32 / 1_000.0,
+                        delay_millis: micros as f32 / MICROS_PER_MILLI_F,
                     },
                 )))
                 .await
@@ -184,8 +188,8 @@ impl ReceiverStats {
         let data_ready_since = latest_received_frame - playout_time;
 
         if let Some(measured_link_offset) = self.measured_link_offset.update(data_ready_since) {
-            let link_offset_ms =
-                measured_link_offset as f32 * 1_000.0 / desc.audio_format.sample_rate as f32;
+            let link_offset_ms = measured_link_offset as f32 * MILLIS_PER_SEC_F
+                / desc.audio_format.sample_rate as f32;
 
             if link_offset_ms < desc.link_offset {
                 debug!(

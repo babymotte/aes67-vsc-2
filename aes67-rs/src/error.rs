@@ -21,7 +21,7 @@ use opentelemetry_otlp::ExporterBuildError;
 use rtp_rs::{RtpPacketBuildError, RtpReaderError};
 use std::{fmt::Display, io, net::AddrParseError};
 use thiserror::Error;
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, watch};
 use tracing::error;
 use tracing_subscriber::{filter::ParseError, util::TryInitError};
 
@@ -87,8 +87,8 @@ pub enum VscInternalError {
 pub enum SenderInternalError {
     #[error("Config error: {0}")]
     ConfigError(#[from] ConfigError),
-    #[error("System clock Error: {0}.")]
-    SystemClockError(#[from] SystemClockError),
+    #[error("Clock Error: {0}.")]
+    ClockError(#[from] ClockError),
     #[error("I/O error: {0}")]
     IoError(#[from] io::Error),
     #[error("RTP packet builder error: {0:?}")]
@@ -109,12 +109,14 @@ pub enum SenderInternalError {
 pub enum ReceiverInternalError {
     #[error("Config error: {0}")]
     ConfigError(#[from] ConfigError),
-    #[error("System clock Error: {0}.")]
-    SystemClockError(#[from] SystemClockError),
+    #[error("Clock Error: {0}.")]
+    ClockError(#[from] ClockError),
     #[error("I/O error: {0}")]
     IoError(#[from] io::Error),
     #[error("Channel error.")]
     ChannelError(#[from] oneshot::error::RecvError),
+    #[error("Watch error.")]
+    WatchError(#[from] watch::error::RecvError),
 }
 
 #[derive(Error, Debug, Diagnostic)]
@@ -151,11 +153,29 @@ pub enum ConfigError {
     NoSuchNIC(String),
     #[error("Receiver not configured")]
     MissingReceiverConfig,
+    #[error("Clock error: {0}")]
+    ClockError(#[from] ClockError),
 }
 
 #[derive(Error, Debug, Diagnostic)]
-#[error("System clock error: {0}")]
-pub struct SystemClockError(pub String);
+#[error("PHC clock error: {0}")]
+pub enum ClockError {
+    #[error("Clock error: {0}")]
+    ClockError(Box<dyn std::error::Error + 'static + Sync + Send>),
+    #[error("I/O Error: {0}")]
+    IoError(#[from] io::Error),
+    #[error("NIC {0} does not support PTP")]
+    PtpNotSupported(String),
+}
+
+impl ClockError {
+    pub fn other<E>(e: E) -> Self
+    where
+        E: std::error::Error + Sync + Send + 'static,
+    {
+        ClockError::ClockError(Box::new(e))
+    }
+}
 
 #[derive(Error, Debug, Diagnostic)]
 pub enum Aes67Vsc2Error {
@@ -196,7 +216,7 @@ pub type JackResult<T> = Result<T, JackError>;
 pub type AlsaResult<T> = Result<T, AlsaError>;
 pub type TelemetryResult<T> = Result<T, TelemetryError>;
 pub type ConfigResult<T> = Result<T, ConfigError>;
-pub type SystemClockResult<T> = Result<T, SystemClockError>;
+pub type ClockResult<T> = Result<T, ClockError>;
 
 pub trait ToBoxed {
     fn boxed(self) -> Box<Self>;

@@ -15,7 +15,12 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{buffer::AudioBufferPointer, error::ReceiverApiResult, receiver::config::RxDescriptor};
+use crate::{
+    buffer::{AudioBufferPointer, ReceiverBufferConsumer, ReceiverBufferProducer},
+    error::{ReceiverApiResult, ReceiverInternalResult},
+    formats::Frames,
+    receiver::config::RxDescriptor,
+};
 use tokio::sync::{mpsc, oneshot};
 use tracing::instrument;
 
@@ -30,38 +35,19 @@ pub enum DataState {
 }
 
 #[derive(Debug)]
-pub struct AudioDataRequest {
-    pub buffer: AudioBufferPointer,
-    pub playout_time: u64,
-}
-
-#[derive(Debug)]
-pub struct ChannelAudioDataRequest {
-    pub buffer: AudioBufferPointer,
-    pub channel: usize,
-    pub playout_time: u64,
-}
-
-#[derive(Debug)]
 pub enum ReceiverApiMessage {
-    GetInfo {
-        tx: oneshot::Sender<RxDescriptor>,
-    },
-    DataRequest {
-        req: AudioDataRequest,
-        tx: oneshot::Sender<DataState>,
-    },
     Stop,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ReceiverApi {
     api_tx: mpsc::Sender<ReceiverApiMessage>,
+    rx: ReceiverBufferConsumer,
 }
 
 impl ReceiverApi {
-    pub fn new(api_tx: mpsc::Sender<ReceiverApiMessage>) -> Self {
-        Self { api_tx }
+    pub fn new(api_tx: mpsc::Sender<ReceiverApiMessage>, rx: ReceiverBufferConsumer) -> Self {
+        Self { api_tx, rx }
     }
 
     #[instrument(skip(self))]
@@ -69,31 +55,14 @@ impl ReceiverApi {
         self.api_tx.send(ReceiverApiMessage::Stop).await.ok();
     }
 
-    #[instrument(skip(self), ret, err)]
-    pub async fn info(&self) -> ReceiverApiResult<RxDescriptor> {
-        let (tx, rx) = oneshot::channel();
-        self.api_tx
-            .send(ReceiverApiMessage::GetInfo { tx })
-            .await
-            .ok();
-        Ok(rx.await?)
-    }
-
-    pub fn receive_all(
-        &self,
-        playout_time: u64,
-        buffer_ptr: usize,
-        buffer_len: usize,
-    ) -> ReceiverApiResult<DataState> {
-        let (tx, rx) = oneshot::channel();
-        let buffer = AudioBufferPointer::new(buffer_ptr, buffer_len);
-        let req = AudioDataRequest {
-            buffer,
-            playout_time,
-        };
-        self.api_tx
-            .blocking_send(ReceiverApiMessage::DataRequest { req, tx })
-            .ok();
-        Ok(rx.blocking_recv()?)
+    pub fn receive_blocking<'a>(
+        &mut self,
+        buffers: impl Iterator<Item = Option<&'a mut [f32]>>,
+        ingress_time: Frames,
+    ) -> ReceiverInternalResult<()> {
+        unsafe {
+            self.rx.read(buffers, ingress_time)?;
+        }
+        Ok(())
     }
 }

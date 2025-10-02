@@ -1,21 +1,34 @@
-use crate::session_manager::{SessionManagerNotificationHandler, start_session_manager};
-use aes67_rs::receiver::{api::ReceiverApi, config::RxDescriptor};
+use crate::{
+    common::JackClock,
+    session_manager::{SessionManagerNotificationHandler, start_session_manager},
+};
+use aes67_rs::{
+    receiver::{api::ReceiverApi, config::RxDescriptor},
+    time::{MILLIS_PER_SEC, MILLIS_PER_SEC_F, MediaClock},
+};
 use jack::{
     AudioOut, Client, ClientOptions, Control, Port, ProcessScope, contrib::ClosureProcessHandler,
 };
 use miette::IntoDiagnostic;
+use std::time::Instant;
 use tokio::sync::mpsc;
 use tokio_graceful_shutdown::SubsystemHandle;
-use tracing::info;
+use tracing::{error, info};
 
 struct State {
     ports: Vec<Port<AudioOut>>,
+    receiver: ReceiverApi,
+    clock: JackClock,
+    descriptor: RxDescriptor,
 }
+
+impl State {}
 
 pub async fn start_playout(
     subsys: SubsystemHandle,
-    sender: ReceiverApi,
+    receiver: ReceiverApi,
     descriptor: RxDescriptor,
+    clock: Box<dyn MediaClock>,
 ) -> miette::Result<()> {
     // TODO evaluate client status
     let (client, status) =
@@ -39,7 +52,12 @@ pub async fn start_playout(
 
     let (tx, notifications) = mpsc::channel(1024);
     let notification_handler = SessionManagerNotificationHandler { tx };
-    let process_handler_state = State { ports };
+    let process_handler_state = State {
+        ports,
+        receiver,
+        clock: JackClock::new(clock),
+        descriptor,
+    };
     let process_handler =
         ClosureProcessHandler::with_state(process_handler_state, process, buffer_change);
 
@@ -54,12 +72,46 @@ pub async fn start_playout(
 }
 
 fn buffer_change(_: &mut State, client: &Client, buffer_len: jack::Frames) -> Control {
-    let buffer_ms = buffer_len as f32 * 1_000.0 / client.sample_rate() as f32;
+    let buffer_ms = buffer_len as f32 * MILLIS_PER_SEC_F / client.sample_rate() as f32;
     info!("JACK buffer size changed to {buffer_len} frames / {buffer_ms:.1} ms");
     Control::Continue
 }
 
 fn process(state: &mut State, client: &Client, ps: &ProcessScope) -> Control {
-    // TODO
+    let start = Instant::now();
+
+    let playout_time = match state.clock.update_clock(ps) {
+        Ok(it) => it,
+        Err(e) => {
+            error!("Could not get current media time: {e}");
+            return Control::Quit;
+        }
+    };
+
+    // TODO get link offset from current config
+    let link_offset_frames = state.descriptor.frames_in_link_offset() as u64;
+    let ingress_time = playout_time - link_offset_frames;
+
+    let buffers = state.ports.iter_mut().map(|p| Some(p.as_mut_slice(ps)));
+
+    let pre_req = Instant::now();
+
+    if let Err(e) = state.receiver.receive_blocking(buffers, ingress_time) {
+        error!("Error receiving audio data: {e}");
+        return Control::Quit;
+    }
+
+    let post_req = Instant::now();
+
+    // TODO send to monitoring
+
+    let total = post_req.duration_since(start).as_micros();
+    let req = post_req.duration_since(pre_req).as_micros();
+
+    if total > 100 {
+        eprintln!("latency playout req: {req} µs");
+        eprintln!("latency playout total: {total} µs");
+    }
+
     Control::Continue
 }

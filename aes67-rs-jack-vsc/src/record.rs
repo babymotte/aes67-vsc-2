@@ -1,9 +1,11 @@
-use crate::session_manager::{SessionManagerNotificationHandler, start_session_manager};
+use crate::{
+    common::JackClock,
+    session_manager::{SessionManagerNotificationHandler, start_session_manager},
+};
 use aes67_rs::{
     buffer::AudioBufferPointer,
-    formats::Frames,
     sender::{api::SenderApi, config::TxDescriptor},
-    time::MediaClock,
+    time::{MILLIS_PER_SEC_F, MediaClock},
 };
 use jack::{
     AudioIn, Client, ClientOptions, Control, Port, ProcessScope, contrib::ClosureProcessHandler,
@@ -14,22 +16,22 @@ use tokio::sync::mpsc;
 use tokio_graceful_shutdown::SubsystemHandle;
 use tracing::{error, info};
 
-struct State<C: MediaClock> {
+struct State {
     sender: SenderApi,
     ports: Vec<Port<AudioIn>>,
     channel_bufs: Box<[AudioBufferPointer]>,
-    clock: C,
-    jack_clock: Frames,
+    clock: JackClock,
     send_buffer: Box<[f32]>,
+    #[deprecated = "derive buffer position from media time"]
     send_buf_pos: usize,
     sample_rate: u32,
 }
 
-pub async fn start_recording<C: MediaClock>(
+pub async fn start_recording(
     subsys: SubsystemHandle,
     sender: SenderApi,
     descriptor: TxDescriptor,
-    clock: C,
+    clock: Box<dyn MediaClock>,
 ) -> miette::Result<()> {
     // TODO evaluate client status
     let (client, status) =
@@ -65,8 +67,7 @@ pub async fn start_recording<C: MediaClock>(
             descriptor.audio_format.frame_format.channels
         ]
         .into(),
-        clock,
-        jack_clock: 0,
+        clock: JackClock::new(clock),
         send_buffer,
         send_buf_pos: 0,
         sample_rate: descriptor.audio_format.sample_rate,
@@ -84,27 +85,22 @@ pub async fn start_recording<C: MediaClock>(
     Ok(())
 }
 
-fn buffer_change<C: MediaClock>(
-    _: &mut State<C>,
-    client: &Client,
-    buffer_len: jack::Frames,
-) -> Control {
-    let buffer_ms = buffer_len as f32 * 1_000.0 / client.sample_rate() as f32;
+fn buffer_change(_: &mut State, client: &Client, buffer_len: jack::Frames) -> Control {
+    let buffer_ms = buffer_len as f32 * MILLIS_PER_SEC_F / client.sample_rate() as f32;
     info!("JACK buffer size changed to {buffer_len} frames / {buffer_ms:.1} ms");
     Control::Continue
 }
 
-fn process<C: MediaClock>(state: &mut State<C>, client: &Client, ps: &ProcessScope) -> Control {
+fn process(state: &mut State, client: &Client, ps: &ProcessScope) -> Control {
     let start = Instant::now();
 
-    // TODO observe and compensate clock drift
-    if state.jack_clock == 0 {
-        let Ok(now) = state.clock.current_media_time() else {
-            error!("Could not get PTP time.");
+    let ingress_time = match state.clock.update_clock(ps) {
+        Ok(it) => it,
+        Err(e) => {
+            error!("Could not get current media time: {e}");
             return Control::Quit;
-        };
-        state.jack_clock = now - ps.n_frames() as Frames;
-    }
+        }
+    };
 
     let send_buffers = state.send_buffer.chunks_mut(state.sample_rate as usize);
 
@@ -120,8 +116,6 @@ fn process<C: MediaClock>(state: &mut State<C>, client: &Client, ps: &ProcessSco
         state.channel_bufs[ch] = AudioBufferPointer::from_slice(send_buf_slice);
     }
 
-    let ingress_time = state.jack_clock;
-
     let pre_req = Instant::now();
 
     state
@@ -130,7 +124,6 @@ fn process<C: MediaClock>(state: &mut State<C>, client: &Client, ps: &ProcessSco
 
     let post_req = Instant::now();
 
-    state.jack_clock += ps.n_frames() as u64;
     state.send_buf_pos = (state.send_buf_pos + ps.n_frames() as usize) % state.sample_rate as usize;
 
     // TODO send to monitoring
@@ -138,10 +131,10 @@ fn process<C: MediaClock>(state: &mut State<C>, client: &Client, ps: &ProcessSco
     let total = post_req.duration_since(start).as_micros();
     let req = post_req.duration_since(pre_req).as_micros();
 
-    if total > 100 {
-        eprintln!("req: {req} µs");
-        eprintln!("total: {total} µs");
-    }
+    // if total > 100 {
+    //     eprintln!("latency record req: {req} µs");
+    //     eprintln!("latency record total: {total} µs");
+    // }
 
     Control::Continue
 }

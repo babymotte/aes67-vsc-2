@@ -15,7 +15,11 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{error::ConfigError, receiver::config::RxDescriptor};
+use crate::{
+    error::ConfigError,
+    receiver::config::RxDescriptor,
+    time::{MICROS_PER_SEC, MILLIS_PER_SEC, MILLIS_PER_SEC_F},
+};
 use serde::{Deserialize, Serialize};
 use std::{str::FromStr, time::Duration};
 
@@ -311,15 +315,17 @@ pub fn bytes_per_frame(channels: usize, sample_format: SampleFormat) -> usize {
 }
 
 pub fn duration_to_frames(duration: Duration, sample_rate: FramesPerSecond) -> f64 {
-    (sample_rate as f64 * duration.as_micros() as f64) / 1_000_000.0
+    (sample_rate as f64 * duration.as_micros() as f64) / MICROS_PER_SEC as f64
 }
 
 pub fn frames_to_duration(frames: Frames, sample_rate: FramesPerSecond) -> Duration {
-    Duration::from_micros(((frames as f64 / sample_rate as f64) * 1_000_000.0).round() as u64)
+    Duration::from_micros(
+        ((frames as f64 / sample_rate as f64) * MICROS_PER_SEC as f64).round() as u64,
+    )
 }
 
 pub fn frames_to_duration_float(frames: f64, sample_rate: FramesPerSecond) -> Duration {
-    Duration::from_micros(((frames / sample_rate as f64) * 1_000_000.0).round() as u64)
+    Duration::from_micros(((frames / sample_rate as f64) * MICROS_PER_SEC as f64).round() as u64)
 }
 
 pub fn packets_in_link_offset(link_offset: MilliSeconds, packet_time: MilliSeconds) -> usize {
@@ -327,8 +333,7 @@ pub fn packets_in_link_offset(link_offset: MilliSeconds, packet_time: MilliSecon
 }
 
 pub fn frames_in_buffer(buffer_time: MilliSeconds, sample_rate: FramesPerSecond) -> usize {
-    ((sample_rate as f32 * buffer_time) / Duration::from_secs(1).as_millis() as f32).round()
-        as usize
+    ((sample_rate as f32 * buffer_time) / MILLIS_PER_SEC_F).round() as usize
 }
 
 pub fn samples_in_buffer(
@@ -357,8 +362,8 @@ pub fn samples_per_link_offset_buffer(
     channels * frames_in_buffer(link_offset, sample_rate)
 }
 
-pub fn to_link_offset(samples: usize, sample_rate: FramesPerSecond) -> usize {
-    ((samples as f32 * 1000.0) / sample_rate as f32).round() as usize
+pub fn to_link_offset(samples: usize, sample_rate: FramesPerSecond) -> MilliSeconds {
+    (samples as f32 * MILLIS_PER_SEC_F) / sample_rate as f32
 }
 
 #[cfg(test)]

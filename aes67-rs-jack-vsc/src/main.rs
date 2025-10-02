@@ -15,6 +15,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+mod common;
 mod play;
 mod record;
 mod session_manager;
@@ -22,7 +23,7 @@ mod session_manager;
 use crate::{play::start_playout, record::start_recording};
 use aes67_rs::{
     config::Config, receiver::config::RxDescriptor, sender::config::TxDescriptor, telemetry,
-    time::SystemMediaClock, vsc::VirtualSoundCardApi,
+    time::get_clock, vsc::VirtualSoundCardApi,
 };
 use miette::IntoDiagnostic;
 use std::time::Duration;
@@ -66,16 +67,22 @@ async fn run(subsys: SubsystemHandle, config: Config) -> miette::Result<()> {
 
     let vsc = VirtualSoundCardApi::new(id).await.into_diagnostic()?;
 
+    let ptp_mode = config.ptp;
+
     for tx_config in config.senders {
         let descriptor = TxDescriptor::try_from(&tx_config).into_diagnostic()?;
         let vsc = vsc.clone();
+        let ptp_mode = ptp_mode.clone();
         subsys.start(SubsystemBuilder::new(
             format!("sender/{}", descriptor.id),
             |s| async move {
-                match vsc.create_sender(tx_config).await.into_diagnostic() {
+                match vsc
+                    .create_sender(tx_config, ptp_mode.clone())
+                    .await
+                    .into_diagnostic()
+                {
                     Ok((sender, _)) => {
-                        // TODO make clock source configurable
-                        let clock = SystemMediaClock::new(descriptor.audio_format.clone());
+                        let clock = get_clock(ptp_mode, descriptor.audio_format)?;
                         start_recording(s, sender, descriptor, clock).await
                     }
                     Err(e) => {
@@ -90,11 +97,19 @@ async fn run(subsys: SubsystemHandle, config: Config) -> miette::Result<()> {
     for rx_config in config.receivers {
         let descriptor = RxDescriptor::try_from(&rx_config).into_diagnostic()?;
         let vsc = vsc.clone();
+        let ptp_mode = ptp_mode.clone();
         subsys.start(SubsystemBuilder::new(
             format!("receiver/{}", descriptor.id),
             |s| async move {
-                match vsc.create_receiver(rx_config).await.into_diagnostic() {
-                    Ok((receiver, _)) => start_playout(s, receiver, descriptor).await,
+                match vsc
+                    .create_receiver(rx_config, ptp_mode.clone())
+                    .await
+                    .into_diagnostic()
+                {
+                    Ok((receiver, _)) => {
+                        let clock = get_clock(ptp_mode, descriptor.audio_format)?;
+                        start_playout(s, receiver, descriptor, clock).await
+                    }
                     Err(e) => {
                         error!("Error creating receiver '{}': {}", descriptor.id, e);
                         Ok(())

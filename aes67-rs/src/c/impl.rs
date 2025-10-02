@@ -2,7 +2,7 @@ use crate::{
     AES_VSC_ERROR_CLOCK_SYNC_ERROR, AES_VSC_ERROR_INVALID_CHANNEL, AES_VSC_ERROR_NO_DATA,
     AES_VSC_ERROR_RECEIVER_BUFFER_UNDERRUN, AES_VSC_ERROR_RECEIVER_NOT_FOUND,
     AES_VSC_ERROR_RECEIVER_NOT_READY_YET, AES_VSC_OK, Aes67VscReceiverConfig,
-    config::Config,
+    config::{Config, PtpMode},
     error::{
         ConfigError, ConfigResult, GetErrorCode, ReceiverApiResult, ReceiverInternalResult,
         ToBoxedResult, VscApiResult, VscInternalError, VscInternalResult,
@@ -71,12 +71,15 @@ impl<'a> TryFrom<&Aes67VscReceiverConfig<'a>> for ReceiverConfig {
     }
 }
 
-pub fn try_create_receiver(config: &Aes67VscReceiverConfig) -> ReceiverInternalResult<i32> {
+pub fn try_create_receiver(
+    config: &Aes67VscReceiverConfig,
+    ptp_mode: Option<PtpMode>,
+) -> ReceiverInternalResult<i32> {
     let config = match ReceiverConfig::try_from(config) {
         Ok(it) => it,
         Err(err) => return Ok(-(err.error_code() as i32)),
     };
-    let (receiver_api, id) = match VIRTUAL_SOUND_CARD.create_receiver_blocking(config) {
+    let (receiver_api, id) = match VIRTUAL_SOUND_CARD.create_receiver_blocking(config, ptp_mode) {
         Ok(it) => it,
         Err(err) => return Ok(-(err.error_code() as i32)),
     };
@@ -93,19 +96,33 @@ pub fn try_receive<'a>(
         return Ok(AES_VSC_ERROR_RECEIVER_NOT_FOUND);
     };
 
-    match receiver.receive_all(playout_time, buffer_ptr.as_ptr() as usize, buffer_ptr.len())? {
-        DataState::Ready => Ok(AES_VSC_OK),
-        DataState::NotReady => Ok(AES_VSC_ERROR_NO_DATA),
-        DataState::ReceiverNotReady => Ok(AES_VSC_ERROR_RECEIVER_NOT_READY_YET),
-        DataState::InvalidChannelNumber => Ok(AES_VSC_ERROR_INVALID_CHANNEL),
-        DataState::Missed => Ok(AES_VSC_ERROR_RECEIVER_BUFFER_UNDERRUN),
-        DataState::SyncError => Ok(AES_VSC_ERROR_CLOCK_SYNC_ERROR),
-    }
+    // match receiver.receive_all(playout_time, buffer_ptr.as_ptr() as usize, buffer_ptr.len())? {
+    //     DataState::Ready => Ok(AES_VSC_OK),
+    //     DataState::NotReady => Ok(AES_VSC_ERROR_NO_DATA),
+    //     DataState::ReceiverNotReady => Ok(AES_VSC_ERROR_RECEIVER_NOT_READY_YET),
+    //     DataState::InvalidChannelNumber => Ok(AES_VSC_ERROR_INVALID_CHANNEL),
+    //     DataState::Missed => Ok(AES_VSC_ERROR_RECEIVER_BUFFER_UNDERRUN),
+    //     DataState::SyncError => Ok(AES_VSC_ERROR_CLOCK_SYNC_ERROR),
+    // }
+
+    // TODO adapt to new receiver API
+
+    Ok(AES_VSC_OK)
 }
 
 pub fn try_destroy_receiver(id: u32) -> VscApiResult<u8> {
     VIRTUAL_SOUND_CARD.destroy_receiver_blocking(id)?;
     Ok(AES_VSC_OK)
+}
+
+impl TryFrom<(Option<&char_p::Ref<'_>>, Option<&char_p::Ref<'_>>)> for PtpMode {
+    type Error = ConfigError;
+
+    fn try_from(
+        value: (Option<&char_p::Ref<'_>>, Option<&char_p::Ref<'_>>),
+    ) -> Result<Self, Self::Error> {
+        todo!()
+    }
 }
 
 // The following function is only necessary for the header generation.

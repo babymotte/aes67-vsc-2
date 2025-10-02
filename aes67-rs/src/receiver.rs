@@ -23,11 +23,11 @@ pub mod api;
 pub mod config;
 
 use crate::{
-    buffer::FloatingPointAudioBuffer,
+    buffer::{ReceiverBufferProducer, receiver_buffer_channel},
     error::{ReceiverInternalError, ReceiverInternalResult},
     monitoring::{Monitoring, ReceiverState, RxStats},
     receiver::{
-        api::{AudioDataRequest, DataState, ReceiverApi, ReceiverApiMessage},
+        api::{ReceiverApi, ReceiverApiMessage},
         config::{ReceiverConfig, RxDescriptor},
     },
     socket::create_rx_socket,
@@ -48,16 +48,17 @@ use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle, Toplevel};
 use tracing::{debug, error, info, instrument, trace, warn};
 
 #[instrument(skip(clock, monitoring))]
-pub(crate) async fn start_receiver<C: MediaClock>(
+pub(crate) async fn start_receiver(
     id: String,
     config: ReceiverConfig,
-    clock: C,
+    clock: Box<dyn MediaClock>,
     monitoring: Monitoring,
 ) -> ReceiverInternalResult<ReceiverApi> {
     let receiver_id = id.clone();
     let (result_tx, result_rx) = oneshot::channel();
     let (api_tx, api_rx) = mpsc::channel(1024);
     let desc = RxDescriptor::try_from(&config)?;
+    let (tx, rx) = receiver_buffer_channel(desc.clone());
     let socket = create_rx_socket(&config.session, config.interface_ip)?;
     thread::Builder::new().name(id.clone()).spawn(move || {
         // set_realtime_priority();
@@ -69,46 +70,49 @@ pub(crate) async fn start_receiver<C: MediaClock>(
                 return;
             }
         };
-        let receiver_future = Receiver::start(id, desc, config, clock, api_rx, socket, monitoring);
+        let receiver_future =
+            Receiver::start(id, desc, config, clock, api_rx, socket, monitoring, tx);
         result_tx.send(Ok(())).ok();
         runtime.block_on(receiver_future);
     })?;
 
     result_rx.await??;
     info!("Receiver '{receiver_id}' started successfully.");
-    Ok(ReceiverApi::new(api_tx))
+    Ok(ReceiverApi::new(api_tx, rx))
 }
 
-struct Receiver<C: MediaClock> {
+struct Receiver {
     id: String,
     subsys: SubsystemHandle,
     desc: RxDescriptor,
-    clock: C,
+    clock: Box<dyn MediaClock>,
     api_rx: mpsc::Receiver<ReceiverApiMessage>,
     last_timestamp: Option<u32>,
     last_sequence_number: Option<Seq>,
     timestamp_offset: Option<u64>,
-    rtp_packet_buffer: FloatingPointAudioBuffer,
+    // rtp_packet_buffer: FloatingPointAudioBuffer,
     latest_received_frame: u64,
     latest_played_frame: u64,
     socket: UdpSocket,
     monitoring: Monitoring,
+    tx: ReceiverBufferProducer,
 }
 
-impl<C: MediaClock> Receiver<C> {
+impl Receiver {
     async fn start(
         id: String,
         desc: RxDescriptor,
         config: ReceiverConfig,
-        clock: C,
+        clock: Box<dyn MediaClock>,
         api_rx: mpsc::Receiver<ReceiverApiMessage>,
         socket: UdpSocket,
         monitoring: Monitoring,
+        tx: ReceiverBufferProducer,
     ) {
         let recv_id = id.clone();
 
-        let desc_rx = desc.clone();
-        let packet_buffer_len = desc.audio_format.samples_in_buffer(config.buffer_time());
+        // let desc_rx = desc.clone();
+        // let packet_buffer_len = desc.audio_format.samples_in_buffer(config.buffer_time());
 
         let subsystem_name = id.clone();
         let subsystem = move |s: SubsystemHandle| async move {
@@ -121,15 +125,15 @@ impl<C: MediaClock> Receiver<C> {
                 last_sequence_number: None,
                 last_timestamp: None,
                 timestamp_offset: None,
-
-                rtp_packet_buffer: FloatingPointAudioBuffer::new(
-                    vec![0f32; packet_buffer_len].into(),
-                    desc_rx,
-                ),
+                // rtp_packet_buffer: FloatingPointAudioBuffer::new(
+                //     vec![0f32; packet_buffer_len].into(),
+                //     desc_rx,
+                // ),
                 latest_received_frame: 0,
                 latest_played_frame: 0,
                 socket,
                 monitoring,
+                tx,
             }
             .run()
             .await
@@ -177,57 +181,53 @@ impl<C: MediaClock> Receiver<C> {
         api_msg: ReceiverApiMessage,
     ) -> ReceiverInternalResult<()> {
         match api_msg {
-            ReceiverApiMessage::GetInfo { tx } => _ = tx.send(self.desc.clone()),
-            ReceiverApiMessage::DataRequest { req, tx } => {
-                _ = tx.send(self.write_out_buf(req).await)
-            }
             ReceiverApiMessage::Stop => self.subsys.request_shutdown(),
         }
         Ok(())
     }
 
-    async fn write_out_buf(&mut self, mut req: AudioDataRequest) -> DataState {
-        // get the playout buffer
-        // this is safe because the thread from which we borrow this buffer is blocked until we send
-        // the response back, so no concurrent reads and writes can occur
-        let buf = unsafe { req.buffer.buffer_mut::<f32>() };
+    // async fn write_out_buf(&mut self, mut req: AudioDataRequest) -> DataState {
+    //     // get the playout buffer
+    //     // this is safe because the thread from which we borrow this buffer is blocked until we send
+    //     // the response back, so no concurrent reads and writes can occur
+    //     let buf = unsafe { req.buffer.buffer_mut::<f32>() };
 
-        if self.latest_received_frame == 0 {
-            return DataState::NotReady;
-        }
+    //     if self.latest_received_frame == 0 {
+    //         return DataState::NotReady;
+    //     }
 
-        let buf_frames = buf.len() / self.desc.audio_format.frame_format.channels;
-        let last_frame_in_request_buffer = req.playout_time + buf_frames as u64 - 1;
+    //     let buf_frames = buf.len() / self.desc.audio_format.frame_format.channels;
+    //     let last_frame_in_request_buffer = req.playout_time + buf_frames as u64 - 1;
 
-        if last_frame_in_request_buffer > self.latest_received_frame {
-            // we have not received enough data to fill the buffer yet
-            trace!(
-                "Not all requested frames have been received yet (requested frames: [{}; {}]; last received frame: {})!",
-                req.playout_time, last_frame_in_request_buffer, self.latest_received_frame
-            );
-            return DataState::NotReady;
-        }
+    //     if last_frame_in_request_buffer > self.latest_received_frame {
+    //         // we have not received enough data to fill the buffer yet
+    //         trace!(
+    //             "Not all requested frames have been received yet (requested frames: [{}; {}]; last received frame: {})!",
+    //             req.playout_time, last_frame_in_request_buffer, self.latest_received_frame
+    //         );
+    //         return DataState::NotReady;
+    //     }
 
-        if last_frame_in_request_buffer > self.latest_played_frame {
-            self.latest_played_frame = last_frame_in_request_buffer;
-        }
+    //     if last_frame_in_request_buffer > self.latest_played_frame {
+    //         self.latest_played_frame = last_frame_in_request_buffer;
+    //     }
 
-        let oldest_frame_in_buffer =
-            self.latest_received_frame - self.rtp_packet_buffer.frames() as u64 + 1;
-        if oldest_frame_in_buffer > req.playout_time {
-            warn!(
-                "The requested data is not in the receiver buffer anymore (requested frames: [{}; {}]; oldest frame in buffer: {})!",
-                req.playout_time, last_frame_in_request_buffer, oldest_frame_in_buffer
-            );
-            return DataState::Missed;
-        }
+    //     let oldest_frame_in_buffer =
+    //         self.latest_received_frame - self.rtp_packet_buffer.frames() as u64 + 1;
+    //     if oldest_frame_in_buffer > req.playout_time {
+    //         warn!(
+    //             "The requested data is not in the receiver buffer anymore (requested frames: [{}; {}]; oldest frame in buffer: {})!",
+    //             req.playout_time, last_frame_in_request_buffer, oldest_frame_in_buffer
+    //         );
+    //         return DataState::Missed;
+    //     }
 
-        let state = self.rtp_packet_buffer.read(buf, req.playout_time);
+    //     let state = self.rtp_packet_buffer.read(buf, req.playout_time);
 
-        self.report_playout(&req).await;
+    //     self.report_playout(&req).await;
 
-        state
-    }
+    //     state
+    // }
 
     async fn rtp_data_received(
         &mut self,
@@ -319,8 +319,11 @@ impl<C: MediaClock> Receiver<C> {
             self.latest_received_frame = last_received_frame;
         }
 
-        self.rtp_packet_buffer
-            .insert(rtp.payload(), ingress_timestamp);
+        self.tx.write(rtp.payload(), ingress_timestamp).await;
+
+        // self
+        //     .rtp_packet_buffer
+        //     .insert(rtp.payload(), ingress_timestamp);
 
         Ok(())
     }
@@ -367,7 +370,7 @@ impl<C: MediaClock> Receiver<C> {
 mod monitoring {
     use super::*;
 
-    impl<C: MediaClock> Receiver<C> {
+    impl Receiver {
         pub(crate) async fn report_receiver_created(&mut self) {
             self.monitoring
                 .receiver_state(ReceiverState::ReceiverCreated {
@@ -392,12 +395,12 @@ mod monitoring {
             });
         }
 
-        pub(crate) async fn report_playout(&mut self, req: &AudioDataRequest) {
-            self.monitoring.receiver_stats(RxStats::Playout {
-                playout_time: req.playout_time,
-                latest_received_frame: self.latest_received_frame,
-            });
-        }
+        // pub(crate) async fn report_playout(&mut self, req: &AudioDataRequest) {
+        //     self.monitoring.receiver_stats(RxStats::Playout {
+        //         playout_time: req.playout_time,
+        //         latest_received_frame: self.latest_received_frame,
+        //     });
+        // }
 
         pub(crate) async fn report_media_clock_offset_changed(
             &mut self,

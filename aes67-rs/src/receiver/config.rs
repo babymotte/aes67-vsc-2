@@ -18,6 +18,7 @@
 use crate::{
     error::{ConfigError, ConfigResult},
     formats::{self, AudioFormat, FrameFormat, Frames, MilliSeconds, Seconds},
+    time::{MICROS_PER_MILLI_F, MILLIS_PER_SEC_F},
 };
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -220,9 +221,9 @@ impl RxDescriptor {
     }
 
     #[deprecated = "link offset is a configuration that may change during playout, it is not acceptable to read this from a static object"]
-    pub(crate) fn frames_in_link_offset(&self) -> usize {
+    pub fn frames_in_link_offset(&self) -> usize {
         formats::duration_to_frames(
-            Duration::from_micros((self.link_offset * 1_000.0).round() as u64),
+            Duration::from_micros((self.link_offset * MICROS_PER_MILLI_F).round() as u64),
             self.audio_format.sample_rate,
         )
         .round() as usize
@@ -232,7 +233,7 @@ impl RxDescriptor {
         buffer_len as u64 / self.bytes_per_frame() as u64
     }
 
-    pub fn to_link_offset(&self, samples: usize) -> usize {
+    pub fn to_link_offset(&self, samples: usize) -> MilliSeconds {
         formats::to_link_offset(samples, self.audio_format.sample_rate)
     }
 

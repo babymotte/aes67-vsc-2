@@ -64,18 +64,6 @@ pub fn panic_to_string(panic: Box<dyn Any + Send>) -> String {
     }
 }
 
-pub fn find_network_interface(ip: IpAddr) -> ConfigResult<NetworkInterface> {
-    for iface in datalink::interfaces() {
-        for ipn in &iface.ips {
-            if ipn.ip() == ip {
-                return Ok(iface);
-            }
-        }
-    }
-
-    Err(ConfigError::NoSuchNIC(ip.to_string()))
-}
-
 pub trait GetAverage<T> {
     fn average(&self) -> T;
 }

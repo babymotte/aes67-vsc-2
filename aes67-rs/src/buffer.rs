@@ -16,7 +16,7 @@
  */
 
 use crate::{
-    error::{SenderInternalError, SenderInternalResult},
+    error::{ReceiverInternalResult, SenderInternalError, SenderInternalResult},
     formats::{BufferFormat, Frames, SampleReader, SampleWriter},
     receiver::{api::DataState, config::RxDescriptor},
     sender::config::TxDescriptor,
@@ -27,8 +27,8 @@ use std::{
     slice::{from_raw_parts, from_raw_parts_mut},
     time::Duration,
 };
-use tokio::sync::mpsc;
-use tracing::error;
+use tokio::sync::{mpsc, watch};
+use tracing::{error, warn};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BufferConfig {
@@ -236,7 +236,7 @@ pub fn receiver_buffer_channel(
     descriptor: RxDescriptor,
 ) -> (ReceiverBufferProducer, ReceiverBufferConsumer) {
     let buffer_len = descriptor.duration_to_frames(Duration::from_secs(1)) as usize;
-    let (tx, rx) = mpsc::channel(buffer_len);
+    let (tx, rx) = watch::channel(0);
     let buffer = vec![0f32; buffer_len].into_boxed_slice();
     let buffer_pointer = AudioBufferPointer::from_slice(&buffer);
     (
@@ -249,22 +249,24 @@ pub fn receiver_buffer_channel(
             buffer_pointer,
             descriptor,
             rx,
-            last_received_frame: 0,
+            // last_received_frame: 0,
         },
     )
 }
 
+#[derive(Debug, Clone)]
 pub struct ReceiverBufferProducer {
     buffer: Box<[f32]>,
     descriptor: RxDescriptor,
-    tx: mpsc::Sender<Frames>,
+    tx: watch::Sender<Frames>,
 }
 
+#[derive(Debug, Clone)]
 pub struct ReceiverBufferConsumer {
     buffer_pointer: AudioBufferPointer,
     descriptor: RxDescriptor,
-    rx: mpsc::Receiver<Frames>,
-    last_received_frame: Frames,
+    rx: watch::Receiver<Frames>,
+    // last_received_frame: Frames,
 }
 
 impl ReceiverBufferProducer {
@@ -298,7 +300,6 @@ impl ReceiverBufferProducer {
 
         self.tx
             .send(ingress_time + self.descriptor.frames_in_buffer(payload.len()) - 1)
-            .await
             .ok();
     }
 }
@@ -306,42 +307,42 @@ impl ReceiverBufferProducer {
 // TODO return proper errors
 impl ReceiverBufferConsumer {
     /// Write data from the shared buffer. Before reading, this function will block until the requested data is available.
-    pub unsafe fn read(&mut self, buffers: &mut [&mut [f32]], egress_time: Frames) {
-        let Some(buf_len) = buffers.first().map(|it| it.len()) else {
-            return;
-        };
-
-        debug_assert!(
-            buffers.iter().all(|it| it.len() == buf_len),
-            "inconsistent buffer lengths"
-        );
-
-        let last_requested_frame = egress_time + buf_len as Frames - 1;
-
-        if last_requested_frame > self.last_received_frame {
-            loop {
-                let Some(frame) = self.rx.blocking_recv() else {
-                    return;
-                };
-                self.last_received_frame = frame;
-                if self.last_received_frame >= last_requested_frame {
-                    break;
-                }
-            }
-        }
-
+    pub unsafe fn read<'a>(
+        &mut self,
+        buffers: impl Iterator<Item = Option<&'a mut [f32]>>,
+        ingress_time: Frames,
+    ) -> ReceiverInternalResult<()> {
         let buf = self.buffer_pointer.buffer::<f32>();
 
-        for (channel, output_buffer) in buffers.iter_mut().enumerate() {
+        for (channel, output_buffer) in buffers.enumerate() {
+            let Some(output_buffer) = output_buffer else {
+                continue;
+            };
+
+            let last_requested_frame = ingress_time + output_buffer.len() as Frames - 1;
+            let last_received_frame = *self.rx.borrow();
+
+            if last_received_frame < last_requested_frame {
+                warn!(
+                    "Requested frame {last_requested_frame} has not been received yet (last received frame is {last_received_frame})."
+                );
+                // TODO report underrun
+                futures::executor::block_on(
+                    self.rx.wait_for(|last_received_frame| {
+                        last_received_frame >= &last_requested_frame
+                    }),
+                )?;
+            }
+
             let channels = self.descriptor.audio_format.frame_format.channels;
             let chunk_size = buf.len() / channels;
             let mut channel_partitions = buf.chunks(chunk_size);
 
-            let Some(rtp_buffer) = channel_partitions.nth(channel) else {
-                return;
-            };
+            let rtp_buffer = channel_partitions
+                .nth(channel)
+                .expect("bug in buffer partitioning logic");
 
-            let start_index = (egress_time % rtp_buffer.len() as u64) as usize;
+            let start_index = (ingress_time % rtp_buffer.len() as u64) as usize;
             let end_index: usize = start_index + output_buffer.len();
             if end_index <= rtp_buffer.len() {
                 output_buffer.copy_from_slice(&rtp_buffer[start_index..end_index]);
@@ -352,6 +353,8 @@ impl ReceiverBufferConsumer {
                 output_buffer[pivot..].copy_from_slice(&rtp_buffer[..remainder]);
             }
         }
+
+        Ok(())
     }
 }
 

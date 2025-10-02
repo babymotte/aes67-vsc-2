@@ -100,7 +100,36 @@ pub struct SocketConfig {
     pub user_timeout: Option<Duration>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PtpMode {
+    /// System mode is used when there is an external PTP daemon running on this machine that synchronizes the
+    /// system TAI clock to a PTP master or the PTP master or that acts as a PTP master itself and uses the
+    /// system TAI clock as source.
+    /// This mode is useful if other applications on the same machine also need PTP time but there is no NIC that
+    /// provides a PHC, which is often the case on laptops and consumer PCs.
+    /// On desktop/general purpose devices it may not be desirable to synchronize the system time to a PTP master
+    /// since the PTP master may use an arbitrary timescale.
+    #[default]
+    System,
+    /// PHC mode is used when there is an external PTP daemon running in salve-only mode that synchronizes
+    /// the PHC of the given network interface to a PTP master, potentially without synchronizing the system
+    /// clock to the PHC.
+    /// This mode is useful if other applications on the same machine also need PTP time but it is not acceptable
+    /// to synchronize the system clock to the PTP master. Its downside is that it requires a NIC that provides a
+    /// PHC, which is usually not the case on consumer hardware.
+    Phc { nic: String },
+    #[cfg(feature = "statime")]
+    /// Internal mode is used when there is no external PTP daemon running. The application will start its own
+    /// internal slave-only PTP client to provide a clock that is synchronized to a PTP master.
+    /// This mode is useful if it is not acceptable to synchronize the system clock to the PTP master and none
+    /// of the machine's NICs provides a PHC or if running an external PTP daemon is not desired. Its downside
+    /// is that it requires exclusive access to the default PTP port, so no other applications on the same machine
+    /// can use PTP at the same time.
+    Internal { nic: String },
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Config {
     #[serde(default = "AppConfig::default")]
@@ -108,20 +137,11 @@ pub struct Config {
     #[serde(default)]
     pub telemetry: Option<TelemetryConfig>,
     #[serde(default)]
+    pub ptp: Option<PtpMode>,
+    #[serde(default)]
     pub receivers: Vec<ReceiverConfig>,
     #[serde(default)]
     pub senders: Vec<SenderConfig>,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            app: Default::default(),
-            telemetry: Default::default(),
-            receivers: Default::default(),
-            senders: Default::default(),
-        }
-    }
 }
 
 impl Config {

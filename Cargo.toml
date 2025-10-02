@@ -1,5 +1,5 @@
 [workspace]
-members = ["aes67-jack-vsc", "aes67-rs"]
+members = ["aes67-rs-jack-vsc", "aes67-rs"]
 resolver = "3"
 
 [patch.crates-io]
