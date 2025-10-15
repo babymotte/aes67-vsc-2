@@ -1,0 +1,10 @@
+[package]
+name = "aes67-rs-ui"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+aes67-rs = { path = "../aes67-rs" }
+tokio = "1.47.1"
+tokio-graceful-shutdown = { version = "0.18.0", features = ["tracing"] }
+tokio-util = "0.7.16"
