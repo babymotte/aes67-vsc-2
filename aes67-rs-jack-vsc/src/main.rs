@@ -47,7 +47,9 @@ async fn async_main(config: Config) -> miette::Result<()> {
     telemetry::init(&config).await.into_diagnostic()?;
 
     Toplevel::new(move |s| async move {
-        s.start(SubsystemBuilder::new("jack-vsc", move |s| run(s, config)));
+        s.start(SubsystemBuilder::new("aes67-jack-vsc", move |s| {
+            run(s, config)
+        }));
     })
     .catch_signals()
     .handle_shutdown_requests(Duration::from_secs(1))
@@ -65,7 +67,9 @@ async fn run(subsys: SubsystemHandle, config: Config) -> miette::Result<()> {
         config.app.name, config.app.instance.name
     );
 
-    let vsc = VirtualSoundCardApi::new(id).await.into_diagnostic()?;
+    let vsc = VirtualSoundCardApi::new(id, subsys.create_cancellation_token())
+        .await
+        .into_diagnostic()?;
 
     let ptp_mode = config.ptp;
 

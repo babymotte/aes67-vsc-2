@@ -38,6 +38,7 @@ use tokio::{
     runtime,
     sync::{mpsc, oneshot},
 };
+use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 type ResultReceiver<T, E> = oneshot::Receiver<Result<T, E>>;
@@ -66,35 +67,28 @@ pub struct VirtualSoundCardApi {
 }
 
 impl VirtualSoundCardApi {
-    pub fn new_blocking(name: String) -> VscApiResult<Self> {
-        Ok(VirtualSoundCardApi::try_new_blocking(name).boxed()?)
+    pub async fn new(name: String, shutdown_token: CancellationToken) -> VscApiResult<Self> {
+        Ok(VirtualSoundCardApi::try_new(name, shutdown_token)
+            .await
+            .boxed()?)
     }
 
-    pub async fn new(name: String) -> VscApiResult<Self> {
-        Ok(VirtualSoundCardApi::try_new(name).await.boxed()?)
-    }
-
-    fn try_new_blocking(name: String) -> VscInternalResult<Self> {
-        let (result_rx, api_tx) = VirtualSoundCardApi::create_vsc(name)?;
-        result_rx.blocking_recv()??;
-        Ok(VirtualSoundCardApi { api_tx })
-    }
-
-    async fn try_new(name: String) -> VscInternalResult<Self> {
-        let (result_rx, api_tx) = VirtualSoundCardApi::create_vsc(name)?;
+    async fn try_new(name: String, shutdown_token: CancellationToken) -> VscInternalResult<Self> {
+        let (result_rx, api_tx) = VirtualSoundCardApi::create_vsc(name, shutdown_token)?;
         result_rx.await??;
         Ok(VirtualSoundCardApi { api_tx })
     }
 
     fn create_vsc(
         name: String,
+        shutdown_token: CancellationToken,
     ) -> Result<(ResultReceiver<(), VscInternalError>, ApiMessageSender), VscInternalError> {
         let (result_tx, result_rx) = oneshot::channel();
         let (api_tx, api_rx) = mpsc::channel(1024);
         thread::Builder::new()
             .name(format!("aes67-vsc-{name}"))
             .spawn(move || {
-                let vsc_future = VirtualSoundCard::new(name, api_rx).run();
+                let vsc_future = VirtualSoundCard::new(name, api_rx, shutdown_token).run();
                 let runtime = match runtime::Builder::new_current_thread().enable_all().build() {
                     Ok(it) => it,
                     Err(e) => {
@@ -106,18 +100,6 @@ impl VirtualSoundCardApi {
                 runtime.block_on(vsc_future);
             })?;
         Ok((result_rx, api_tx))
-    }
-
-    pub fn create_sender_blocking(&self, config: SenderConfig) -> VscApiResult<(SenderApi, u32)> {
-        let (tx, rx) = oneshot::channel();
-        self.api_tx
-            .blocking_send(VscApiMessage::CreateSender(
-                config.id.to_owned(),
-                Box::new(config),
-                tx,
-            ))
-            .ok();
-        Ok(rx.blocking_recv().map_err(SenderInternalError::from)??)
     }
 
     pub async fn create_sender(&self, config: SenderConfig) -> VscApiResult<(SenderApi, u32)> {
@@ -133,14 +115,6 @@ impl VirtualSoundCardApi {
         Ok(rx.await.map_err(SenderInternalError::from)??)
     }
 
-    pub fn destroy_sender_blocking(&self, id: u32) -> VscApiResult<()> {
-        let (tx, rx) = oneshot::channel();
-        self.api_tx
-            .blocking_send(VscApiMessage::DestroySenderById(id, tx))
-            .ok();
-        Ok(rx.blocking_recv().map_err(SenderInternalError::from)??)
-    }
-
     pub async fn destroy_sender(&self, id: u32) -> VscApiResult<()> {
         let (tx, rx) = oneshot::channel();
         self.api_tx
@@ -148,23 +122,6 @@ impl VirtualSoundCardApi {
             .await
             .ok();
         Ok(rx.await.map_err(SenderInternalError::from)??)
-    }
-
-    pub fn create_receiver_blocking(
-        &self,
-        config: ReceiverConfig,
-        ptp_mode: Option<PtpMode>,
-    ) -> VscApiResult<(ReceiverApi, Monitoring, u32)> {
-        let (tx, rx) = oneshot::channel();
-        self.api_tx
-            .blocking_send(VscApiMessage::CreateReceiver(
-                config.id().to_owned(),
-                Box::new(config),
-                ptp_mode,
-                tx,
-            ))
-            .ok();
-        Ok(rx.blocking_recv().map_err(ReceiverInternalError::from)??)
     }
 
     pub async fn create_receiver(
@@ -185,14 +142,6 @@ impl VirtualSoundCardApi {
         Ok(rx.await.map_err(ReceiverInternalError::from)??)
     }
 
-    pub fn destroy_receiver_blocking(&self, id: u32) -> VscApiResult<()> {
-        let (tx, rx) = oneshot::channel();
-        self.api_tx
-            .blocking_send(VscApiMessage::DestroyReceiverById(id, tx))
-            .ok();
-        Ok(rx.blocking_recv().map_err(ReceiverInternalError::from)??)
-    }
-
     pub async fn destroy_receiver(&self, id: u32) -> VscApiResult<()> {
         let (tx, rx) = oneshot::channel();
         self.api_tx
@@ -200,12 +149,6 @@ impl VirtualSoundCardApi {
             .await
             .ok();
         Ok(rx.await.map_err(ReceiverInternalError::from)??)
-    }
-
-    pub fn close_blocking(self) -> VscApiResult<()> {
-        let (tx, rx) = oneshot::channel();
-        self.api_tx.blocking_send(VscApiMessage::Stop(tx)).ok();
-        Ok(rx.blocking_recv().map_err(VscInternalError::from).boxed()?)
     }
 
     pub async fn close(self) -> VscApiResult<()> {
@@ -225,11 +168,16 @@ struct VirtualSoundCard {
     tx_counter: u32,
     rx_counter: u32,
     monitoring: Monitoring,
+    shutdown_token: CancellationToken,
 }
 
 impl VirtualSoundCard {
-    fn new(name: String, api_rx: mpsc::Receiver<VscApiMessage>) -> Self {
-        let monitoring = start_monitoring_service(name.clone());
+    fn new(
+        name: String,
+        api_rx: mpsc::Receiver<VscApiMessage>,
+        shutdown_token: CancellationToken,
+    ) -> Self {
+        let monitoring = start_monitoring_service(name.clone(), shutdown_token.clone());
         VirtualSoundCard {
             name,
             api_rx,
@@ -240,6 +188,7 @@ impl VirtualSoundCard {
             tx_counter: 0,
             rx_counter: 0,
             monitoring,
+            shutdown_token,
         }
     }
 
@@ -287,6 +236,7 @@ impl VirtualSoundCard {
             display_name.clone(),
             config,
             self.monitoring.child(display_name.clone()),
+            self.shutdown_token.clone(),
         )
         .await?;
 
@@ -319,8 +269,14 @@ impl VirtualSoundCard {
         let desc = RxDescriptor::try_from(&config)?;
         let clock = get_clock(ptp_mode, desc.audio_format)?;
         let monitoring = self.monitoring.child(display_name.clone());
-        let receiver_api =
-            start_receiver(display_name.clone(), config, clock, monitoring.clone()).await?;
+        let receiver_api = start_receiver(
+            display_name.clone(),
+            config,
+            clock,
+            monitoring.clone(),
+            self.shutdown_token.clone(),
+        )
+        .await?;
 
         self.rx_names.insert(id, name.clone());
         self.rxs.insert(id, receiver_api.clone());

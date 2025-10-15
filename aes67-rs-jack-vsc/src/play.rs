@@ -55,7 +55,8 @@ pub async fn start_playout(
     }
 
     let (tx, notifications) = mpsc::channel(1024);
-    let notification_handler = SessionManagerNotificationHandler { tx };
+    let client_id = descriptor.id.clone();
+    let notification_handler = SessionManagerNotificationHandler { client_id, tx };
     let process_handler_state = State {
         ports,
         receiver,

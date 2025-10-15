@@ -38,6 +38,7 @@ use tokio::{
     sync::{mpsc, oneshot},
 };
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle, Toplevel};
+use tokio_util::sync::CancellationToken;
 use tracing::{error, info, instrument};
 
 #[instrument(skip(monitoring))]
@@ -45,6 +46,7 @@ pub(crate) async fn start_sender(
     id: String,
     config: SenderConfig,
     monitoring: Monitoring,
+    shutdown_token: CancellationToken,
 ) -> SenderInternalResult<SenderApi> {
     let sender_id = id.clone();
     let (result_tx, result_rx) = oneshot::channel();
@@ -62,7 +64,16 @@ pub(crate) async fn start_sender(
                 return;
             }
         };
-        let sender_future = Sender::start(id, desc, config, api_rx, socket, monitoring, rx);
+        let sender_future = Sender::start(
+            id,
+            desc,
+            config,
+            api_rx,
+            socket,
+            monitoring,
+            rx,
+            shutdown_token,
+        );
         result_tx.send(Ok(())).ok();
         runtime.block_on(sender_future);
     })?;
@@ -95,6 +106,7 @@ impl Sender {
         socket: UdpSocket,
         monitoring: Monitoring,
         rx: SenderBufferConsumer,
+        shutdown_token: CancellationToken,
     ) {
         let send_id = id.clone();
         let subsystem_name = id.clone();
@@ -115,9 +127,12 @@ impl Sender {
             .run()
             .await
         };
-        if let Err(e) = Toplevel::new(|s| async move {
-            s.start(SubsystemBuilder::new(subsystem_name, subsystem));
-        })
+        if let Err(e) = Toplevel::new_with_shutdown_token(
+            |s| async move {
+                s.start(SubsystemBuilder::new(subsystem_name, subsystem));
+            },
+            shutdown_token,
+        )
         .handle_shutdown_requests(Duration::from_secs(1))
         .await
         {

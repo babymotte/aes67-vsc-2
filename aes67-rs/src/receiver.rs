@@ -45,6 +45,7 @@ use tokio::{
     },
 };
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle, Toplevel};
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, instrument, warn};
 
 #[instrument(skip(clock, monitoring))]
@@ -53,6 +54,7 @@ pub(crate) async fn start_receiver(
     config: ReceiverConfig,
     clock: Box<dyn MediaClock>,
     monitoring: Monitoring,
+    shutdown_token: CancellationToken,
 ) -> ReceiverInternalResult<ReceiverApi> {
     let receiver_id = id.clone();
     let (result_tx, result_rx) = oneshot::channel();
@@ -70,7 +72,16 @@ pub(crate) async fn start_receiver(
                 return;
             }
         };
-        let receiver_future = Receiver::start(id, desc, clock, api_rx, socket, monitoring, tx);
+        let receiver_future = Receiver::start(
+            id,
+            desc,
+            clock,
+            api_rx,
+            socket,
+            monitoring,
+            tx,
+            shutdown_token,
+        );
         result_tx.send(Ok(())).ok();
         runtime.block_on(receiver_future);
     })?;
@@ -103,6 +114,7 @@ impl Receiver {
         socket: UdpSocket,
         monitoring: Monitoring,
         tx: ReceiverBufferProducer,
+        shutdown_token: CancellationToken,
     ) {
         let recv_id = id.clone();
 
@@ -127,9 +139,12 @@ impl Receiver {
             .run()
             .await
         };
-        if let Err(e) = Toplevel::new(|s| async move {
-            s.start(SubsystemBuilder::new(subsystem_name, subsystem));
-        })
+        if let Err(e) = Toplevel::new_with_shutdown_token(
+            |s| async move {
+                s.start(SubsystemBuilder::new(subsystem_name, subsystem));
+            },
+            shutdown_token,
+        )
         .handle_shutdown_requests(Duration::from_secs(1))
         .await
         {

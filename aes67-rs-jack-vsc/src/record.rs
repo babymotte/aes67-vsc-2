@@ -58,7 +58,8 @@ pub async fn start_recording(
     let send_buffer = vec![0.0; send_buffer_len].into();
 
     let (tx, notifications) = mpsc::channel(1024);
-    let notification_handler = SessionManagerNotificationHandler { tx };
+    let client_id = descriptor.id.clone();
+    let notification_handler = SessionManagerNotificationHandler { client_id, tx };
     let process_handler_state = State {
         sender,
         ports,

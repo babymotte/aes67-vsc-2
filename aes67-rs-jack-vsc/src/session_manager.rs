@@ -19,10 +19,11 @@ pub enum Notification {
     PortRename(jack::PortId, String, String),
     PortConnected(jack::PortId, jack::PortId, bool),
     GraphReorder,
-    XRun,
+    XRun(String),
 }
 
 pub struct SessionManagerNotificationHandler {
+    pub client_id: String,
     pub tx: mpsc::Sender<Notification>,
 }
 
@@ -96,7 +97,9 @@ impl NotificationHandler for SessionManagerNotificationHandler {
     }
 
     fn xrun(&mut self, _: &Client) -> Control {
-        self.tx.try_send(Notification::XRun).ok();
+        self.tx
+            .try_send(Notification::XRun(self.client_id.clone()))
+            .ok();
         Control::Continue
     }
 }
@@ -166,31 +169,33 @@ async fn handle_notification(client: &Client, notification: Notification) -> mie
         }
         Notification::PortConnected(port_id_a, port_id_b, are_connected) => {
             if let Some(port) = client.port_by_id(port_id_b)
-                && client.is_mine(&port) {
-                    if are_connected {
-                        info!("JACK sender ports connected: {port_id_a} -> {port_id_b}")
-                    } else {
-                        info!("JACK sender ports disconnected: {port_id_a} -/> {port_id_b}")
-                    }
-                    store_connection(client, port_id_a, port_id_b, are_connected).await;
+                && client.is_mine(&port)
+            {
+                if are_connected {
+                    info!("JACK sender ports connected: {port_id_a} -> {port_id_b}")
+                } else {
+                    info!("JACK sender ports disconnected: {port_id_a} -/> {port_id_b}")
                 }
+                store_connection(client, port_id_a, port_id_b, are_connected).await;
+            }
 
             if let Some(port) = client.port_by_id(port_id_a)
-                && client.is_mine(&port) {
-                    if are_connected {
-                        info!("JACK receiver ports connected: {port_id_a} -> {port_id_b}")
-                    } else {
-                        info!("JACK receiver ports disconnected: {port_id_a} -/> {port_id_b}")
-                    }
-                    store_connection(client, port_id_a, port_id_b, are_connected).await;
+                && client.is_mine(&port)
+            {
+                if are_connected {
+                    info!("JACK receiver ports connected: {port_id_a} -> {port_id_b}")
+                } else {
+                    info!("JACK receiver ports disconnected: {port_id_a} -/> {port_id_b}")
                 }
+                store_connection(client, port_id_a, port_id_b, are_connected).await;
+            }
         }
         Notification::GraphReorder => {
             info!("JACK graph reorder");
         }
-        Notification::XRun => {
+        Notification::XRun(client) => {
             // TODO report playout xrun
-            warn!("JACK buffer xrun");
+            warn!("JACK buffer xrun in client {client}");
         }
     }
 

@@ -28,10 +28,12 @@ use crate::{
 };
 use ::safer_ffi::prelude::*;
 use dashmap::DashMap;
+use futures_lite::future::block_on;
 use lazy_static::lazy_static;
 use sdp::SessionDescription;
 use std::{env, io::Cursor, sync::Arc};
 use tokio::runtime;
+use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 lazy_static! {
@@ -44,7 +46,8 @@ fn init_vsc() -> VscApiResult<Arc<VirtualSoundCardApi>> {
     try_init().boxed()?;
     let vsc_name = env::var("AES67_VSC_NAME").unwrap_or("aes67-virtual-sound-card".to_owned());
     info!("Creating new VSC with name '{vsc_name}' …");
-    let vsc = VirtualSoundCardApi::new_blocking(vsc_name.clone())?;
+    let shutdown_token = CancellationToken::new();
+    let vsc = block_on(VirtualSoundCardApi::new(vsc_name.clone(), shutdown_token))?;
     info!("VSC '{}' created.", vsc_name);
     Ok(Arc::new(vsc))
 }
@@ -91,7 +94,7 @@ pub fn try_create_receiver(
         Ok(it) => it,
         Err(err) => return Ok(-(err.error_code() as i32)),
     };
-    let (receiver_api, _, id) = match VIRTUAL_SOUND_CARD.create_receiver_blocking(config, ptp_mode)
+    let (receiver_api, _, id) = match block_on(VIRTUAL_SOUND_CARD.create_receiver(config, ptp_mode))
     {
         Ok(it) => it,
         Err(err) => return Ok(-(err.error_code() as i32)),
@@ -124,7 +127,7 @@ pub fn try_receive<'a>(
 }
 
 pub fn try_destroy_receiver(id: u32) -> VscApiResult<u8> {
-    VIRTUAL_SOUND_CARD.destroy_receiver_blocking(id)?;
+    block_on(VIRTUAL_SOUND_CARD.destroy_receiver(id))?;
     Ok(AES_VSC_OK)
 }
 
@@ -141,22 +144,11 @@ impl TryFrom<(Option<&char_p::Ref<'_>>, Option<&char_p::Ref<'_>>)> for PtpMode {
 // The following function is only necessary for the header generation.
 #[cfg(feature = "headers")] // c.f. the `Cargo.toml` section
 pub fn generate_headers() -> ::std::io::Result<()> {
+    use safer_ffi::headers::Language;
+
     ::safer_ffi::headers::builder()
-        .with_text_after_guard(
-            "static const unsigned int AES_VSC_OK = 0x00;
-static const unsigned int AES_VSC_ERROR_NOT_INITIALIZED = 0x01;
-static const unsigned int AES_VSC_ERROR_ALREADY_INITIALIZED = 0x02;
-static const unsigned int AES_VSC_ERROR_UNSUPPORTED_BIT_DEPTH = 0x03;
-static const unsigned int AES_VSC_ERROR_UNSUPPORTED_SAMPLE_RATE = 0x04;
-static const unsigned int AES_VSC_ERROR_VSC_NOT_CREATED = 0x05;
-static const unsigned int AES_VSC_ERROR_RECEIVER_NOT_FOUND = 0x06;
-static const unsigned int AES_VSC_ERROR_SENDER_NOT_FOUND = 0x07;
-static const unsigned int AES_VSC_ERROR_INVALID_CHANNEL = 0x08;
-static const unsigned int AES_VSC_ERROR_RECEIVER_BUFFER_UNDERRUN = 0x09;
-static const unsigned int AES_VSC_ERROR_CLOCK_SYNC_ERROR = 0x0A;
-static const unsigned int AES_VSC_ERROR_RECEIVER_NOT_READY_YET = 0x0B;
-static const unsigned int AES_VSC_ERROR_NO_DATA = 0x0C;",
-        )
+        .with_language(Language::C)
+        .with_text_after_guard("#include \"./aes67-vsc-2-constants.h\"")
         .to_file("./include/aes67-vsc-2.h")?
         .generate()
 }

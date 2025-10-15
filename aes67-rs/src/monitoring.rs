@@ -41,6 +41,7 @@ use tokio::{
     },
 };
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle, Toplevel};
+use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
 #[derive(Debug, Clone)]
@@ -285,7 +286,7 @@ impl Monitoring {
     }
 }
 
-pub fn start_monitoring_service(root_id: String) -> Monitoring {
+pub fn start_monitoring_service(root_id: String, shutdown_token: CancellationToken) -> Monitoring {
     let (mon_tx, mon_rx) = mpsc::channel::<(MonitoringEvent, String)>(1024);
 
     let client_name = root_id.clone();
@@ -294,7 +295,7 @@ pub fn start_monitoring_service(root_id: String) -> Monitoring {
 
     let (child, start) = parent.deferred_child(root_id);
 
-    let monitoring_thread = move || monitoring(client_name, mon_rx, start);
+    let monitoring_thread = move || monitoring(client_name, mon_rx, start, shutdown_token);
 
     thread::Builder::new()
         .name("monitoring".to_owned())
@@ -308,6 +309,7 @@ fn monitoring(
     client_name: String,
     mon_rx: mpsc::Receiver<(MonitoringEvent, String)>,
     start: impl Future<Output = ()> + Send + 'static,
+    shutdown_token: CancellationToken,
 ) -> io::Result<()> {
     let (stats_tx, stats_rx) = mpsc::channel::<Report>(1024);
     let (observ_tx, observ_rx) = broadcast::channel::<Report>(1024);
@@ -317,11 +319,14 @@ fn monitoring(
     let observability = |s: SubsystemHandle| observability(s, client_name, observ_rx);
     let monitoring = async {
         spawn(start);
-        if let Err(e) = Toplevel::new(|s| async move {
-            s.start(SubsystemBuilder::new("stats", stats));
-            s.start(SubsystemBuilder::new("health", health));
-            s.start(SubsystemBuilder::new("observability", observability));
-        })
+        if let Err(e) = Toplevel::new_with_shutdown_token(
+            |s| async move {
+                s.start(SubsystemBuilder::new("stats", stats));
+                s.start(SubsystemBuilder::new("health", health));
+                s.start(SubsystemBuilder::new("observability", observability));
+            },
+            shutdown_token,
+        )
         .handle_shutdown_requests(Duration::from_secs(1))
         .await
         {

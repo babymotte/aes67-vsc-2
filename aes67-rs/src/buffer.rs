@@ -22,6 +22,7 @@ use crate::{
     receiver::{api::DataState, config::RxDescriptor},
     sender::config::TxDescriptor,
 };
+use futures_lite::future::block_on;
 use serde::{Deserialize, Serialize};
 use std::{
     fmt::Debug,
@@ -309,8 +310,6 @@ impl ReceiverBufferProducer {
     }
 }
 
-// TODO return proper errors
-
 impl ReceiverBufferConsumer {
     /// Write data from the shared buffer. Before reading, this function will block until the requested data is available.
     pub fn read<'a>(
@@ -344,13 +343,9 @@ impl ReceiverBufferConsumer {
                 );
                 let wait_start = Instant::now();
                 // TODO report underrun
-                futures::executor::block_on(async {
-                    while latest_received_frame < last_requested_frame {
-                        self.rx.changed().await?;
-                        latest_received_frame = *self.rx.borrow();
-                    }
-                    Ok::<(), watch::error::RecvError>(())
-                })?;
+                latest_received_frame =
+                    *block_on(self.rx.wait_for(|f| f >= &last_requested_frame))?;
+
                 let wait_end = Instant::now();
                 debug!(
                     "Waited for data for {} µs.",
