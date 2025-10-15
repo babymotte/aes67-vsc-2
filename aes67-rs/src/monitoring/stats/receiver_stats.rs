@@ -94,7 +94,7 @@ impl ReceiverStats {
                 .await;
             }
             RxStats::MalformedRtpPacket(e) => {
-                warn!("received malformed rtp packet: {e:?}");
+                warn!("{}: Received malformed rtp packet: {e:?}", self.id);
             }
             RxStats::TimeTravellingPacket {
                 sequence_number,
@@ -142,7 +142,8 @@ impl ReceiverStats {
         let diff_usec =
             (diff as f64 * MICROS_PER_SEC as f64 / desc.audio_format.sample_rate as f64) as u64;
         warn!(
-            "Packet {} was received {diff} frames / {diff_usec} µs before it was sent, sender and receiver clocks must be out of sync.",
+            "{}: Packet {} was received {diff} frames / {diff_usec} µs before it was sent, sender and receiver clocks must be out of sync.",
+            self.id,
             u16::from(sequence_number)
         );
         // TODO collect stats + publish
@@ -246,7 +247,8 @@ impl ReceiverStats {
         if !missed_timestamps.is_empty() {
             missed_timestamps.sort_by(|(ts_a, _), (ts_b, _)| ts_a.cmp(ts_b));
             warn!(
-                "Lost packets: {}",
+                "{}: Lost packets: {}",
+                self.id,
                 missed_timestamps
                     .iter()
                     .map(|(ts, seq)| format!("{{seq: {}, ts: {}}}", u16::from(*seq), ts))
@@ -273,7 +275,8 @@ impl ReceiverStats {
         let needs_update = if let Some(previous_offset) = self.timestamp_offset {
             if previous_offset != offset {
                 warn!(
-                    "RTP timestamp offset changed from {previous_offset} to {offset}, this may lead to audio interruptions"
+                    "{}: RTP timestamp offset changed from {previous_offset} to {offset}, this may lead to audio interruptions",
+                    self.id
                 );
                 true
             } else {
@@ -304,8 +307,8 @@ impl ReceiverStats {
             return;
         };
         warn!(
-            "Received packet from wrong sender: {} (expected {})",
-            ip, desc.origin_ip
+            "{}: Received packet from wrong sender: {} (expected {})",
+            self.id, ip, desc.origin_ip
         );
         // TODO collect stats + publish
     }
@@ -333,7 +336,8 @@ impl ReceiverStats {
 
         let delay_usec = desc.frames_to_duration(delay).as_micros();
         warn!(
-            "Late packet: {{seq: {}, ts: {}}} (received {} frames / {} µs after playout time)",
+            "{}: Late packet: {{seq: {}, ts: {}}} (received {} frames / {} µs after playout time)",
+            self.id,
             u16::from(seq),
             timestamp,
             delay,
