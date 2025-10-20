@@ -15,6 +15,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+use crate::app::{propagate_exit, spawn_child_app, wait_for_start};
 use crate::config::PtpMode;
 use crate::error::{SenderInternalError, SenderInternalResult};
 use crate::monitoring::{Monitoring, VscState, start_monitoring_service};
@@ -33,15 +34,12 @@ use crate::{
     },
     sender::api::SenderApi,
 };
-use std::{collections::HashMap, thread};
-use tokio::{
-    runtime,
-    sync::{mpsc, oneshot},
-};
+use std::collections::HashMap;
+use tokio::sync::{mpsc, oneshot};
+use tokio_graceful_shutdown::SubsystemHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
-type ResultReceiver<T, E> = oneshot::Receiver<Result<T, E>>;
 type ApiMessageSender = mpsc::Sender<VscApiMessage>;
 
 enum VscApiMessage {
@@ -74,32 +72,28 @@ impl VirtualSoundCardApi {
     }
 
     async fn try_new(name: String, shutdown_token: CancellationToken) -> VscInternalResult<Self> {
-        let (result_rx, api_tx) = VirtualSoundCardApi::create_vsc(name, shutdown_token)?;
-        result_rx.await??;
+        let api_tx = VirtualSoundCardApi::create_vsc(name, shutdown_token).await?;
         Ok(VirtualSoundCardApi { api_tx })
     }
 
-    fn create_vsc(
+    async fn create_vsc(
         name: String,
         shutdown_token: CancellationToken,
-    ) -> Result<(ResultReceiver<(), VscInternalError>, ApiMessageSender), VscInternalError> {
-        let (result_tx, result_rx) = oneshot::channel();
+    ) -> VscInternalResult<ApiMessageSender> {
+        let subsystem_name = format!("aes67-vsc-{name}");
         let (api_tx, api_rx) = mpsc::channel(1024);
-        thread::Builder::new()
-            .name(format!("aes67-vsc-{name}"))
-            .spawn(move || {
-                let vsc_future = VirtualSoundCard::new(name, api_rx, shutdown_token).run();
-                let runtime = match runtime::Builder::new_current_thread().enable_all().build() {
-                    Ok(it) => it,
-                    Err(e) => {
-                        result_tx.send(Err(VscInternalError::from(e))).ok();
-                        return;
-                    }
-                };
-                result_tx.send(Ok(())).ok();
-                runtime.block_on(vsc_future);
-            })?;
-        Ok((result_rx, api_tx))
+
+        let subsystem = |s: SubsystemHandle| async move {
+            VirtualSoundCard::new(name, api_rx, s.create_cancellation_token())?
+                .run()
+                .await;
+            Ok::<(), VscInternalError>(())
+        };
+
+        let mut app = spawn_child_app(subsystem_name.clone(), subsystem, shutdown_token.clone())?;
+        wait_for_start(subsystem_name, &mut app).await?;
+        propagate_exit(app, shutdown_token);
+        Ok(api_tx)
     }
 
     pub async fn create_sender(&self, config: SenderConfig) -> VscApiResult<(SenderApi, u32)> {
@@ -176,9 +170,9 @@ impl VirtualSoundCard {
         name: String,
         api_rx: mpsc::Receiver<VscApiMessage>,
         shutdown_token: CancellationToken,
-    ) -> Self {
-        let monitoring = start_monitoring_service(name.clone(), shutdown_token.clone());
-        VirtualSoundCard {
+    ) -> VscInternalResult<Self> {
+        let monitoring = start_monitoring_service(name.clone(), shutdown_token.clone())?;
+        Ok(VirtualSoundCard {
             name,
             api_rx,
             txs: HashMap::new(),
@@ -189,7 +183,7 @@ impl VirtualSoundCard {
             rx_counter: 0,
             monitoring,
             shutdown_token,
-        }
+        })
     }
 
     async fn run(mut self) {

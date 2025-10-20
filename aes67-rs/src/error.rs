@@ -19,7 +19,11 @@ use axum::{http::StatusCode, response::IntoResponse};
 use miette::Diagnostic;
 use opentelemetry_otlp::ExporterBuildError;
 use rtp_rs::{RtpPacketBuildError, RtpReaderError};
-use std::{fmt::Display, io, net::AddrParseError};
+use std::{
+    fmt::{Debug, Display},
+    io,
+    net::AddrParseError,
+};
 use thiserror::Error;
 use tokio::sync::{oneshot, watch};
 use tracing::error;
@@ -43,6 +47,13 @@ pub enum ErrorCode {
     JackError = 0x1E,
     Other = 0x1F,
 }
+
+#[derive(Error, Debug)]
+#[error("Error in child app {0}: {1}")]
+pub struct ChildAppError(pub String, pub String);
+
+pub type ChildAppResult<T> = Result<T, ChildAppError>;
+
 #[derive(Error, Debug, Diagnostic)]
 pub enum VscApiError {
     #[error("Internal error: {0}")]
@@ -81,6 +92,8 @@ pub enum VscInternalError {
     ChannelError(#[from] oneshot::error::RecvError),
     #[error("Telemetry error: {0}")]
     TelemetryError(#[from] TelemetryError),
+    #[error("Error in VSC child app: {0}")]
+    ChildAppError(#[from] ChildAppError),
 }
 
 #[derive(Error, Debug, Diagnostic)]
@@ -105,6 +118,8 @@ pub enum SenderInternalError {
     ProducerClosed,
     #[error("Shutdown triggered.")]
     ShutdownTriggered,
+    #[error("Error in sender: {0}")]
+    ChildAppError(#[from] ChildAppError),
 }
 
 #[derive(Error, Debug, Diagnostic)]
@@ -119,6 +134,8 @@ pub enum ReceiverInternalError {
     ChannelError(#[from] oneshot::error::RecvError),
     #[error("Watch error.")]
     WatchError(#[from] watch::error::RecvError),
+    #[error("Error in receiver: {0}")]
+    ChildAppError(#[from] ChildAppError),
 }
 
 #[derive(Error, Debug, Diagnostic)]
@@ -205,6 +222,8 @@ pub enum Aes67Vsc2Error {
     TelemetryError(#[from] Box<TelemetryError>),
     #[error("Worterbuch error: {0}")]
     WorterbuchError(#[from] Box<worterbuch_client::ConnectionError>),
+    #[error("Error in child app{0}: {1}")]
+    ChildAppError(String, Box<dyn std::error::Error + Send + Sync>),
 }
 
 pub type Aes67Vsc2Result<T> = Result<T, Aes67Vsc2Error>;

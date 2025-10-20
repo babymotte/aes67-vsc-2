@@ -20,28 +20,25 @@ mod observability;
 mod stats;
 
 use crate::{
+    app::{propagate_exit, spawn_child_app},
+    error::{ChildAppError, ChildAppResult},
     formats::{Frames, MilliSeconds},
     monitoring::{health::health, observability::observability, stats::stats},
     receiver::config::RxDescriptor,
     sender::config::TxDescriptor,
 };
 use rtp_rs::Seq;
-use std::{
-    io,
-    net::IpAddr,
-    thread,
-    time::{Duration, SystemTime},
-};
+use std::{net::IpAddr, time::SystemTime};
 use tokio::{
-    runtime, spawn,
+    spawn,
     sync::{
         broadcast,
         mpsc::{self, error::TrySendError},
     },
 };
-use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle, Toplevel};
+use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
 use tokio_util::sync::CancellationToken;
-use tracing::{info, warn};
+use tracing::warn;
 
 #[derive(Debug, Clone)]
 pub enum MonitoringEvent {
@@ -285,7 +282,10 @@ impl Monitoring {
     }
 }
 
-pub fn start_monitoring_service(root_id: String, shutdown_token: CancellationToken) -> Monitoring {
+pub fn start_monitoring_service(
+    root_id: String,
+    shutdown_token: CancellationToken,
+) -> ChildAppResult<Monitoring> {
     let (mon_tx, mon_rx) = mpsc::channel::<(MonitoringEvent, String)>(1024);
 
     let client_name = root_id.clone();
@@ -294,14 +294,9 @@ pub fn start_monitoring_service(root_id: String, shutdown_token: CancellationTok
 
     let (child, start) = parent.deferred_child(root_id);
 
-    let monitoring_thread = move || monitoring(client_name, mon_rx, start, shutdown_token);
+    monitoring(client_name, mon_rx, start, shutdown_token)?;
 
-    thread::Builder::new()
-        .name("monitoring".to_owned())
-        .spawn(monitoring_thread)
-        .expect("no dynmic input, cannot fail");
-
-    child
+    Ok(child)
 }
 
 fn monitoring(
@@ -309,38 +304,29 @@ fn monitoring(
     mon_rx: mpsc::Receiver<(MonitoringEvent, String)>,
     start: impl Future<Output = ()> + Send + 'static,
     shutdown_token: CancellationToken,
-) -> io::Result<()> {
+) -> ChildAppResult<()> {
+    let name = format!("{client_name}-monitoring");
+
     let (stats_tx, stats_rx) = mpsc::channel::<Report>(1024);
     let (observ_tx, observ_rx) = broadcast::channel::<Report>(1024);
 
     let stats = |s: SubsystemHandle| stats(s, mon_rx, stats_tx);
     let health = |s: SubsystemHandle| health(s, stats_rx, observ_tx);
     let observability = |s: SubsystemHandle| observability(s, client_name, observ_rx);
-    let monitoring = async {
+
+    let subsystem = |s: SubsystemHandle| async move {
         spawn(start);
-        if let Err(e) = Toplevel::new_with_shutdown_token(
-            |s| async move {
-                s.start(SubsystemBuilder::new("stats", stats));
-                s.start(SubsystemBuilder::new("health", health));
-                s.start(SubsystemBuilder::new("observability", observability));
-            },
-            shutdown_token,
-        )
-        .handle_shutdown_requests(Duration::from_secs(1))
-        .await
-        {
-            warn!("Monitoring subsystem failed to shut down: {e}");
-        }
+        s.start(SubsystemBuilder::new("stats", stats));
+        s.start(SubsystemBuilder::new("health", health));
+        s.start(SubsystemBuilder::new("observability", observability));
+        s.on_shutdown_requested().await;
+        Ok::<(), ChildAppError>(())
     };
 
-    info!("Monitoring subsystem started.");
-
-    runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?
-        .block_on(monitoring);
-
-    info!("Monitoring subsystem stopped.");
+    propagate_exit(
+        spawn_child_app(name, subsystem, shutdown_token.clone())?,
+        shutdown_token,
+    );
 
     Ok(())
 }

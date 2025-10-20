@@ -23,8 +23,9 @@ pub mod api;
 pub mod config;
 
 use crate::{
+    app::{spawn_child_app, wait_for_start},
     buffer::{ReceiverBufferProducer, receiver_buffer_channel},
-    error::{ReceiverInternalError, ReceiverInternalResult},
+    error::ReceiverInternalResult,
     monitoring::{Monitoring, ReceiverState, RxStats},
     receiver::{
         api::{ReceiverApi, ReceiverApiMessage},
@@ -35,15 +36,11 @@ use crate::{
     utils::U32_WRAP,
 };
 use rtp_rs::{RtpReader, Seq};
-use std::{net::SocketAddr, thread, time::Duration};
-use tokio::{
-    net::UdpSocket,
-    runtime, select,
-    sync::{mpsc, oneshot},
-};
-use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle, Toplevel};
+use std::net::SocketAddr;
+use tokio::{net::UdpSocket, select, sync::mpsc};
+use tokio_graceful_shutdown::SubsystemHandle;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{debug, info, instrument, warn};
 
 #[instrument(skip(clock, monitoring))]
 pub(crate) async fn start_receiver(
@@ -54,36 +51,33 @@ pub(crate) async fn start_receiver(
     shutdown_token: CancellationToken,
 ) -> ReceiverInternalResult<ReceiverApi> {
     let receiver_id = id.clone();
-    let (result_tx, result_rx) = oneshot::channel();
     let (api_tx, api_rx) = mpsc::channel(1024);
     let desc = RxDescriptor::try_from(&config)?;
     let (tx, rx) = receiver_buffer_channel(desc.clone(), monitoring.clone());
     let socket = create_rx_socket(&config.session, config.interface_ip)?;
-    thread::Builder::new().name(id.clone()).spawn(move || {
-        // set_realtime_priority();
 
-        let runtime = match runtime::Builder::new_current_thread().enable_all().build() {
-            Ok(it) => it,
-            Err(e) => {
-                result_tx.send(Err(ReceiverInternalError::from(e))).ok();
-                return;
-            }
-        };
-        let receiver_future = Receiver::start(
+    let subsystem_name = id.clone();
+    let subsystem = move |s: SubsystemHandle| async move {
+        Receiver {
             id,
+            subsys: s,
             desc,
             clock,
             api_rx,
+            last_sequence_number: None,
+            last_timestamp: None,
+            timestamp_offset: None,
             socket,
             monitoring,
             tx,
-            shutdown_token,
-        );
-        result_tx.send(Ok(())).ok();
-        runtime.block_on(receiver_future);
-    })?;
+        }
+        .run()
+        .await
+    };
 
-    result_rx.await??;
+    let mut app = spawn_child_app(subsystem_name.clone(), subsystem, shutdown_token)?;
+    wait_for_start(subsystem_name, &mut app).await?;
+
     info!("Receiver '{receiver_id}' started successfully.");
     Ok(ReceiverApi::new(api_tx, rx))
 }
@@ -103,52 +97,6 @@ struct Receiver {
 }
 
 impl Receiver {
-    async fn start(
-        id: String,
-        desc: RxDescriptor,
-        clock: Box<dyn MediaClock>,
-        api_rx: mpsc::Receiver<ReceiverApiMessage>,
-        socket: UdpSocket,
-        monitoring: Monitoring,
-        tx: ReceiverBufferProducer,
-        shutdown_token: CancellationToken,
-    ) {
-        let recv_id = id.clone();
-
-        // let desc_rx = desc.clone();
-        // let packet_buffer_len = desc.audio_format.samples_in_buffer(config.buffer_time());
-
-        let subsystem_name = id.clone();
-        let subsystem = move |s: SubsystemHandle| async move {
-            Receiver {
-                id,
-                subsys: s,
-                desc,
-                clock,
-                api_rx,
-                last_sequence_number: None,
-                last_timestamp: None,
-                timestamp_offset: None,
-                socket,
-                monitoring,
-                tx,
-            }
-            .run()
-            .await
-        };
-        if let Err(e) = Toplevel::new_with_shutdown_token(
-            |s| async move {
-                s.start(SubsystemBuilder::new(subsystem_name, subsystem));
-            },
-            shutdown_token,
-        )
-        .handle_shutdown_requests(Duration::from_secs(1))
-        .await
-        {
-            error!("Receiver '{recv_id}' subsystem failed to shut down: {e}");
-        }
-    }
-
     async fn run(mut self) -> ReceiverInternalResult<()> {
         let mut receive_buffer = [0; 65_535];
 
@@ -165,7 +113,10 @@ impl Receiver {
                     let time = self.clock.current_media_time()?;
                     self.rtp_data_received(&receive_buffer[..len], addr, time).await?;
                 },
-                _ = self.subsys.on_shutdown_requested() => break,
+                _ = self.subsys.on_shutdown_requested() => {
+                    info!("Shutdown of receiver '{}' requested.", self.id);
+                    break;
+                },
                 else => break,
             }
         }
