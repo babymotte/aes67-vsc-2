@@ -39,10 +39,7 @@ use std::{net::SocketAddr, thread, time::Duration};
 use tokio::{
     net::UdpSocket,
     runtime, select,
-    sync::{
-        mpsc,
-        oneshot::{self},
-    },
+    sync::{mpsc, oneshot},
 };
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle, Toplevel};
 use tokio_util::sync::CancellationToken;

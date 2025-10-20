@@ -33,8 +33,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 use tokio::{
-    runtime::{self},
-    spawn,
+    runtime, spawn,
     sync::{
         broadcast,
         mpsc::{self, error::TrySendError},

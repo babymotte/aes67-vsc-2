@@ -27,23 +27,12 @@ use aes67_rs::{
 };
 use miette::IntoDiagnostic;
 use std::time::Duration;
-use tokio::runtime;
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle, Toplevel};
 use tracing::{error, info};
 
-fn main() -> miette::Result<()> {
+#[tokio::main]
+async fn main() -> miette::Result<()> {
     let config = Config::load().into_diagnostic()?;
-
-    runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .into_diagnostic()?
-        .block_on(async_main(config))?;
-
-    Ok(())
-}
-
-async fn async_main(config: Config) -> miette::Result<()> {
     telemetry::init(&config).await.into_diagnostic()?;
 
     Toplevel::new(move |s| async move {
