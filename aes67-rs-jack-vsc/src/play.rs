@@ -7,6 +7,7 @@ use aes67_rs::{
     receiver::{api::ReceiverApi, config::RxDescriptor},
     time::{MILLIS_PER_SEC_F, MediaClock},
 };
+use futures_lite::future::block_on;
 use jack::{
     AudioOut, Client, ClientOptions, Control, Port, ProcessScope, contrib::ClosureProcessHandler,
 };
@@ -14,6 +15,7 @@ use miette::IntoDiagnostic;
 use std::time::Instant;
 use tokio::sync::mpsc;
 use tokio_graceful_shutdown::SubsystemHandle;
+use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
 struct State {
@@ -23,6 +25,7 @@ struct State {
     descriptor: RxDescriptor,
     muted: bool,
     monitoring: Monitoring,
+    shutdown_token: CancellationToken,
 }
 
 impl State {}
@@ -64,6 +67,7 @@ pub async fn start_playout(
         descriptor,
         muted: false,
         monitoring,
+        shutdown_token: subsys.create_cancellation_token(),
     };
     let process_handler =
         ClosureProcessHandler::with_state(process_handler_state, process, buffer_change);
@@ -107,7 +111,11 @@ fn process(state: &mut State, _: &Client, ps: &ProcessScope) -> Control {
 
     let pre_req = Instant::now();
 
-    match state.receiver.receive_blocking(buffers, ingress_time) {
+    match block_on(
+        state
+            .receiver
+            .receive(buffers, ingress_time, &state.shutdown_token),
+    ) {
         Ok(true) => {
             unmuted(state);
         }

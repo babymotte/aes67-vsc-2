@@ -37,7 +37,7 @@ impl SenderApi {
         Self { api_tx, tx }
     }
 
-    pub fn send_blocking(&mut self, channel_buffers: &[AudioBufferPointer], ingress_time: Frames) {
-        self.tx.write(channel_buffers, ingress_time);
+    pub async fn send(&mut self, channel_buffers: &[AudioBufferPointer], ingress_time: Frames) {
+        self.tx.write(channel_buffers, ingress_time).await;
     }
 }

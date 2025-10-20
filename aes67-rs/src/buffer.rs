@@ -22,14 +22,17 @@ use crate::{
     receiver::{api::DataState, config::RxDescriptor},
     sender::config::TxDescriptor,
 };
-use futures_lite::future::block_on;
 use serde::{Deserialize, Serialize};
 use std::{
     fmt::Debug,
     slice::{from_raw_parts, from_raw_parts_mut},
     time::{Duration, Instant},
 };
-use tokio::sync::{mpsc, watch};
+use tokio::{
+    select,
+    sync::{mpsc, watch},
+};
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, warn};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -311,11 +314,12 @@ impl ReceiverBufferProducer {
 }
 
 impl ReceiverBufferConsumer {
-    /// Write data from the shared buffer. Before reading, this function will block until the requested data is available.
-    pub fn read<'a>(
+    /// Read data from the shared buffer. Before reading, this function will block until the requested data is available.
+    pub async fn read<'a>(
         &mut self,
         buffers: impl Iterator<Item = Option<&'a mut [f32]>>,
         ingress_time: Frames,
+        cancellation_token: &CancellationToken,
     ) -> ReceiverInternalResult<bool> {
         let buf = self.buffer_pointer.buffer::<f32>();
 
@@ -342,9 +346,11 @@ impl ReceiverBufferConsumer {
                     .as_micros()
                 );
                 let wait_start = Instant::now();
-                // TODO report underrun
-                latest_received_frame =
-                    *block_on(self.rx.wait_for(|f| f >= &last_requested_frame))?;
+
+                select! {
+                    lrf = self.rx.wait_for(|f| f >= &last_requested_frame) => latest_received_frame = *lrf?,
+                    _ = cancellation_token.cancelled() => return Ok(false),
+                }
 
                 let wait_end = Instant::now();
                 debug!(
@@ -425,7 +431,7 @@ pub struct SenderBufferConsumer {
 // TODO return proper errors
 // TODO generalize start and end indices/packet time
 impl SenderBufferProducer {
-    pub fn write(&mut self, channel_buffers: &[AudioBufferPointer], ingress_time: Frames) {
+    pub async fn write(&mut self, channel_buffers: &[AudioBufferPointer], ingress_time: Frames) {
         let channels = self.descriptor.audio_format.frame_format.channels;
 
         debug_assert_eq!(
@@ -450,6 +456,8 @@ impl SenderBufferProducer {
         };
 
         let output_len = buffer_len * channels * target_bytes_per_sample;
+
+        // TODO acquire some kind of lock that prevents from writing to de-allocated memory
 
         unsafe {
             let audio_buffer = self.buffer_pointer.buffer_mut::<u8>();
@@ -478,14 +486,23 @@ impl SenderBufferProducer {
         }
 
         self.tx
-            .blocking_send((output_len, buffer_len as Frames, ingress_time))
+            .send((output_len, buffer_len as Frames, ingress_time))
+            .await
             .ok();
     }
 }
 
 impl SenderBufferConsumer {
-    pub async fn read(&mut self) -> SenderInternalResult<(usize, Frames, Frames)> {
-        let Some(data) = self.rx.recv().await else {
+    pub async fn read(
+        &mut self,
+        cancellation_token: &CancellationToken,
+    ) -> SenderInternalResult<(usize, Frames, Frames)> {
+        let received = select! {
+            it = self.rx.recv() => it,
+            _ = cancellation_token.cancelled() => return Err(SenderInternalError::ShutdownTriggered),
+        };
+
+        let Some(data) = received else {
             return Err(SenderInternalError::ProducerClosed);
         };
 

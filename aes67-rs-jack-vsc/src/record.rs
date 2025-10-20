@@ -7,6 +7,7 @@ use aes67_rs::{
     sender::{api::SenderApi, config::TxDescriptor},
     time::{MILLIS_PER_SEC_F, MediaClock},
 };
+use futures_lite::future::block_on;
 use jack::{
     AudioIn, Client, ClientOptions, Control, Port, ProcessScope, contrib::ClosureProcessHandler,
 };
@@ -123,9 +124,7 @@ fn process(state: &mut State, _: &Client, ps: &ProcessScope) -> Control {
 
     let pre_req = Instant::now();
 
-    state
-        .sender
-        .send_blocking(&state.channel_bufs, ingress_time);
+    block_on(state.sender.send(&state.channel_bufs, ingress_time));
 
     let post_req = Instant::now();
 

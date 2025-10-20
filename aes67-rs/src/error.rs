@@ -103,6 +103,8 @@ pub enum SenderInternalError {
     MaxMTUExceeded(usize),
     #[error("Producer closed.")]
     ProducerClosed,
+    #[error("Shutdown triggered.")]
+    ShutdownTriggered,
 }
 
 #[derive(Error, Debug, Diagnostic)]

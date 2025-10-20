@@ -145,12 +145,14 @@ impl Sender {
 
         self.report_sender_created().await;
 
+        let shutdown_token = self.subsys.create_cancellation_token();
+
         loop {
             select! {
                 Some(api_msg) = self.api_rx.recv() => {
                     self.handle_api_message(api_msg).await?;
                 },
-                Ok(recv) = self.rx.read() => self.send(recv.0, recv.1, recv.2).await?,
+                Ok(recv) = self.rx.read(&shutdown_token) => self.send(recv.0, recv.1, recv.2).await?,
                 _ = self.subsys.on_shutdown_requested() => break,
                 else => break,
             }
