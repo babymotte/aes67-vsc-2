@@ -25,6 +25,7 @@ use aes67_rs::{
     config::Config, receiver::config::RxDescriptor, sender::config::TxDescriptor, telemetry,
     time::get_clock, vsc::VirtualSoundCardApi,
 };
+use aes67_rs_ui::Aes67VscUi;
 use miette::IntoDiagnostic;
 use std::time::Duration;
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle, Toplevel};
@@ -55,6 +56,8 @@ async fn run(subsys: SubsystemHandle, config: Config) -> miette::Result<()> {
         "Starting {} instance '{}' …",
         config.app.name, config.app.instance.name
     );
+
+    Aes67VscUi::new(config.clone(), subsys.create_cancellation_token()).await?;
 
     let vsc = VirtualSoundCardApi::new(id, subsys.create_cancellation_token())
         .await

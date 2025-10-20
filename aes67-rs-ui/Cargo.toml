@@ -5,6 +5,10 @@ edition = "2024"
 
 [dependencies]
 aes67-rs = { path = "../aes67-rs" }
+axum = { version = "0.8.6", features = ["http2"] }
+miette = "7.6.0"
 tokio = "1.47.1"
 tokio-graceful-shutdown = { version = "0.18.0", features = ["tracing"] }
 tokio-util = "0.7.16"
+tower-http = { version = "0.6.6", features = ["fs", "trace"] }
+tracing = "0.1.41"

@@ -38,9 +38,7 @@ use tokio::{
 };
 use tokio_graceful_shutdown::SubsystemHandle;
 use tracing::{info, instrument, warn};
-use worterbuch_client::{KeyValuePair, Worterbuch, topic};
-
-const ROOT_KEY: &str = "aes67-vsc";
+use worterbuch_client::{Worterbuch, topic};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -158,16 +156,8 @@ impl ObservabilityActor {
             disco.send(()).await.ok();
         });
 
-        wb.set_client_name(topic!(ROOT_KEY, client_name)).await.ok();
-        wb.set_grave_goods(&[&topic!(ROOT_KEY, client_name, "#")])
-            .await
-            .ok();
-        wb.set_last_will(&[KeyValuePair::of(
-            topic!(ROOT_KEY, client_name, "running"),
-            false,
-        )])
-        .await
-        .ok();
+        wb.set_client_name(topic!(client_name)).await.ok();
+        wb.set_grave_goods(&[&topic!(client_name, "#")]).await.ok();
 
         self.wb = Some(wb);
         self.re_publish().await;
@@ -426,7 +416,7 @@ impl ObservabilityActor {
 
     async fn publish_vsc(&self) {
         if let Some(wb) = &self.wb {
-            wb.set_async(topic!(ROOT_KEY, self.client_name, "running"), true)
+            wb.set_async(topic!(self.client_name, "running"), true)
                 .await
                 .ok();
         };
@@ -434,37 +424,37 @@ impl ObservabilityActor {
 
     async fn publish_sender(&self, name: &str, data: SenderData) {
         if let Some(wb) = &self.wb {
-            publish_individual(wb, topic!(ROOT_KEY, name), data).await;
+            publish_individual(wb, topic!(name), data).await;
         };
     }
 
     async fn unpublish_sender(&mut self, name: &str) {
         if let Some(wb) = &self.wb {
-            wb.delete_async(topic!(ROOT_KEY, name)).await.ok();
+            wb.delete_async(topic!(name)).await.ok();
         };
     }
 
     async fn publish_receiver(&self, name: &str, data: ReceiverData) {
         if let Some(wb) = &self.wb {
-            publish_individual(wb, topic!(ROOT_KEY, name), data).await;
+            publish_individual(wb, topic!(name), data).await;
         };
     }
 
     async fn publish_receiver_config(&self, name: &str, config: RxDescriptor) {
         if let Some(wb) = &self.wb {
-            publish_individual(wb, topic!(ROOT_KEY, name, "config"), config).await;
+            publish_individual(wb, topic!(name, "config"), config).await;
         };
     }
 
     async fn publish_receiver_stats(&self, name: &str, stats: ReceiverStats) {
         if let Some(wb) = &self.wb {
-            publish_individual(wb, topic!(ROOT_KEY, name, "stats"), stats).await;
+            publish_individual(wb, topic!(name, "stats"), stats).await;
         };
     }
 
     async fn unpublish_receiver(&self, name: &str) {
         if let Some(wb) = &self.wb {
-            wb.delete_async(topic!(ROOT_KEY, name)).await.ok();
+            wb.delete_async(topic!(name)).await.ok();
         };
     }
 }

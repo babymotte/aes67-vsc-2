@@ -1,21 +1,24 @@
 #root {
-  max-width: 1280px;
+  /* max-width: 1280px; */
   margin: 0 auto;
   padding: 2rem;
   text-align: center;
+  width: 100%;
+  color: #aaa;
 }
 
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: filter 300ms;
+.header {
+  width: 100%;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  justify-content: space-between;
+  align-items: center;
+  justify-content: start;
 }
-.logo:hover {
-  filter: drop-shadow(0 0 2em #646cffaa);
-}
-.logo.solid:hover {
-  filter: drop-shadow(0 0 2em #61dafbaa);
+
+.spacer {
+  flex-grow: 1;
 }
 
 .card {
@@ -33,7 +36,6 @@
   transition: color 0.3s;
   transition-delay: 0.1s;
   transition-timing-function: ease-in;
-  color: #aaa;
 }
 
 ul.main-menu {

@@ -30,7 +30,6 @@ pub mod telemetry;
 pub mod time;
 pub mod utils;
 pub mod vsc;
-pub mod worterbuch;
 
 #[cfg(feature = "c")]
 pub mod c;

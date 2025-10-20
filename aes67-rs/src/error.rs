@@ -174,6 +174,8 @@ pub enum ConfigError {
     MissingReceiverConfig,
     #[error("Clock error: {0}")]
     ClockError(#[from] ClockError),
+    #[error("Backend not configured correctly: {0}")]
+    BackendMisconfigured(String),
 }
 
 #[derive(Error, Debug, Diagnostic)]
@@ -226,6 +228,12 @@ pub enum Aes67Vsc2Error {
     ChildAppError(String, Box<dyn std::error::Error + Send + Sync>),
 }
 
+#[derive(Error, Debug, Diagnostic)]
+pub enum WebUIError {
+    #[error("I/O error: {0}")]
+    IoError(#[from] io::Error),
+}
+
 pub type Aes67Vsc2Result<T> = Result<T, Aes67Vsc2Error>;
 pub type VscApiResult<T> = Result<T, VscApiError>;
 pub type SenderApiResult<T> = Result<T, SenderApiError>;
@@ -238,6 +246,7 @@ pub type AlsaResult<T> = Result<T, AlsaError>;
 pub type TelemetryResult<T> = Result<T, TelemetryError>;
 pub type ConfigResult<T> = Result<T, ConfigError>;
 pub type ClockResult<T> = Result<T, ClockError>;
+pub type WebUIResult<T> = Result<T, WebUIError>;
 
 pub trait ToBoxed {
     fn boxed(self) -> Box<Self>;
