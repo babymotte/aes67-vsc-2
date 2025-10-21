@@ -70,6 +70,7 @@ struct ReceiverStats {
 struct SenderData {
     config: TxDescriptor,
     stats: SenderStats,
+    label: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -77,6 +78,7 @@ struct SenderData {
 struct ReceiverData {
     config: RxDescriptor,
     stats: ReceiverStats,
+    label: String,
 }
 
 pub async fn observability(
@@ -167,11 +169,11 @@ impl ObservabilityActor {
         if self.running {
             self.publish_vsc().await;
         }
-        for (name, data) in &self.senders {
-            self.publish_sender(name, data.clone()).await;
+        for (qualified_id, data) in &self.senders {
+            self.publish_sender(qualified_id, data.clone()).await;
         }
-        for (name, data) in &self.receivers {
-            self.publish_receiver(name, data.clone()).await;
+        for (qualified_id, data) in &self.receivers {
+            self.publish_receiver(qualified_id, data.clone()).await;
         }
     }
 
@@ -199,19 +201,25 @@ impl ObservabilityActor {
 
     async fn process_sender_event(&mut self, e: SenderState) {
         match e {
-            SenderState::SenderCreated { name, descriptor } => {
-                self.sender_created(name, descriptor).await
-            }
-            SenderState::SenderDestroyed { name } => self.sender_destroyed(name).await,
+            SenderState::Created {
+                id,
+                descriptor,
+                label,
+            } => self.sender_created(id, label, descriptor).await,
+            SenderState::Renamed { id, label } => self.sender_renamed(id, label).await,
+            SenderState::Destroyed { id } => self.sender_destroyed(id).await,
         }
     }
 
     async fn process_receiver_event(&mut self, e: ReceiverState) {
         match e {
-            ReceiverState::ReceiverCreated { name, descriptor } => {
-                self.receiver_created(name, descriptor).await
-            }
-            ReceiverState::ReceiverDestroyed { name } => self.receiver_destroyed(name).await,
+            ReceiverState::Created {
+                id: name,
+                descriptor,
+                label,
+            } => self.receiver_created(name, label, descriptor).await,
+            ReceiverState::Renamed { id, label } => self.receiver_renamed(id, label).await,
+            ReceiverState::Destroyed { id: name } => self.receiver_destroyed(name).await,
         }
     }
 
@@ -237,13 +245,22 @@ impl ObservabilityActor {
         self.publish_vsc().await;
     }
 
-    async fn sender_created(&mut self, name: String, descriptor: TxDescriptor) {
+    async fn sender_created(&mut self, name: String, label: String, descriptor: TxDescriptor) {
         let data = SenderData {
             config: descriptor.clone(),
             stats: SenderStats::default(),
+            label,
         };
         self.senders.insert(name.clone(), data.clone());
         self.publish_sender(&name, data).await;
+    }
+
+    async fn sender_renamed(&mut self, qualified_id: String, label: String) {
+        let Some(data) = self.senders.get_mut(&qualified_id) else {
+            return;
+        };
+        data.label = label.clone();
+        self.publish_sender_label(&qualified_id, label).await;
     }
 
     async fn sender_destroyed(&mut self, name: String) {
@@ -251,18 +268,32 @@ impl ObservabilityActor {
         self.unpublish_sender(&name).await;
     }
 
-    async fn receiver_created(&mut self, name: String, descriptor: RxDescriptor) {
+    async fn receiver_created(
+        &mut self,
+        qualified_id: String,
+        label: String,
+        descriptor: RxDescriptor,
+    ) {
         let data = ReceiverData {
             config: descriptor.clone(),
             stats: ReceiverStats::default(),
+            label,
         };
-        self.receivers.insert(name.clone(), data.clone());
-        self.publish_receiver_config(&name, data.config).await;
+        self.receivers.insert(qualified_id.clone(), data.clone());
+        self.publish_receiver(&qualified_id, data).await;
     }
 
-    async fn receiver_destroyed(&mut self, name: String) {
-        self.receivers.remove(&name);
-        self.unpublish_receiver(&name).await;
+    async fn receiver_renamed(&mut self, qualified_id: String, label: String) {
+        let Some(data) = self.receivers.get_mut(&qualified_id) else {
+            return;
+        };
+        data.label = label.clone();
+        self.publish_receiver_label(&qualified_id, label).await;
+    }
+
+    async fn receiver_destroyed(&mut self, qualified_id: String) {
+        self.receivers.remove(&qualified_id);
+        self.unpublish_receiver(&qualified_id).await;
     }
 
     async fn process_vsc_stats_report(&mut self, report: VscStatsReport) {
@@ -320,52 +351,52 @@ impl ObservabilityActor {
         }
     }
 
-    async fn receiver_clock_offset_changed(&mut self, name: String, offset: u64) {
-        let Some(receiver) = self.receivers.get_mut(&name) else {
+    async fn receiver_clock_offset_changed(&mut self, qualified_id: String, offset: u64) {
+        let Some(receiver) = self.receivers.get_mut(&qualified_id) else {
             return;
         };
         receiver.stats.clock_offset = offset;
         let stats = receiver.stats.clone();
-        self.publish_receiver_stats(&name, stats).await;
+        self.publish_receiver_stats(&qualified_id, stats).await;
     }
 
     async fn receiver_network_delay_changed(
         &mut self,
-        name: String,
+        qualified_id: String,
         delay_frames: i64,
         delay_millis: f32,
     ) {
-        let Some(receiver) = self.receivers.get_mut(&name) else {
+        let Some(receiver) = self.receivers.get_mut(&qualified_id) else {
             return;
         };
         receiver.stats.network_delay_frames = delay_frames;
         receiver.stats.network_delay_millis = delay_millis;
         let stats = receiver.stats.clone();
-        self.publish_receiver_stats(&name, stats).await;
+        self.publish_receiver_stats(&qualified_id, stats).await;
     }
 
     async fn receiver_measured_link_offset_changed(
         &mut self,
-        name: String,
+        qualified_id: String,
         link_offset_frames: Frames,
         link_offset_ms: MilliSeconds,
     ) {
-        let Some(receiver) = self.receivers.get_mut(&name) else {
+        let Some(receiver) = self.receivers.get_mut(&qualified_id) else {
             return;
         };
         receiver.stats.measured_link_offset_frames = link_offset_frames;
         receiver.stats.measured_link_offset_millis = link_offset_ms;
         let stats = receiver.stats.clone();
-        self.publish_receiver_stats(&name, stats).await;
+        self.publish_receiver_stats(&qualified_id, stats).await;
     }
 
     async fn receiver_lost_packets_changed(
         &mut self,
-        name: String,
+        qualified_id: String,
         lost_packets: usize,
         timestamp: SystemTime,
     ) {
-        let Some(receiver) = self.receivers.get_mut(&name) else {
+        let Some(receiver) = self.receivers.get_mut(&qualified_id) else {
             return;
         };
         receiver.stats.lost_packets = LostPackets {
@@ -373,16 +404,16 @@ impl ObservabilityActor {
             last: Some(timestamp),
         };
         let stats = receiver.stats.clone();
-        self.publish_receiver_stats(&name, stats).await;
+        self.publish_receiver_stats(&qualified_id, stats).await;
     }
 
     async fn receiver_late_packets_changed(
         &mut self,
-        name: String,
+        qualified_id: String,
         late_packets: usize,
         timestamp: SystemTime,
     ) {
-        let Some(receiver) = self.receivers.get_mut(&name) else {
+        let Some(receiver) = self.receivers.get_mut(&qualified_id) else {
             return;
         };
         receiver.stats.late_packets = LostPackets {
@@ -390,16 +421,16 @@ impl ObservabilityActor {
             last: Some(timestamp),
         };
         let stats = receiver.stats.clone();
-        self.publish_receiver_stats(&name, stats).await;
+        self.publish_receiver_stats(&qualified_id, stats).await;
     }
 
-    async fn receiver_muted_changed(&mut self, name: String, muted: bool) {
-        let Some(receiver) = self.receivers.get_mut(&name) else {
+    async fn receiver_muted_changed(&mut self, qualified_id: String, muted: bool) {
+        let Some(receiver) = self.receivers.get_mut(&qualified_id) else {
             return;
         };
         receiver.stats.muted = muted;
         let stats = receiver.stats.clone();
-        self.publish_receiver_stats(&name, stats).await;
+        self.publish_receiver_stats(&qualified_id, stats).await;
     }
 
     async fn process_vsc_health_report(&mut self, report: VscHealthReport) {
@@ -422,39 +453,63 @@ impl ObservabilityActor {
         };
     }
 
-    async fn publish_sender(&self, name: &str, data: SenderData) {
+    async fn publish_sender(&self, qualified_id: &str, data: SenderData) {
         if let Some(wb) = &self.wb {
-            publish_individual(wb, topic!(name), data).await;
+            publish_individual(wb, topic!(qualified_id), data).await;
         };
     }
 
-    async fn unpublish_sender(&mut self, name: &str) {
+    async fn publish_sender_config(&self, qualified_id: &str, config: TxDescriptor) {
         if let Some(wb) = &self.wb {
-            wb.delete_async(topic!(name)).await.ok();
+            publish_individual(wb, topic!(qualified_id, "config"), config).await;
         };
     }
 
-    async fn publish_receiver(&self, name: &str, data: ReceiverData) {
+    async fn publish_sender_stats(&self, qualified_id: &str, stats: SenderStats) {
         if let Some(wb) = &self.wb {
-            publish_individual(wb, topic!(name), data).await;
+            publish_individual(wb, topic!(qualified_id, "stats"), stats).await;
         };
     }
 
-    async fn publish_receiver_config(&self, name: &str, config: RxDescriptor) {
+    async fn publish_sender_label(&self, qualified_id: &str, label: String) {
         if let Some(wb) = &self.wb {
-            publish_individual(wb, topic!(name, "config"), config).await;
+            publish_individual(wb, topic!(qualified_id, "label"), label).await;
         };
     }
 
-    async fn publish_receiver_stats(&self, name: &str, stats: ReceiverStats) {
+    async fn unpublish_sender(&mut self, qualified_id: &str) {
         if let Some(wb) = &self.wb {
-            publish_individual(wb, topic!(name, "stats"), stats).await;
+            wb.delete_async(topic!(qualified_id)).await.ok();
         };
     }
 
-    async fn unpublish_receiver(&self, name: &str) {
+    async fn publish_receiver(&self, qualified_id: &str, data: ReceiverData) {
         if let Some(wb) = &self.wb {
-            wb.delete_async(topic!(name)).await.ok();
+            publish_individual(wb, topic!(qualified_id), data).await;
+        };
+    }
+
+    async fn publish_receiver_config(&self, qualified_id: &str, config: RxDescriptor) {
+        if let Some(wb) = &self.wb {
+            publish_individual(wb, topic!(qualified_id, "config"), config).await;
+        };
+    }
+
+    async fn publish_receiver_stats(&self, qualified_id: &str, stats: ReceiverStats) {
+        if let Some(wb) = &self.wb {
+            publish_individual(wb, topic!(qualified_id, "stats"), stats).await;
+        };
+    }
+
+    async fn publish_receiver_label(&self, qualified_id: &str, label: String) {
+        if let Some(wb) = &self.wb {
+            publish_individual(wb, topic!(qualified_id, "label"), label).await;
+        };
+    }
+
+    async fn unpublish_receiver(&self, qualified_id: &str) {
+        if let Some(wb) = &self.wb {
+            wb.delete_async(topic!(qualified_id)).await.ok();
         };
     }
 }

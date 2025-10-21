@@ -157,8 +157,8 @@ struct VirtualSoundCard {
     api_rx: mpsc::Receiver<VscApiMessage>,
     txs: HashMap<u32, SenderApi>,
     rxs: HashMap<u32, ReceiverApi>,
-    tx_names: HashMap<u32, String>,
-    rx_names: HashMap<u32, String>,
+    // tx_names: HashMap<u32, String>,
+    // rx_names: HashMap<u32, String>,
     tx_counter: u32,
     rx_counter: u32,
     monitoring: Monitoring,
@@ -177,8 +177,8 @@ impl VirtualSoundCard {
             api_rx,
             txs: HashMap::new(),
             rxs: HashMap::new(),
-            tx_names: HashMap::new(),
-            rx_names: HashMap::new(),
+            // tx_names: HashMap::new(),
+            // rx_names: HashMap::new(),
             tx_counter: 0,
             rx_counter: 0,
             monitoring,
@@ -218,26 +218,27 @@ impl VirtualSoundCard {
 
     async fn create_sender(
         &mut self,
-        name: String,
+        label: String,
         config: SenderConfig,
     ) -> SenderInternalResult<(SenderApi, u32)> {
         self.tx_counter += 1;
         let id = self.tx_counter;
-        let display_name = format!("{}/tx/{}", self.name, name);
-        info!("Creating sender '{display_name}' …");
+        let qualified_id = format!("{}/tx/{}", self.name, id);
+        info!("Creating sender '{label}' ({qualified_id}) …");
 
         let sender_api = start_sender(
-            display_name.clone(),
+            qualified_id.clone(),
+            label,
             config,
-            self.monitoring.child(display_name.clone()),
+            self.monitoring.child(qualified_id.clone()),
             self.shutdown_token.clone(),
         )
         .await?;
 
-        self.tx_names.insert(id, name.clone());
+        // self.tx_names.insert(id, name.clone());
         self.txs.insert(id, sender_api.clone());
 
-        info!("Sender '{display_name}' successfully created.");
+        info!("Sender {qualified_id} successfully created.");
         Ok((sender_api, id))
     }
 
@@ -251,20 +252,21 @@ impl VirtualSoundCard {
 
     async fn create_receiver(
         &mut self,
-        name: String,
+        label: String,
         config: ReceiverConfig,
         ptp_mode: Option<PtpMode>,
     ) -> ReceiverInternalResult<(ReceiverApi, Monitoring, u32)> {
         self.rx_counter += 1;
-        let id = self.rx_counter;
-        let display_name = format!("{}/rx/{}", self.name, name);
-        info!("Creating receiver '{display_name}' …");
+        let id: u32 = self.rx_counter;
+        let qulified_id = format!("{}/rx/{}", self.name, id);
+        info!("Creating receiver '{label}' ({qulified_id}) …");
 
         let desc = RxDescriptor::try_from(&config)?;
         let clock = get_clock(ptp_mode, desc.audio_format)?;
-        let monitoring = self.monitoring.child(display_name.clone());
+        let monitoring = self.monitoring.child(qulified_id.clone());
         let receiver_api = start_receiver(
-            display_name.clone(),
+            qulified_id.clone(),
+            label,
             config,
             clock,
             monitoring.clone(),
@@ -272,10 +274,10 @@ impl VirtualSoundCard {
         )
         .await?;
 
-        self.rx_names.insert(id, name.clone());
+        // self.rx_names.insert(id, name.clone());
         self.rxs.insert(id, receiver_api.clone());
 
-        info!("Receiver '{display_name}' successfully created.");
+        info!("Receiver {qulified_id} successfully created.");
         Ok((receiver_api, monitoring, id))
     }
 

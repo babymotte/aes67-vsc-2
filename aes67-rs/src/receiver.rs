@@ -45,6 +45,7 @@ use tracing::{debug, info, instrument, warn};
 #[instrument(skip(clock, monitoring))]
 pub(crate) async fn start_receiver(
     id: String,
+    label: String,
     config: ReceiverConfig,
     clock: Box<dyn MediaClock>,
     monitoring: Monitoring,
@@ -60,6 +61,7 @@ pub(crate) async fn start_receiver(
     let subsystem = move |s: SubsystemHandle| async move {
         Receiver {
             id,
+            label,
             subsys: s,
             desc,
             clock,
@@ -84,6 +86,7 @@ pub(crate) async fn start_receiver(
 
 struct Receiver {
     id: String,
+    label: String,
     subsys: SubsystemHandle,
     desc: RxDescriptor,
     clock: Box<dyn MediaClock>,
@@ -270,8 +273,9 @@ mod monitoring {
     impl Receiver {
         pub(crate) async fn report_receiver_created(&mut self) {
             self.monitoring
-                .receiver_state(ReceiverState::ReceiverCreated {
-                    name: self.id.clone(),
+                .receiver_state(ReceiverState::Created {
+                    id: self.id.clone(),
+                    label: self.label.clone(),
                     descriptor: self.desc.clone(),
                 })
                 .await;
@@ -346,8 +350,8 @@ mod monitoring {
 
         pub(crate) async fn report_receiver_destroyed(&mut self) {
             self.monitoring
-                .receiver_state(ReceiverState::ReceiverDestroyed {
-                    name: self.id.clone(),
+                .receiver_state(ReceiverState::Destroyed {
+                    id: self.id.clone(),
                 })
                 .await;
         }

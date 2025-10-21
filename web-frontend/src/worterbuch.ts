@@ -3,6 +3,7 @@ import { createEffect, createSignal, onCleanup } from "solid-js";
 import {
   connect,
   type LsCallback,
+  type PStateCallback,
   type StateCallback,
   type TransactionID,
   type Value,
@@ -46,6 +47,43 @@ export function subscribe<T extends Value>(key: string, cb: StateCallback<T>) {
     const wb = wbClient();
     if (wb) {
       setTid(wb.subscribe(key, cb));
+    }
+  });
+  onCleanup(() => {
+    const wb = wbClient();
+    const id = tid();
+    if (wb && id) {
+      wb.unsubscribe(id);
+    }
+  });
+}
+
+export function pSubscribe<T extends Value>(
+  pattern: string,
+  cb: (aggregated: Map<string, T>) => void
+) {
+  const [tid, setTid] = createSignal<TransactionID | null>(null);
+  const [aggregated, setAggregated] = createSignal<Map<string, T>>(new Map());
+  createEffect(() => {
+    const wb = wbClient();
+    if (wb) {
+      setTid(
+        wb.pSubscribe(pattern, (state) => {
+          const newAgg = new Map(aggregated());
+          if (state.keyValuePairs) {
+            for (const kvp of state.keyValuePairs) {
+              newAgg.set(kvp.key, kvp.value as T);
+            }
+          }
+          if (state.deleted) {
+            for (const kvp of state.deleted) {
+              newAgg.delete(kvp.key);
+            }
+          }
+          setAggregated(newAgg);
+          cb(newAgg);
+        })
+      );
     }
   });
   onCleanup(() => {

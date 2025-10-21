@@ -7,32 +7,33 @@ import {
   Switch,
   useTransition,
 } from "solid-js";
-import { subscribeLs } from "../worterbuch";
+import { pSubscribe } from "../worterbuch";
 import { selectedVsc, appName } from "../vscState";
+import { sortTransceivers, transceiverID } from "../utils";
 
 export default function Senders() {
   const [tab, setTab] = createSignal(0);
   const [pending, start] = useTransition();
-  const [senders, setSenders] = createSignal<string[]>([]);
+  const [senders, setSenders] = createSignal<Map<string, string>>(new Map());
   const updateTab = (index: number) => () => start(() => setTab(index));
 
   createEffect(() => {
     const an = appName();
     const sv = selectedVsc();
-    subscribeLs(`${an}/${sv}/tx`, setSenders);
+    pSubscribe(`${an}/${sv}/tx/?/label`, setSenders);
   });
 
   return (
     <div class="tab-content">
       <div class="sub-menu">
         <ul>
-          <For each={senders().sort()}>
+          <For each={sortTransceivers(Array.from(senders().entries()))}>
             {(sender, index) => (
               <li
                 classList={{ selected: tab() === index() }}
                 onClick={updateTab(index())}
               >
-                {sender}
+                {transceiverID(sender[0])} - {sender[1]}
               </li>
             )}
           </For>
@@ -41,10 +42,10 @@ export default function Senders() {
       <div class="main-view" classList={{ pending: pending() }}>
         <Suspense fallback={<div class="loader">Loading...</div>}>
           <Switch>
-            <For each={senders().sort()}>
+            <For each={sortTransceivers(Array.from(senders().entries()))}>
               {(sender, index) => (
                 <Match when={tab() === index()}>
-                  <h3>{sender}</h3>
+                  <h3>{sender[1]}</h3>
                 </Match>
               )}
             </For>

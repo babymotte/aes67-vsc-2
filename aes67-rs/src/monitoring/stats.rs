@@ -114,7 +114,7 @@ impl StatsActor {
     fn rx_stats(&mut self, src: String) -> &mut ReceiverStats {
         match self.receivers.entry(src.clone()) {
             Entry::Occupied(e) => e.into_mut(),
-            Entry::Vacant(e) => e.insert(ReceiverStats::new(src, self.tx.clone())),
+            Entry::Vacant(e) => e.insert(ReceiverStats::new(src, None, self.tx.clone())),
         }
     }
 
@@ -135,13 +135,18 @@ impl StatsActor {
 
     async fn process_receiver_state(&mut self, s: &ReceiverState) {
         match s {
-            ReceiverState::ReceiverCreated { name, descriptor } => {
-                self.rx_stats(name.to_owned())
+            ReceiverState::Created {
+                id,
+                descriptor,
+                label: _,
+            } => {
+                self.rx_stats(id.to_owned())
                     .process(RxStats::Started(descriptor.to_owned()))
-                    .await
+                    .await;
             }
-            ReceiverState::ReceiverDestroyed { name } => {
-                warn!("receiver destroyed: {name}");
+            ReceiverState::Renamed { id: _, label: _ } => (),
+            ReceiverState::Destroyed { id } => {
+                warn!("receiver destroyed: {id}");
                 // TODO
             }
         }

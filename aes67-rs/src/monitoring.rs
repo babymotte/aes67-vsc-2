@@ -67,23 +67,33 @@ pub enum VscState {
 
 #[derive(Debug, Clone)]
 pub enum SenderState {
-    SenderCreated {
-        name: String,
+    Created {
+        id: String,
         descriptor: TxDescriptor,
+        label: String,
     },
-    SenderDestroyed {
-        name: String,
+    Renamed {
+        id: String,
+        label: String,
+    },
+    Destroyed {
+        id: String,
     },
 }
 
 #[derive(Debug, Clone)]
 pub enum ReceiverState {
-    ReceiverCreated {
-        name: String,
+    Created {
+        id: String,
         descriptor: RxDescriptor,
+        label: String,
     },
-    ReceiverDestroyed {
-        name: String,
+    Renamed {
+        id: String,
+        label: String,
+    },
+    Destroyed {
+        id: String,
     },
 }
 

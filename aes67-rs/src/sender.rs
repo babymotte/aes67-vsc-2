@@ -41,6 +41,7 @@ use tracing::{info, instrument};
 #[instrument(skip(monitoring))]
 pub(crate) async fn start_sender(
     id: String,
+    label: String,
     config: SenderConfig,
     monitoring: Monitoring,
     shutdown_token: CancellationToken,
@@ -55,6 +56,7 @@ pub(crate) async fn start_sender(
     let subsystem = move |s: SubsystemHandle| async move {
         Sender {
             id,
+            label,
             subsys: s,
             desc,
             api_rx,
@@ -79,6 +81,7 @@ pub(crate) async fn start_sender(
 
 struct Sender {
     id: String,
+    label: String,
     subsys: SubsystemHandle,
     desc: TxDescriptor,
     api_rx: mpsc::Receiver<SenderApiMessage>,
@@ -173,8 +176,9 @@ mod monitoring {
     impl Sender {
         pub(crate) async fn report_sender_created(&self) {
             self.monitoring
-                .sender_state(SenderState::SenderCreated {
-                    name: self.id.clone(),
+                .sender_state(SenderState::Created {
+                    id: self.id.clone(),
+                    label: self.label.clone(),
                     descriptor: self.desc.clone(),
                 })
                 .await;
@@ -192,8 +196,8 @@ mod monitoring {
 
         pub(crate) async fn report_sender_destroyed(&self) {
             self.monitoring
-                .sender_state(SenderState::SenderDestroyed {
-                    name: self.id.clone(),
+                .sender_state(SenderState::Destroyed {
+                    id: self.id.clone(),
                 })
                 .await;
         }

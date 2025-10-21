@@ -41,7 +41,7 @@ pub struct ReceiverStats {
 }
 
 impl ReceiverStats {
-    pub fn new(id: String, tx: mpsc::Sender<Report>) -> Self {
+    pub fn new(id: String, label: Option<String>, tx: mpsc::Sender<Report>) -> Self {
         Self {
             id,
             tx,
