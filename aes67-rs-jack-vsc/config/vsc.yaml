@@ -10,16 +10,16 @@ ptp: !phc
 ptpMode:
 receivers:
   # XCEL
-  - session: http://worterbuch.local/api/v1/get/discovery/sap/192.168.178.97/12235?raw
+  - session: http://worterbuch.local/api/v1/get/discovery/sap/192.168.178.114/10657?raw
     linkOffset: 4.0
     interfaceIp: 192.168.178.39
     # interfaceIp: 192.168.178.36
     # interfaceIp: 172.50.0.177
-  # - session: http://worterbuch.local/api/v1/get/discovery/sap/192.168.178.114/1723?raw
+  # - session: http://worterbuch.local/api/v1/get/discovery/sap/192.168.178.114/10657?raw
   #   linkOffset: 4.0
-  #   # interfaceIp: 192.168.178.39
-  #   interfaceIp: 192.168.178.36
-  #   # interfaceIp: 172.50.0.177
+  #   interfaceIp: 192.168.178.39
+  # interfaceIp: 192.168.178.36
+  # interfaceIp: 172.50.0.177
   # - session: http://worterbuch.local/api/v1/get/discovery/sap/192.168.178.114/31988?raw
   #   linkOffset: 4.0
   #   # interfaceIp: 192.168.178.39
@@ -30,51 +30,51 @@ receivers:
   #   # interfaceIp: 192.168.178.39
   #   interfaceIp: 192.168.178.36
   #   # interfaceIp: 172.50.0.177
-  # # NUC
-  # - session: http://worterbuch.local/api/v1/get/discovery/sap/192.168.178.190/44633?raw
-  #   linkOffset: 4.0
-  #   # interfaceIp: 192.168.178.39
-  #   interfaceIp: 192.168.178.36
-  #   # interfaceIp: 172.50.0.177
-  # # Bluetooth
-  # - session: http://worterbuch.local/api/v1/get/discovery/sap/192.168.178.97/2927?raw
-  #   linkOffset: 4.0
-  #   # interfaceIp: 192.168.178.39
-  #   interfaceIp: 192.168.178.36
-  #   # interfaceIp: 172.50.0.177
+  # NUC
+  - session: http://worterbuch.local/api/v1/get/discovery/sap/192.168.178.190/34456?raw
+    linkOffset: 4.0
+    interfaceIp: 192.168.178.39
+    # interfaceIp: 192.168.178.36
+    # interfaceIp: 172.50.0.177
+  # Bluetooth
+  - session: http://worterbuch.local/api/v1/get/discovery/sap/192.168.178.97/22490?raw
+    linkOffset: 4.0
+    interfaceIp: 192.168.178.39
+    # interfaceIp: 192.168.178.36
+    # interfaceIp: 172.50.0.177
 senders:
-  # - id: aes67-vsc-jack-1
-  #   # interfaceIp: 192.168.178.39
-  #   interfaceIp: 192.168.178.36
-  #   # interfaceIp: 172.50.0.177
-  #   target: 239.1.178.224:5004
-  #   audioFormat:
-  #     sampleRate: 48000
-  #     frameFormat:
-  #       channels: 4
-  #       sampleFormat: L24
-  #   payloadType: 98
+  - id: aes67-vsc-jack-1
+    interfaceIp: 192.168.178.39
+    # interfaceIp: 192.168.178.36
+    # interfaceIp: 172.50.0.177
+    target: 239.1.178.224:5004
+    audioFormat:
+      sampleRate: 48000
+      frameFormat:
+        channels: 4
+        sampleFormat: L24
+    payloadType: 98
 
-  # - id: aes67-vsc-jack-2
-  #   # interfaceIp: 192.168.178.39
-  #   interfaceIp: 192.168.178.36
-  #   # interfaceIp: 172.50.0.177
-  #   target: 239.1.178.225:5004
-  #   audioFormat:
-  #     sampleRate: 48000
-  #     frameFormat:
-  #       channels: 2
-  #       sampleFormat: L24
-  #   payloadType: 98
+  - id: aes67-vsc-jack-2
+    interfaceIp: 192.168.178.39
+    # interfaceIp: 192.168.178.36
+    # interfaceIp: 172.50.0.177
+    target: 239.1.178.225:5004
+    audioFormat:
+      sampleRate: 48000
+      frameFormat:
+        channels: 2
+        sampleFormat: L24
+    payloadType: 98
 
-  # - id: aes67-vsc-jack-3
-  #   # interfaceIp: 192.168.178.39
-  #   interfaceIp: 192.168.178.36
-  #   # interfaceIp: 172.50.0.177
-  #   target: 239.1.178.226:5004
-  #   audioFormat:
-  #     sampleRate: 48000
-  #     frameFormat:
-  #       channels: 2
-  #       sampleFormat: L24
-  #   payloadType: 98
+  - id: aes67-vsc-jack-3
+    interfaceIp: 192.168.178.39
+    # interfaceIp: 192.168.178.36
+    # interfaceIp: 172.50.0.177
+    target: 239.1.178.226:5004
+    audioFormat:
+      sampleRate: 48000
+      frameFormat:
+        channels: 2
+        sampleFormat: L24
+    payloadType: 98

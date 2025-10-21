@@ -3,6 +3,8 @@ import { subscribeLs } from "./worterbuch";
 import axios from "axios";
 
 const [appName, setAppName] = createSignal<string | null>(null);
+const [selectedVsc, setSelectedVsc] = createSignal<string | null>(null);
+const [vscs, setVscs] = createSignal<string[]>([]);
 
 axios.get("/api/v1/backend/app-name").then((response) => {
   setAppName(response.data);
@@ -15,7 +17,11 @@ createEffect(() => {
   }
 });
 
-const [vscs, setVscs] = createSignal<string[]>([]);
-subscribeLs("aes67-vsc", setVscs);
+createEffect(() => {
+  let vscList = vscs();
+  if (vscList.length > 0 && !selectedVsc()) {
+    setSelectedVsc(vscList[0]);
+  }
+});
 
-export { vscs };
+export { vscs, appName, selectedVsc };

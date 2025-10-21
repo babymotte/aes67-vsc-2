@@ -1,10 +1,20 @@
-#root {
-  /* max-width: 1280px; */
-  margin: 0 auto;
-  padding: 2rem;
-  text-align: center;
+html,
+body {
+  height: 100%;
   width: 100%;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
   color: #aaa;
+}
+
+#root {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  /* padding: 1rem; */
 }
 
 .header {
@@ -13,8 +23,9 @@
   flex-direction: row;
   flex-wrap: nowrap;
   justify-content: space-between;
-  align-items: center;
+  align-items: baseline;
   justify-content: start;
+  gap: 1em;
 }
 
 .spacer {
@@ -26,10 +37,17 @@
 }
 
 .tab {
-  padding: 25px;
+  /* padding: 25px; */
   font-family: sans-serif;
   color: #444;
   min-height: 400px;
+}
+
+.tab-content {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  justify-content: flex-start;
 }
 
 .pending {
@@ -67,8 +85,17 @@ ul.main-menu li.selected {
   color: #444;
 }
 
-ul.sub-menu {
+.sub-menu {
+  grid-row: 1;
+  grid-column: 1;
+  z-index: 999;
   list-style: none;
+  display: flex;
+  flex-direction: column;
+  align-items: start;
+}
+
+.sub-menu ul {
   padding: 0;
   margin-bottom: 0;
   -webkit-margin-before: 0;
@@ -78,7 +105,7 @@ ul.sub-menu {
   -webkit-padding-start: 0px;
 }
 
-ul.sub-menu li {
+.sub-menu li {
   display: block;
   margin-left: 0;
   padding: 10px;
@@ -90,7 +117,7 @@ ul.sub-menu li {
   color: #444;
 }
 
-ul.sub-menu li.selected {
+.sub-menu li.selected {
   border-bottom: 2px solid #337ab7;
   color: #aaa;
 }
@@ -100,4 +127,20 @@ ul.sub-menu li.selected {
   font-size: 16px;
   font-weight: 600;
   width: 80px;
+}
+
+.tab-content {
+  display: grid;
+  columns: 1;
+  justify-content: stretch;
+}
+
+.main-view {
+  grid-row: 1;
+  grid-column: 1;
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
 }

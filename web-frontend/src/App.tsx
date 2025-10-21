@@ -1,16 +1,17 @@
-import {
-  createSignal,
-  Suspense,
-  Switch,
-  Match,
-  useTransition,
-  createEffect,
-} from "solid-js";
+import { createSignal, Suspense, Switch, Match, useTransition } from "solid-js";
 import Receivers from "./components/Receivers";
 import Senders from "./components/Senders";
 import Config from "./components/Config";
 import "./App.css";
 import { vscs } from "./vscState";
+
+function AddSenderButton() {
+  return <button onclick={() => console.log("Add sender ...")}>+</button>;
+}
+
+function AddReceiverButton() {
+  return <button onclick={() => console.log("Add receiver ...")}>+</button>;
+}
 
 export default function App() {
   const [tab, setTab] = createSignal(0);
@@ -31,6 +32,14 @@ export default function App() {
             Config
           </li>
         </ul>
+        <Switch>
+          <Match when={tab() === 0}>
+            <AddSenderButton />
+          </Match>
+          <Match when={tab() === 1}>
+            <AddReceiverButton />
+          </Match>
+        </Switch>
         <div class="spacer" />
         <span>{vscs()}</span>
       </div>

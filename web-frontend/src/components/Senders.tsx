@@ -1,32 +1,56 @@
-import { createSignal, Match, Suspense, Switch, useTransition } from "solid-js";
+import {
+  createEffect,
+  createSignal,
+  For,
+  Match,
+  Suspense,
+  Switch,
+  useTransition,
+} from "solid-js";
+import { subscribeLs } from "../worterbuch";
+import { selectedVsc, appName } from "../vscState";
 
 export default function Senders() {
   const [tab, setTab] = createSignal(0);
   const [pending, start] = useTransition();
+  const [senders, setSenders] = createSignal<string[]>([]);
   const updateTab = (index: number) => () => start(() => setTab(index));
 
+  createEffect(() => {
+    const an = appName();
+    const sv = selectedVsc();
+    subscribeLs(`${an}/${sv}/tx`, setSenders);
+  });
+
   return (
-    <>
-      <ul class="sub-menu">
-        <li classList={{ selected: tab() === 0 }} onClick={updateTab(0)}>
-          Senders
-        </li>
-        <li classList={{ selected: tab() === 1 }} onClick={updateTab(1)}>
-          Receivers
-        </li>
-        <li classList={{ selected: tab() === 2 }} onClick={updateTab(2)}>
-          Config
-        </li>
-      </ul>
-      <div class="tab" classList={{ pending: pending() }}>
+    <div class="tab-content">
+      <div class="sub-menu">
+        <ul>
+          <For each={senders().sort()}>
+            {(sender, index) => (
+              <li
+                classList={{ selected: tab() === index() }}
+                onClick={updateTab(index())}
+              >
+                {sender}
+              </li>
+            )}
+          </For>
+        </ul>
+      </div>
+      <div class="main-view" classList={{ pending: pending() }}>
         <Suspense fallback={<div class="loader">Loading...</div>}>
           <Switch>
-            <Match when={tab() === 0}>Hello</Match>
-            <Match when={tab() === 1}>World</Match>
-            <Match when={tab() === 2}>There</Match>
+            <For each={senders().sort()}>
+              {(sender, index) => (
+                <Match when={tab() === index()}>
+                  <h3>{sender}</h3>
+                </Match>
+              )}
+            </For>
           </Switch>
         </Suspense>
       </div>
-    </>
+    </div>
   );
 }
