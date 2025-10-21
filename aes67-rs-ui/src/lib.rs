@@ -1,3 +1,5 @@
+mod state_transformers;
+
 use aes67_rs::{
     app::{propagate_exit, spawn_child_app},
     config::Config,
@@ -9,22 +11,27 @@ use std::{
     env::{self, current_dir},
     path::PathBuf,
 };
-use tokio_graceful_shutdown::SubsystemHandle;
+use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
 use tokio_util::sync::CancellationToken;
 use tower_http::{
     services::{ServeDir, ServeFile},
     trace::TraceLayer,
 };
 use tracing::{info, instrument};
+use worterbuch_client::Worterbuch;
 
 pub struct Aes67VscUi {}
 
 impl Aes67VscUi {
-    pub async fn new<'a>(config: Config, shutdown_token: CancellationToken) -> Result<()> {
+    pub async fn new<'a>(
+        config: Config,
+        worterbuch_client: Worterbuch,
+        shutdown_token: CancellationToken,
+    ) -> Result<()> {
         propagate_exit(
             spawn_child_app(
                 "aes67-rs-ui".to_owned(),
-                |s| run(s, config),
+                |s| run(s, config, worterbuch_client),
                 shutdown_token.clone(),
             )
             .into_diagnostic()?,
@@ -34,8 +41,17 @@ impl Aes67VscUi {
     }
 }
 
-async fn run(subsys: SubsystemHandle, config: Config) -> WebUIResult<()> {
+async fn run(
+    subsys: SubsystemHandle,
+    config: Config,
+    worterbuch_client: Worterbuch,
+) -> WebUIResult<()> {
     info!("Starting AES67-VSC web UI …");
+
+    let cfg = config.clone();
+    subsys.start(SubsystemBuilder::new("state-transformers", |s| {
+        state_transformers::start(s, cfg, worterbuch_client)
+    }));
 
     let trace = TraceLayer::new_for_http();
     let web_root_path = PathBuf::from(

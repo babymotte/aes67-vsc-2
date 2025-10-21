@@ -18,6 +18,7 @@
 pub mod app;
 pub mod buffer;
 pub mod config;
+pub mod discovery;
 pub mod error;
 pub mod formats;
 pub mod monitoring;

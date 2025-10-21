@@ -27,17 +27,10 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{
-    collections::HashMap,
-    time::{Duration, SystemTime},
-};
-use tokio::{
-    select, spawn,
-    sync::{broadcast, mpsc},
-    time::{sleep, timeout},
-};
+use std::{collections::HashMap, time::SystemTime};
+use tokio::{select, sync::broadcast};
 use tokio_graceful_shutdown::SubsystemHandle;
-use tracing::{info, instrument, warn};
+use tracing::info;
 use worterbuch_client::{Worterbuch, topic};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -85,8 +78,11 @@ pub async fn observability(
     subsys: SubsystemHandle,
     client_name: String,
     rx: broadcast::Receiver<Report>,
+    worterbuch_client: Worterbuch,
 ) -> Result<(), &'static str> {
-    ObservabilityActor::new(subsys, client_name, rx).run().await;
+    ObservabilityActor::new(subsys, client_name, rx, worterbuch_client)
+        .run()
+        .await;
     Ok(())
 }
 
@@ -94,19 +90,24 @@ struct ObservabilityActor {
     subsys: SubsystemHandle,
     client_name: String,
     rx: broadcast::Receiver<Report>,
-    wb: Option<Worterbuch>,
+    wb: Worterbuch,
     senders: HashMap<String, SenderData>,
     receivers: HashMap<String, ReceiverData>,
     running: bool,
 }
 
 impl ObservabilityActor {
-    fn new(subsys: SubsystemHandle, client_name: String, rx: broadcast::Receiver<Report>) -> Self {
+    fn new(
+        subsys: SubsystemHandle,
+        client_name: String,
+        rx: broadcast::Receiver<Report>,
+        wb: Worterbuch,
+    ) -> Self {
         Self {
             subsys,
             client_name,
             rx,
-            wb: None,
+            wb,
             senders: HashMap::new(),
             receivers: HashMap::new(),
             running: false,
@@ -114,15 +115,10 @@ impl ObservabilityActor {
     }
 
     async fn run(mut self) {
-        let (wb_disco_tx, mut wb_disco_rx) = mpsc::channel(1);
-        self.restart_wb(wb_disco_tx.clone(), self.client_name.clone())
-            .await;
-
         info!("Observability subsystem started.");
         loop {
             select! {
                 Ok(evt) = self.rx.recv() => self.process_event(evt).await,
-                recv = wb_disco_rx.recv() => if recv.is_some() { self.restart_wb(wb_disco_tx.clone(), self.client_name.clone()).await },
                 _ = self.subsys.on_shutdown_requested() => break,
                 else => {
                     self.subsys.request_shutdown();
@@ -131,38 +127,6 @@ impl ObservabilityActor {
             }
         }
         info!("Observability subsystem stopped.");
-    }
-
-    #[instrument(skip(self, disco))]
-    async fn restart_wb(&mut self, disco: mpsc::Sender<()>, client_name: String) {
-        warn!("(Re-)connecting to worterbuch …");
-        drop(self.wb.take());
-
-        let Ok(Ok((wb, on_disconnect, _))) = timeout(
-            Duration::from_secs(1),
-            worterbuch_client::connect_with_default_config(),
-        )
-        .await
-        else {
-            warn!("Could not connect to worterbuch, trying again in 5 seconds …");
-            spawn(async move {
-                sleep(Duration::from_secs(5)).await;
-                disco.send(()).await.ok();
-            });
-            return;
-        };
-
-        spawn(async move {
-            on_disconnect.await;
-            sleep(Duration::from_secs(5)).await;
-            disco.send(()).await.ok();
-        });
-
-        wb.set_client_name(topic!(client_name)).await.ok();
-        wb.set_grave_goods(&[&topic!(client_name, "#")]).await.ok();
-
-        self.wb = Some(wb);
-        self.re_publish().await;
     }
 
     async fn re_publish(&self) {
@@ -446,71 +410,50 @@ impl ObservabilityActor {
     }
 
     async fn publish_vsc(&self) {
-        if let Some(wb) = &self.wb {
-            wb.set_async(topic!(self.client_name, "running"), true)
-                .await
-                .ok();
-        };
+        self.wb
+            .set_async(topic!(self.client_name, "running"), true)
+            .await
+            .ok();
     }
 
     async fn publish_sender(&self, qualified_id: &str, data: SenderData) {
-        if let Some(wb) = &self.wb {
-            publish_individual(wb, topic!(qualified_id), data).await;
-        };
+        publish_individual(&self.wb, topic!(qualified_id), data).await;
     }
 
     async fn publish_sender_config(&self, qualified_id: &str, config: TxDescriptor) {
-        if let Some(wb) = &self.wb {
-            publish_individual(wb, topic!(qualified_id, "config"), config).await;
-        };
+        publish_individual(&self.wb, topic!(qualified_id, "config"), config).await;
     }
 
     async fn publish_sender_stats(&self, qualified_id: &str, stats: SenderStats) {
-        if let Some(wb) = &self.wb {
-            publish_individual(wb, topic!(qualified_id, "stats"), stats).await;
-        };
+        publish_individual(&self.wb, topic!(qualified_id, "stats"), stats).await;
     }
 
     async fn publish_sender_label(&self, qualified_id: &str, label: String) {
-        if let Some(wb) = &self.wb {
-            publish_individual(wb, topic!(qualified_id, "label"), label).await;
-        };
+        publish_individual(&self.wb, topic!(qualified_id, "label"), label).await;
     }
 
     async fn unpublish_sender(&mut self, qualified_id: &str) {
-        if let Some(wb) = &self.wb {
-            wb.delete_async(topic!(qualified_id)).await.ok();
-        };
+        self.wb.delete_async(topic!(qualified_id)).await.ok();
     }
 
     async fn publish_receiver(&self, qualified_id: &str, data: ReceiverData) {
-        if let Some(wb) = &self.wb {
-            publish_individual(wb, topic!(qualified_id), data).await;
-        };
+        publish_individual(&self.wb, topic!(qualified_id), data).await;
     }
 
     async fn publish_receiver_config(&self, qualified_id: &str, config: RxDescriptor) {
-        if let Some(wb) = &self.wb {
-            publish_individual(wb, topic!(qualified_id, "config"), config).await;
-        };
+        publish_individual(&self.wb, topic!(qualified_id, "config"), config).await;
     }
 
     async fn publish_receiver_stats(&self, qualified_id: &str, stats: ReceiverStats) {
-        if let Some(wb) = &self.wb {
-            publish_individual(wb, topic!(qualified_id, "stats"), stats).await;
-        };
+        publish_individual(&self.wb, topic!(qualified_id, "stats"), stats).await;
     }
 
     async fn publish_receiver_label(&self, qualified_id: &str, label: String) {
-        if let Some(wb) = &self.wb {
-            publish_individual(wb, topic!(qualified_id, "label"), label).await;
-        };
+        publish_individual(&self.wb, topic!(qualified_id, "label"), label).await;
     }
 
     async fn unpublish_receiver(&self, qualified_id: &str) {
-        if let Some(wb) = &self.wb {
-            wb.delete_async(topic!(qualified_id)).await.ok();
-        };
+        self.wb.delete_async(topic!(qualified_id)).await.ok();
     }
 }
 

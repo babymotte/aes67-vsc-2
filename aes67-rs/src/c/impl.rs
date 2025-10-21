@@ -32,7 +32,6 @@ use futures_lite::future::block_on;
 use lazy_static::lazy_static;
 use sdp::SessionDescription;
 use std::{env, io::Cursor, sync::Arc};
-use tokio::runtime;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
@@ -44,24 +43,32 @@ lazy_static! {
 
 fn init_vsc() -> VscApiResult<Arc<VirtualSoundCardApi>> {
     try_init().boxed()?;
+    let (wb, _, _) = block_on(worterbuch_client::connect_with_default_config())
+        .map_err(VscInternalError::from)
+        .boxed()?;
     let vsc_name = env::var("AES67_VSC_NAME").unwrap_or("aes67-virtual-sound-card".to_owned());
     info!("Creating new VSC with name '{vsc_name}' …");
     let shutdown_token = CancellationToken::new();
-    let vsc = block_on(VirtualSoundCardApi::new(vsc_name.clone(), shutdown_token))?;
+    let vsc = block_on(VirtualSoundCardApi::new(
+        vsc_name.clone(),
+        shutdown_token,
+        wb,
+    ))?;
     info!("VSC '{}' created.", vsc_name);
     Ok(Arc::new(vsc))
 }
 
 fn try_init() -> VscInternalResult<()> {
     let config = Config::load()?;
-    let runtime = runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?;
+    // let runtime = runtime::Builder::new_current_thread()
+    //     .enable_all()
+    //     .build()?;
     let init_future = async {
         telemetry::init(&config).await?;
         Ok::<(), VscInternalError>(())
     };
-    runtime.block_on(init_future)?;
+    // runtime.block_on(init_future)?;
+    block_on(init_future)?;
     info!("AES67 VSC subsystem initialized successfully.");
     Ok(())
 }

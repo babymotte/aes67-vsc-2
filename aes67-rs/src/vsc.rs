@@ -39,6 +39,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_graceful_shutdown::SubsystemHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
+use worterbuch_client::Worterbuch;
 
 type ApiMessageSender = mpsc::Sender<VscApiMessage>;
 
@@ -65,28 +66,45 @@ pub struct VirtualSoundCardApi {
 }
 
 impl VirtualSoundCardApi {
-    pub async fn new(name: String, shutdown_token: CancellationToken) -> VscApiResult<Self> {
-        Ok(VirtualSoundCardApi::try_new(name, shutdown_token)
-            .await
-            .boxed()?)
+    pub async fn new(
+        name: String,
+        shutdown_token: CancellationToken,
+        worterbuch_client: Worterbuch,
+    ) -> VscApiResult<Self> {
+        Ok(
+            VirtualSoundCardApi::try_new(name, shutdown_token, worterbuch_client)
+                .await
+                .boxed()?,
+        )
     }
 
-    async fn try_new(name: String, shutdown_token: CancellationToken) -> VscInternalResult<Self> {
-        let api_tx = VirtualSoundCardApi::create_vsc(name, shutdown_token).await?;
+    async fn try_new(
+        name: String,
+        shutdown_token: CancellationToken,
+        worterbuch_client: Worterbuch,
+    ) -> VscInternalResult<Self> {
+        let api_tx =
+            VirtualSoundCardApi::create_vsc(name, shutdown_token, worterbuch_client).await?;
         Ok(VirtualSoundCardApi { api_tx })
     }
 
     async fn create_vsc(
         name: String,
         shutdown_token: CancellationToken,
+        worterbuch_client: Worterbuch,
     ) -> VscInternalResult<ApiMessageSender> {
         let subsystem_name = format!("aes67-vsc-{name}");
         let (api_tx, api_rx) = mpsc::channel(1024);
 
         let subsystem = |s: SubsystemHandle| async move {
-            VirtualSoundCard::new(name, api_rx, s.create_cancellation_token())?
-                .run()
-                .await;
+            VirtualSoundCard::new(
+                name,
+                api_rx,
+                s.create_cancellation_token(),
+                worterbuch_client,
+            )?
+            .run()
+            .await;
             Ok::<(), VscInternalError>(())
         };
 
@@ -170,8 +188,10 @@ impl VirtualSoundCard {
         name: String,
         api_rx: mpsc::Receiver<VscApiMessage>,
         shutdown_token: CancellationToken,
+        worterbuch_client: Worterbuch,
     ) -> VscInternalResult<Self> {
-        let monitoring = start_monitoring_service(name.clone(), shutdown_token.clone())?;
+        let monitoring =
+            start_monitoring_service(name.clone(), shutdown_token.clone(), worterbuch_client)?;
         Ok(VirtualSoundCard {
             name,
             api_rx,

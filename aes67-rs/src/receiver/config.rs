@@ -61,13 +61,14 @@ impl ReceiverConfig {
     }
 }
 
+pub type Session = (u64, u64);
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RxDescriptor {
     pub id: String,
     pub session_name: String,
-    pub session_id: u64,
-    pub session_version: u64,
+    pub session: Session,
     pub packet_time: MilliSeconds,
     pub link_offset: MilliSeconds,
     pub origin_ip: IpAddr,
@@ -187,8 +188,7 @@ impl RxDescriptor {
         Ok(RxDescriptor {
             id: receiver_id,
             session_name,
-            session_id,
-            session_version,
+            session: (session_id, session_version),
             audio_format,
             packet_time,
             origin_ip,
@@ -203,7 +203,7 @@ impl RxDescriptor {
     }
 
     pub fn session_id(&self) -> String {
-        format!("{} {}", self.session_id, self.session_version)
+        format!("{} {}", self.session.0, self.session.1)
     }
 
     pub fn bytes_per_sample(&self) -> usize {

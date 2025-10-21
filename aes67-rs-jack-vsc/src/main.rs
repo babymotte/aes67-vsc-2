@@ -22,8 +22,8 @@ mod session_manager;
 
 use crate::{play::start_playout, record::start_recording};
 use aes67_rs::{
-    config::Config, receiver::config::RxDescriptor, sender::config::TxDescriptor, telemetry,
-    time::get_clock, vsc::VirtualSoundCardApi,
+    config::Config, discovery::start_sap_discovery, receiver::config::RxDescriptor,
+    sender::config::TxDescriptor, telemetry, time::get_clock, vsc::VirtualSoundCardApi,
 };
 use aes67_rs_ui::Aes67VscUi;
 use miette::IntoDiagnostic;
@@ -57,9 +57,21 @@ async fn run(subsys: SubsystemHandle, config: Config) -> miette::Result<()> {
         config.app.name, config.app.instance.name
     );
 
-    Aes67VscUi::new(config.clone(), subsys.create_cancellation_token()).await?;
+    let (wb, _, _) = worterbuch_client::connect_with_default_config().await?;
 
-    let vsc = VirtualSoundCardApi::new(id, subsys.create_cancellation_token())
+    let wbd = wb.clone();
+    subsys.start(SubsystemBuilder::new("discovery", |s| {
+        start_sap_discovery(wbd, s.create_cancellation_token())
+    }));
+
+    Aes67VscUi::new(
+        config.clone(),
+        wb.clone(),
+        subsys.create_cancellation_token(),
+    )
+    .await?;
+
+    let vsc = VirtualSoundCardApi::new(id, subsys.create_cancellation_token(), wb)
         .await
         .into_diagnostic()?;
 

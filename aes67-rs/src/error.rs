@@ -28,6 +28,7 @@ use thiserror::Error;
 use tokio::sync::{oneshot, watch};
 use tracing::error;
 use tracing_subscriber::{filter::ParseError, util::TryInitError};
+use worterbuch_client::ConnectionError;
 
 pub enum ErrorCode {
     WorterbuchError = 0x10,
@@ -94,6 +95,8 @@ pub enum VscInternalError {
     TelemetryError(#[from] TelemetryError),
     #[error("Error in VSC child app: {0}")]
     ChildAppError(#[from] ChildAppError),
+    #[error("Worterbuch error: {0}")]
+    WorterbuchError(#[from] ConnectionError),
 }
 
 #[derive(Error, Debug, Diagnostic)]
@@ -232,6 +235,16 @@ pub enum Aes67Vsc2Error {
 pub enum WebUIError {
     #[error("I/O error: {0}")]
     IoError(#[from] io::Error),
+    #[error("Worterbuch error: {0}")]
+    WorterbuchError(#[from] ConnectionError),
+}
+
+#[derive(Error, Debug, Diagnostic)]
+pub enum DiscoveryError {
+    #[error("SAP error: {0}")]
+    SapError(#[from] sap_rs::error::Error),
+    #[error("Worterbuch error: {0}")]
+    WorterbuchError(#[from] ConnectionError),
 }
 
 pub type Aes67Vsc2Result<T> = Result<T, Aes67Vsc2Error>;
@@ -247,6 +260,7 @@ pub type TelemetryResult<T> = Result<T, TelemetryError>;
 pub type ConfigResult<T> = Result<T, ConfigError>;
 pub type ClockResult<T> = Result<T, ClockError>;
 pub type WebUIResult<T> = Result<T, WebUIError>;
+pub type DiscoveryResult<T> = Result<T, DiscoveryError>;
 
 pub trait ToBoxed {
     fn boxed(self) -> Box<Self>;

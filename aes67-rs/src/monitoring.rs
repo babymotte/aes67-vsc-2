@@ -39,6 +39,7 @@ use tokio::{
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
+use worterbuch_client::Worterbuch;
 
 #[derive(Debug, Clone)]
 pub enum MonitoringEvent {
@@ -295,6 +296,7 @@ impl Monitoring {
 pub fn start_monitoring_service(
     root_id: String,
     shutdown_token: CancellationToken,
+    worterbuch_client: Worterbuch,
 ) -> ChildAppResult<Monitoring> {
     let (mon_tx, mon_rx) = mpsc::channel::<(MonitoringEvent, String)>(1024);
 
@@ -304,7 +306,13 @@ pub fn start_monitoring_service(
 
     let (child, start) = parent.deferred_child(root_id);
 
-    monitoring(client_name, mon_rx, start, shutdown_token)?;
+    monitoring(
+        client_name,
+        mon_rx,
+        start,
+        shutdown_token,
+        worterbuch_client,
+    )?;
 
     Ok(child)
 }
@@ -314,6 +322,7 @@ fn monitoring(
     mon_rx: mpsc::Receiver<(MonitoringEvent, String)>,
     start: impl Future<Output = ()> + Send + 'static,
     shutdown_token: CancellationToken,
+    worterbuch_client: Worterbuch,
 ) -> ChildAppResult<()> {
     let name = format!("{client_name}-monitoring");
 
@@ -322,7 +331,8 @@ fn monitoring(
 
     let stats = |s: SubsystemHandle| stats(s, mon_rx, stats_tx);
     let health = |s: SubsystemHandle| health(s, stats_rx, observ_tx);
-    let observability = |s: SubsystemHandle| observability(s, client_name, observ_rx);
+    let observability =
+        |s: SubsystemHandle| observability(s, client_name, observ_rx, worterbuch_client);
 
     let subsystem = |s: SubsystemHandle| async move {
         spawn(start);

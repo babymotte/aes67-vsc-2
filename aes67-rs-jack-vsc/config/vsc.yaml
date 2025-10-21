@@ -43,38 +43,38 @@ receivers:
     # interfaceIp: 192.168.178.36
     # interfaceIp: 172.50.0.177
 senders:
-  - id: aes67-vsc-jack-1
-    interfaceIp: 192.168.178.39
-    # interfaceIp: 192.168.178.36
-    # interfaceIp: 172.50.0.177
-    target: 239.1.178.224:5004
-    audioFormat:
-      sampleRate: 48000
-      frameFormat:
-        channels: 4
-        sampleFormat: L24
-    payloadType: 98
+  # - id: aes67-vsc-jack-1
+  #   interfaceIp: 192.168.178.39
+  #   # interfaceIp: 192.168.178.36
+  #   # interfaceIp: 172.50.0.177
+  #   target: 239.1.178.224:5004
+  #   audioFormat:
+  #     sampleRate: 48000
+  #     frameFormat:
+  #       channels: 4
+  #       sampleFormat: L24
+  #   payloadType: 98
 
-  - id: aes67-vsc-jack-2
-    interfaceIp: 192.168.178.39
-    # interfaceIp: 192.168.178.36
-    # interfaceIp: 172.50.0.177
-    target: 239.1.178.225:5004
-    audioFormat:
-      sampleRate: 48000
-      frameFormat:
-        channels: 2
-        sampleFormat: L24
-    payloadType: 98
+  # - id: aes67-vsc-jack-2
+  #   interfaceIp: 192.168.178.39
+  #   # interfaceIp: 192.168.178.36
+  #   # interfaceIp: 172.50.0.177
+  #   target: 239.1.178.225:5004
+  #   audioFormat:
+  #     sampleRate: 48000
+  #     frameFormat:
+  #       channels: 2
+  #       sampleFormat: L24
+  #   payloadType: 98
 
-  - id: aes67-vsc-jack-3
-    interfaceIp: 192.168.178.39
-    # interfaceIp: 192.168.178.36
-    # interfaceIp: 172.50.0.177
-    target: 239.1.178.226:5004
-    audioFormat:
-      sampleRate: 48000
-      frameFormat:
-        channels: 2
-        sampleFormat: L24
-    payloadType: 98
+  # - id: aes67-vsc-jack-3
+  #   interfaceIp: 192.168.178.39
+  #   # interfaceIp: 192.168.178.36
+  #   # interfaceIp: 172.50.0.177
+  #   target: 239.1.178.226:5004
+  #   audioFormat:
+  #     sampleRate: 48000
+  #     frameFormat:
+  #       channels: 2
+  #       sampleFormat: L24
+  #   payloadType: 98
