@@ -19,7 +19,7 @@ use crate::{
     config::{Config, EndpointConfig},
     error::TelemetryResult,
 };
-use opentelemetry::{KeyValue, global, trace::TracerProvider};
+use opentelemetry::{global, trace::TracerProvider};
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_resource_detectors::{
     HostResourceDetector, OsResourceDetector, ProcessResourceDetector,
@@ -69,15 +69,11 @@ pub async fn init(config: &Config) -> TelemetryResult<()> {
                         Box::new(OsResourceDetector),
                         Box::new(ProcessResourceDetector),
                     ])
-                    .with_attributes(vec![KeyValue::new(
-                        "instance.name",
-                        config.app.instance.name.clone(),
-                    )])
                     .build(),
             )
             .build();
 
-        let tracer = tracer_provider.tracer(config.instance_name());
+        let tracer = tracer_provider.tracer(config.instance_name().to_owned());
 
         global::set_tracer_provider(tracer_provider);
 

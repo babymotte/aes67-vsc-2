@@ -17,7 +17,6 @@
 
 use crate::{error::ConfigResult, receiver::config::ReceiverConfig, sender::config::SenderConfig};
 use clap::Parser;
-use gethostname::gethostname;
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
@@ -60,28 +59,12 @@ pub struct Credentials {
 #[serde(rename_all = "camelCase")]
 pub struct AppConfig {
     pub name: String,
-    pub instance: InstanceConfig,
 }
 
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            name: "aes67-vsc-2".to_owned(),
-            instance: InstanceConfig::default(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct InstanceConfig {
-    pub name: String,
-}
-
-impl Default for InstanceConfig {
-    fn default() -> Self {
-        Self {
-            name: gethostname().to_string_lossy().to_string(),
+            name: "aes67-vsc".to_owned(),
         }
     }
 }
@@ -100,7 +83,7 @@ pub struct SocketConfig {
     pub user_timeout: Option<Duration>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum PtpMode {
     /// System mode is used when there is an external PTP daemon running on this machine that synchronizes the
@@ -129,7 +112,7 @@ pub enum PtpMode {
     Internal { nic: String },
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Config {
     #[serde(default = "AppConfig::default")]
@@ -171,7 +154,7 @@ impl Config {
                     warn!("No config file specified, using {it}");
                     it
                 } else {
-                    let it = "/etc/aes67-vsc-2/config.yaml";
+                    let it = "/etc/aes67-vsc/config.yaml";
                     warn!("No config file specified, using {it}");
                     it
                 };
@@ -190,7 +173,7 @@ impl Config {
         }
     }
 
-    pub fn instance_name(&self) -> String {
-        format!("{}/{}", self.app.name, self.app.instance.name)
+    pub fn instance_name(&self) -> &str {
+        &self.app.name
     }
 }

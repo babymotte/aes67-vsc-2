@@ -10,11 +10,11 @@ ptp: !phc
 ptpMode:
 receivers:
   # XCEL
-  - session: http://worterbuch.local/api/v1/get/discovery/sap/192.168.178.114/10657?raw
-    linkOffset: 4.0
-    interfaceIp: 192.168.178.39
-    # interfaceIp: 192.168.178.36
-    # interfaceIp: 172.50.0.177
+  # - session: http://127.0.0.1:8080/api/v1/get/discovery/sap/192.168.178.114/50553?raw
+  #   linkOffset: 4.0
+  #   interfaceIp: 192.168.178.39
+  # interfaceIp: 192.168.178.36
+  # interfaceIp: 172.50.0.177
   # - session: http://worterbuch.local/api/v1/get/discovery/sap/192.168.178.114/10657?raw
   #   linkOffset: 4.0
   #   interfaceIp: 192.168.178.39
@@ -31,17 +31,17 @@ receivers:
   #   interfaceIp: 192.168.178.36
   #   # interfaceIp: 172.50.0.177
   # NUC
-  - session: http://worterbuch.local/api/v1/get/discovery/sap/192.168.178.190/34456?raw
-    linkOffset: 4.0
-    interfaceIp: 192.168.178.39
-    # interfaceIp: 192.168.178.36
-    # interfaceIp: 172.50.0.177
-  # Bluetooth
-  - session: http://worterbuch.local/api/v1/get/discovery/sap/192.168.178.97/22490?raw
-    linkOffset: 4.0
-    interfaceIp: 192.168.178.39
-    # interfaceIp: 192.168.178.36
-    # interfaceIp: 172.50.0.177
+  # - session: http://127.0.0.1:8080/api/v1/get/discovery/sap/192.168.178.190/51467?raw
+  #   linkOffset: 4.0
+  #   interfaceIp: 192.168.178.39
+  #   # interfaceIp: 192.168.178.36
+  #   # interfaceIp: 172.50.0.177
+  # # Bluetooth
+  # - session: http://127.0.0.1:8080/api/v1/get/discovery/sap/192.168.178.97/22588?raw
+  #   linkOffset: 4.0
+  #   interfaceIp: 192.168.178.39
+  # interfaceIp: 192.168.178.36
+  # interfaceIp: 172.50.0.177
 senders:
   # - id: aes67-vsc-jack-1
   #   interfaceIp: 192.168.178.39

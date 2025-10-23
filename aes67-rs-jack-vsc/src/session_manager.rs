@@ -108,12 +108,13 @@ pub fn start_session_manager<N, P>(
     subsys: &SubsystemHandle,
     client: AsyncClient<N, P>,
     notifications: mpsc::Receiver<Notification>,
+    app_id: String,
 ) where
     N: 'static + Send + Sync + NotificationHandler,
     P: 'static + Send + ProcessHandler,
 {
     subsys.start(SubsystemBuilder::new("session_manager", |s| {
-        run(s, client, notifications)
+        run(s, client, notifications, app_id)
     }));
 }
 
@@ -121,16 +122,17 @@ async fn run<N, P>(
     subsys: SubsystemHandle,
     client: AsyncClient<N, P>,
     mut notifications: mpsc::Receiver<Notification>,
+    app_id: String,
 ) -> miette::Result<()>
 where
     N: 'static + Send + Sync + NotificationHandler,
     P: 'static + Send + ProcessHandler,
 {
-    restore_connections(client.as_client()).await;
+    restore_connections(client.as_client(), &app_id).await;
 
     loop {
         select! {
-            Some(notification) = notifications.recv() => handle_notification(client.as_client(), notification).await?,
+            Some(notification) = notifications.recv() => handle_notification(client.as_client(), notification, &app_id).await?,
             _ = subsys.on_shutdown_requested() => break,
             else => break,
         }
@@ -143,7 +145,11 @@ where
     Ok(())
 }
 
-async fn handle_notification(client: &Client, notification: Notification) -> miette::Result<()> {
+async fn handle_notification(
+    client: &Client,
+    notification: Notification,
+    app_id: &str,
+) -> miette::Result<()> {
     match notification {
         Notification::ThreadInit => {
             info!("JACK thread initialized");
@@ -176,7 +182,7 @@ async fn handle_notification(client: &Client, notification: Notification) -> mie
                 } else {
                     info!("JACK sender ports disconnected: {port_id_a} -/> {port_id_b}")
                 }
-                store_connection(client, port_id_a, port_id_b, are_connected).await;
+                store_connection(client, port_id_a, port_id_b, are_connected, app_id).await;
             }
 
             if let Some(port) = client.port_by_id(port_id_a)
@@ -187,7 +193,7 @@ async fn handle_notification(client: &Client, notification: Notification) -> mie
                 } else {
                     info!("JACK receiver ports disconnected: {port_id_a} -/> {port_id_b}")
                 }
-                store_connection(client, port_id_a, port_id_b, are_connected).await;
+                store_connection(client, port_id_a, port_id_b, are_connected, app_id).await;
             }
         }
         Notification::GraphReorder => {
@@ -203,7 +209,13 @@ async fn handle_notification(client: &Client, notification: Notification) -> mie
 }
 
 #[instrument(skip(client))]
-async fn store_connection(client: &Client, port_id_a: u32, port_id_b: u32, are_connected: bool) {
+async fn store_connection(
+    client: &Client,
+    port_id_a: u32,
+    port_id_b: u32,
+    are_connected: bool,
+    app_id: &str,
+) {
     info!("Persisting port connections …");
 
     let Some(port) = client.port_by_id(port_id_a) else {
@@ -221,7 +233,7 @@ async fn store_connection(client: &Client, port_id_a: u32, port_id_b: u32, are_c
         return;
     };
 
-    let mut config = match load_client_config(client).await {
+    let mut config = match load_client_config(client, app_id).await {
         Ok(it) => it,
         Err(e) => {
             warn!("Could not load client config: {e}");
@@ -235,7 +247,7 @@ async fn store_connection(client: &Client, port_id_a: u32, port_id_b: u32, are_c
         remove_connection(&mut config, this_port_name, other_port_name);
     }
 
-    if let Err(e) = save_client_config(client, config).await {
+    if let Err(e) = save_client_config(client, config, app_id).await {
         warn!("Could not write client config to file: {e}");
         return;
     }
@@ -270,10 +282,10 @@ fn remove_connection(config: &mut ClientConfig, port_name: String, other_port: S
 }
 
 #[instrument(skip(client))]
-async fn restore_connections(client: &Client) {
+async fn restore_connections(client: &Client, app_id: &str) {
     info!("Restoring port connections from persistence …");
 
-    let config = match load_client_config(client).await {
+    let config = match load_client_config(client, app_id).await {
         Ok(it) => it,
         Err(e) => {
             warn!("Could not load client config: {e}");
@@ -304,9 +316,9 @@ async fn restore_connections(client: &Client) {
 }
 
 #[instrument(skip(client), err)]
-async fn load_client_config(client: &Client) -> Result<ClientConfig> {
-    let config_file_path =
-        client_config_file_path(client).ok_or_else(|| miette!("Could not get user dir."))?;
+async fn load_client_config(client: &Client, app_id: &str) -> Result<ClientConfig> {
+    let config_file_path = client_config_file_path(client, app_id)
+        .ok_or_else(|| miette!("Could not get user dir."))?;
 
     if let Some(parent) = config_file_path.parent() {
         fs::create_dir_all(parent)
@@ -324,9 +336,9 @@ async fn load_client_config(client: &Client) -> Result<ClientConfig> {
 }
 
 #[instrument(skip(client, config), err)]
-async fn save_client_config(client: &Client, config: ClientConfig) -> Result<()> {
-    let config_file_path =
-        client_config_file_path(client).ok_or_else(|| miette!("Could not get user dir."))?;
+async fn save_client_config(client: &Client, config: ClientConfig, app_id: &str) -> Result<()> {
+    let config_file_path = client_config_file_path(client, app_id)
+        .ok_or_else(|| miette!("Could not get user dir."))?;
 
     let new_yaml = serde_yaml::to_string(&config)
         .into_diagnostic()
@@ -341,9 +353,13 @@ async fn save_client_config(client: &Client, config: ClientConfig) -> Result<()>
 }
 
 #[instrument(skip(client))]
-fn client_config_file_path(client: &Client) -> Option<PathBuf> {
+fn client_config_file_path(client: &Client, app_id: &str) -> Option<PathBuf> {
     let client_name = client.name();
-    config_local_dir().map(|dir| dir.join("aes67-vsc").join(format!("{client_name}.yaml")))
+    config_local_dir().map(|dir| {
+        dir.join(app_id)
+            .join("routing")
+            .join(format!("{client_name}.yaml"))
+    })
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

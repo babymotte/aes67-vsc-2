@@ -93,7 +93,7 @@ impl VirtualSoundCardApi {
         shutdown_token: CancellationToken,
         worterbuch_client: Worterbuch,
     ) -> VscInternalResult<ApiMessageSender> {
-        let subsystem_name = format!("aes67-vsc-{name}");
+        let subsystem_name = name.clone();
         let (api_tx, api_rx) = mpsc::channel(1024);
 
         let subsystem = |s: SubsystemHandle| async move {

@@ -39,11 +39,14 @@ lazy_static! {
         Regex::new(r"([0-9]+) channels: (.+)").expect("no dynammic input, can't fail");
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReceiverConfig {
     pub id: Option<String>,
-    #[serde(deserialize_with = "crate::serde::deserialize_sdp")]
+    #[serde(
+        deserialize_with = "crate::serde::deserialize_sdp",
+        serialize_with = "crate::serde::serialize_sdp"
+    )]
     pub session: SessionDescription,
     pub link_offset: MilliSeconds,
     #[serde(default)]

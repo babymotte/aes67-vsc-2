@@ -232,14 +232,6 @@ pub enum Aes67Vsc2Error {
 }
 
 #[derive(Error, Debug, Diagnostic)]
-pub enum WebUIError {
-    #[error("I/O error: {0}")]
-    IoError(#[from] io::Error),
-    #[error("Worterbuch error: {0}")]
-    WorterbuchError(#[from] ConnectionError),
-}
-
-#[derive(Error, Debug, Diagnostic)]
 pub enum DiscoveryError {
     #[error("SAP error: {0}")]
     SapError(#[from] sap_rs::error::Error),
@@ -259,7 +251,6 @@ pub type AlsaResult<T> = Result<T, AlsaError>;
 pub type TelemetryResult<T> = Result<T, TelemetryError>;
 pub type ConfigResult<T> = Result<T, ConfigError>;
 pub type ClockResult<T> = Result<T, ClockError>;
-pub type WebUIResult<T> = Result<T, WebUIError>;
 pub type DiscoveryResult<T> = Result<T, DiscoveryError>;
 
 pub trait ToBoxed {

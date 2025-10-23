@@ -22,24 +22,26 @@ mod session_manager;
 
 use crate::{play::start_playout, record::start_recording};
 use aes67_rs::{
-    config::Config, discovery::start_sap_discovery, receiver::config::RxDescriptor,
-    sender::config::TxDescriptor, telemetry, time::get_clock, vsc::VirtualSoundCardApi,
+    discovery::start_sap_discovery, receiver::config::RxDescriptor, sender::config::TxDescriptor,
+    telemetry, time::get_clock, vsc::VirtualSoundCardApi,
 };
-use aes67_rs_ui::Aes67VscUi;
+use aes67_rs_ui::{Aes67VscUi, config::PersistentConfig};
 use miette::IntoDiagnostic;
 use std::time::Duration;
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle, Toplevel};
 use tracing::{error, info};
+use worterbuch::PersistenceMode;
 
 #[tokio::main]
 async fn main() -> miette::Result<()> {
-    let config = Config::load().into_diagnostic()?;
-    telemetry::init(&config).await.into_diagnostic()?;
+    let app_id = "aes67-jack-vsc";
+
+    let config = PersistentConfig::load(app_id).await?;
+
+    telemetry::init(&config.vsc).await.into_diagnostic()?;
 
     Toplevel::new(move |s| async move {
-        s.start(SubsystemBuilder::new("aes67-jack-vsc", move |s| {
-            run(s, config)
-        }));
+        s.start(SubsystemBuilder::new(app_id, move |s| run(s, config)));
     })
     .catch_signals()
     .handle_shutdown_requests(Duration::from_secs(1))
@@ -49,45 +51,57 @@ async fn main() -> miette::Result<()> {
     Ok(())
 }
 
-async fn run(subsys: SubsystemHandle, config: Config) -> miette::Result<()> {
-    let id = config.instance_name();
+async fn run(subsys: SubsystemHandle, config: PersistentConfig) -> miette::Result<()> {
+    let id = config.vsc.instance_name().to_owned();
 
-    info!(
-        "Starting {} instance '{}' …",
-        config.app.name, config.app.instance.name
-    );
+    info!("Starting {} …", id);
 
-    let (wb, _, _) = worterbuch_client::connect_with_default_config().await?;
+    let dirs = directories::BaseDirs::new();
+    let data_home = dirs
+        .map(|d| d.data_dir().to_owned())
+        .expect("could not find data dir");
+
+    let data_dir = data_home.join(&id).join("data");
+
+    let mut wb_config = worterbuch::Config::new().await?;
+    wb_config.load_env_with_prefix("AES67_VSC")?;
+    wb_config.persistence_mode = PersistenceMode::ReDB;
+    wb_config.use_persistence = true;
+    wb_config.data_dir = data_dir.display().to_string();
+    wb_config.ws_endpoint = None;
+    wb_config.tcp_endpoint = None;
+    wb_config.unix_endpoint = None;
+    let worterbuch = worterbuch::spawn_worterbuch(&subsys, wb_config).await?;
+
+    let wb = worterbuch_client::local_client_wrapper(worterbuch.clone());
 
     let wbd = wb.clone();
     subsys.start(SubsystemBuilder::new("discovery", |s| {
         start_sap_discovery(wbd, s.create_cancellation_token())
     }));
 
-    Aes67VscUi::new(
-        config.clone(),
-        wb.clone(),
-        subsys.create_cancellation_token(),
-    )
-    .await?;
+    let vsc_config = config.vsc.clone();
 
-    let vsc = VirtualSoundCardApi::new(id, subsys.create_cancellation_token(), wb)
+    Aes67VscUi::new(config, worterbuch, subsys.create_cancellation_token()).await?;
+
+    let vsc = VirtualSoundCardApi::new(id.to_owned(), subsys.create_cancellation_token(), wb)
         .await
         .into_diagnostic()?;
 
-    let ptp_mode = config.ptp;
+    let ptp_mode = vsc_config.ptp;
 
-    for tx_config in config.senders {
+    for tx_config in vsc_config.senders {
         let descriptor = TxDescriptor::try_from(&tx_config).into_diagnostic()?;
         let vsc = vsc.clone();
         let ptp_mode = ptp_mode.clone();
+        let app_id = id.clone();
         subsys.start(SubsystemBuilder::new(
             format!("sender/{}", descriptor.id),
             |s| async move {
                 match vsc.create_sender(tx_config).await.into_diagnostic() {
                     Ok((sender, _)) => {
                         let clock = get_clock(ptp_mode, descriptor.audio_format)?;
-                        start_recording(s, sender, descriptor, clock).await
+                        start_recording(app_id, s, sender, descriptor, clock).await
                     }
                     Err(e) => {
                         error!("Error creating sender '{}': {}", descriptor.id, e);
@@ -98,10 +112,11 @@ async fn run(subsys: SubsystemHandle, config: Config) -> miette::Result<()> {
         ));
     }
 
-    for rx_config in config.receivers {
+    for rx_config in vsc_config.receivers {
         let descriptor = RxDescriptor::try_from(&rx_config).into_diagnostic()?;
         let vsc = vsc.clone();
         let ptp_mode = ptp_mode.clone();
+        let app_id = id.clone();
         subsys.start(SubsystemBuilder::new(
             format!("receiver/{}", descriptor.id),
             |s| async move {
@@ -112,7 +127,7 @@ async fn run(subsys: SubsystemHandle, config: Config) -> miette::Result<()> {
                 {
                     Ok((receiver, monitoring, _)) => {
                         let clock = get_clock(ptp_mode, descriptor.audio_format)?;
-                        start_playout(s, receiver, descriptor, clock, monitoring).await
+                        start_playout(app_id, s, receiver, descriptor, clock, monitoring).await
                     }
                     Err(e) => {
                         error!("Error creating receiver '{}': {}", descriptor.id, e);

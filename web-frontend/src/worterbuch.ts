@@ -1,34 +1,28 @@
-import axios from "axios";
 import { createEffect, createSignal, onCleanup } from "solid-js";
 import {
   connect,
   type LsCallback,
-  type PStateCallback,
   type StateCallback,
   type TransactionID,
   type Value,
   type Worterbuch,
 } from "worterbuch-js";
 
-const [wbServers, setWbServers] = createSignal<string[]>([]);
 const [wbClient, setWbClient] = createSignal<Worterbuch | null>(null);
 
-axios.get("/api/v1/backend/wb-servers").then((response) => {
-  setWbServers(response.data.split(",").map((s: string) => s.trim()));
-});
+const location = window.location;
+const wsAddress = `${location.protocol === "https:" ? "wss" : "ws"}://${
+  location.host
+}/ws`;
 
-createEffect(() => {
-  const servers = wbServers();
-  console.log("WB Servers:", servers);
-  connect(wbServers().map((s: string) => `ws://${s}/ws`))
-    .then((wb) => {
-      setWbClient(wb);
-    })
-    .catch((err) => {
-      console.error("Failed to connect to Worterbuch:", err.message);
-      setWbClient(null);
-    });
-});
+connect(wsAddress)
+  .then((wb) => {
+    setWbClient(wb);
+  })
+  .catch((err) => {
+    console.error("Failed to connect to Worterbuch:", err.message);
+    setWbClient(null);
+  });
 
 createEffect(() => {
   const wb = wbClient();

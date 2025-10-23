@@ -1,4 +1,5 @@
-use aes67_rs::{config::Config, error::WebUIResult, receiver::config::Session};
+use crate::error::WebUIResult;
+use aes67_rs::{config::Config, receiver::config::Session};
 use tokio::{select, sync::mpsc};
 use tokio_graceful_shutdown::SubsystemHandle;
 use tracing::info;

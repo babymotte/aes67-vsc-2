@@ -31,6 +31,7 @@ struct State {
 impl State {}
 
 pub async fn start_playout(
+    app_id: String,
     subsys: SubsystemHandle,
     receiver: ReceiverApi,
     descriptor: RxDescriptor,
@@ -75,7 +76,7 @@ pub async fn start_playout(
     let active_client = client
         .activate_async(notification_handler, process_handler)
         .into_diagnostic()?;
-    start_session_manager(&subsys, active_client, notifications);
+    start_session_manager(&subsys, active_client, notifications, app_id);
 
     subsys.on_shutdown_requested().await;
 

@@ -19,7 +19,7 @@ use crate::{error::ConfigError, formats::AudioFormat};
 use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, SocketAddr};
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SenderConfig {
     pub id: String,

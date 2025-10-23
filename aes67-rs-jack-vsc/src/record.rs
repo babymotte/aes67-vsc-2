@@ -18,6 +18,7 @@ use tokio_graceful_shutdown::SubsystemHandle;
 use tracing::{error, info};
 
 struct State {
+    app_id: String,
     sender: SenderApi,
     ports: Vec<Port<AudioIn>>,
     channel_bufs: Box<[AudioBufferPointer]>,
@@ -29,6 +30,7 @@ struct State {
 }
 
 pub async fn start_recording(
+    app_id: String,
     subsys: SubsystemHandle,
     sender: SenderApi,
     descriptor: TxDescriptor,
@@ -62,6 +64,7 @@ pub async fn start_recording(
     let client_id = descriptor.id.clone();
     let notification_handler = SessionManagerNotificationHandler { client_id, tx };
     let process_handler_state = State {
+        app_id: app_id.clone(),
         sender,
         ports,
         channel_bufs: vec![
@@ -80,7 +83,7 @@ pub async fn start_recording(
     let active_client = client
         .activate_async(notification_handler, process_handler)
         .into_diagnostic()?;
-    start_session_manager(&subsys, active_client, notifications);
+    start_session_manager(&subsys, active_client, notifications, app_id);
 
     subsys.on_shutdown_requested().await;
 
