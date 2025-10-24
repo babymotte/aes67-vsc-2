@@ -11,6 +11,9 @@ pub async fn start_sap_discovery(
 ) -> DiscoveryResult<()> {
     let (_, mut events) = Sap::new().await?;
 
+    // TODO fetch current discovery entries
+    // TODO track session age and remove old ones
+
     loop {
         select! {
             _ = shutdown_token.cancelled() => break,

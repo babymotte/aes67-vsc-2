@@ -10,30 +10,56 @@ import {
 
 const [wbClient, setWbClient] = createSignal<Worterbuch | null>(null);
 
-const location = window.location;
-const wsAddress = `${location.protocol === "https:" ? "wss" : "ws"}://${
-  location.host
-}/ws`;
+const closeWb = (wb: Worterbuch | null) => {
+  if (wb) {
+    wb.onclose = () => {};
+    wb.close();
+  }
+};
 
-connect(wsAddress)
-  .then((wb) => {
-    setWbClient(wb);
-  })
-  .catch((err) => {
-    console.error("Failed to connect to Worterbuch:", err.message);
-    setWbClient(null);
+const swapWbClient = (wb: Worterbuch | null) => {
+  setWbClient((w) => {
+    closeWb(w);
+    return wb;
+  });
+};
+
+export function Worterbuch() {
+  const location = window.location;
+  const wsAddress = `${location.protocol === "https:" ? "wss" : "ws"}://${
+    location.host
+  }/ws`;
+
+  const brokenConnection = (msg: string) => {
+    console.error(msg);
+    swapWbClient(null);
+    console.error("Trying to reconnect in 5 seconds …");
+    setTimeout(connectWb, 5000);
+  };
+
+  const connectWb = () => {
+    connect(wsAddress)
+      .then((wb) => {
+        wb.onclose = () => {
+          brokenConnection("Worterbuch connection closed");
+        };
+        wb.setClientName("AES67 VSC Web UI");
+        swapWbClient(wb);
+      })
+      .catch((err) => {
+        brokenConnection(`Failed to connect to Worterbuch: ${err.message}`);
+      });
+  };
+
+  onCleanup(() => {
+    const wb = wbClient();
+    closeWb(wb);
   });
 
-createEffect(() => {
-  const wb = wbClient();
-  if (wb) {
-    wb.onclose = () => {
-      // TODO reconnect logic
-      console.warn("Worterbuch connection closed");
-      setWbClient(null);
-    };
-  }
-});
+  connectWb();
+
+  return null;
+}
 
 export function subscribe<T extends Value>(key: string, cb: StateCallback<T>) {
   const [tid, setTid] = createSignal<TransactionID | null>(null);

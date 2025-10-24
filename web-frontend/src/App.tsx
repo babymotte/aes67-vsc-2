@@ -3,7 +3,8 @@ import Receivers from "./components/Receivers";
 import Senders from "./components/Senders";
 import Config from "./components/Config";
 import "./App.css";
-import { vscs } from "./vscState";
+import { vscs, VscState } from "./vscState";
+import { Worterbuch } from "./worterbuch";
 
 function AddSenderButton() {
   return <button onclick={() => console.log("Add sender ...")}>+</button>;
@@ -20,6 +21,8 @@ export default function App() {
 
   return (
     <>
+      <Worterbuch />
+      <VscState />
       <div class="header">
         <ul class="main-menu">
           <li classList={{ selected: tab() === 0 }} onClick={updateTab(0)}>
