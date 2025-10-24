@@ -25,7 +25,6 @@ dependencies = [
  "chrono",
  "clap",
  "clock-steering",
- "console-subscriber",
  "crossbeam",
  "dashmap",
  "dirs",
@@ -35,11 +34,6 @@ dependencies = [
  "lazy_static",
  "libc",
  "miette",
- "opentelemetry",
- "opentelemetry-otlp",
- "opentelemetry-resource-detectors",
- "opentelemetry-semantic-conventions",
- "opentelemetry_sdk",
  "pin-project-lite",
  "pnet",
  "rand 0.9.2",
@@ -56,7 +50,6 @@ dependencies = [
  "socket2 0.6.0",
  "statime",
  "statime-linux",
- "supports-color",
  "thiserror 2.0.17",
  "thread-priority",
  "timestamped-socket",
@@ -66,8 +59,6 @@ dependencies = [
  "tokio-util",
  "tower-http",
  "tracing",
- "tracing-opentelemetry",
- "tracing-subscriber",
  "worterbuch-client",
 ]
 
@@ -84,14 +75,22 @@ dependencies = [
  "jack",
  "lazy_static",
  "miette",
+ "opentelemetry",
+ "opentelemetry-otlp",
+ "opentelemetry-resource-detectors",
+ "opentelemetry-semantic-conventions",
+ "opentelemetry_sdk",
  "rand 0.9.2",
  "serde",
  "serde_json",
  "serde_yaml",
+ "supports-color",
  "tokio",
  "tokio-graceful-shutdown",
  "tokio-util",
  "tracing",
+ "tracing-opentelemetry",
+ "tracing-subscriber",
  "worterbuch",
  "worterbuch-client",
 ]
@@ -4867,6 +4866,8 @@ dependencies = [
 [[package]]
 name = "worterbuch"
 version = "1.4.0-rc.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "170803c05edc35d479739421eb94e5b7979347ee867c604f24bdebd85db4a5f4"
 dependencies = [
  "axum 0.8.6",
  "axum-extra",
@@ -4886,6 +4887,11 @@ dependencies = [
  "lazy_static",
  "libc",
  "miette",
+ "opentelemetry",
+ "opentelemetry-otlp",
+ "opentelemetry-resource-detectors",
+ "opentelemetry-semantic-conventions",
+ "opentelemetry_sdk",
  "redb",
  "serde",
  "serde_json",
@@ -4903,6 +4909,7 @@ dependencies = [
  "tokio-util",
  "tower-http",
  "tracing",
+ "tracing-opentelemetry",
  "tracing-subscriber",
  "uuid",
  "worterbuch-common",
@@ -4911,6 +4918,8 @@ dependencies = [
 [[package]]
 name = "worterbuch-client"
 version = "1.4.0-rc.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b2969d04998b56341bfb5704a767af6edae9fb08b664ed1d0c97cc34c34eb5bc"
 dependencies = [
  "async-stream",
  "futures-util",
@@ -4926,6 +4935,8 @@ dependencies = [
 [[package]]
 name = "worterbuch-common"
 version = "1.4.0-rc.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c2c2ec1f6a2b598b19e105b4b45fed72e14d4632d2e00a8f9ff64ee1a99fa0e8"
 dependencies = [
  "axum 0.8.6",
  "http",

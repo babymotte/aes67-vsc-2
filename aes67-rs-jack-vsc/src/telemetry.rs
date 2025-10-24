@@ -15,10 +15,8 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{
-    config::{Config, EndpointConfig},
-    error::TelemetryResult,
-};
+use aes67_rs::config::{Config, EndpointConfig};
+use miette::IntoDiagnostic;
 use opentelemetry::{global, trace::TracerProvider};
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_resource_detectors::{
@@ -32,7 +30,7 @@ use tracing_subscriber::{
     EnvFilter, Layer, filter::filter_fn, fmt, layer::SubscriberExt, util::SubscriberInitExt,
 };
 
-pub async fn init(config: &Config) -> TelemetryResult<()> {
+pub async fn init(config: &Config) -> miette::Result<()> {
     let subscriber = tracing_subscriber::registry().with(
         fmt::Layer::new()
             .with_ansi(supports_color::on(Stream::Stderr).is_some())
@@ -56,12 +54,16 @@ pub async fn init(config: &Config) -> TelemetryResult<()> {
             let builder = opentelemetry_otlp::SpanExporter::builder();
 
             match &tracing_config.endpoint {
-                EndpointConfig::Grpc(endpoint) => {
-                    builder.with_tonic().with_endpoint(endpoint).build()?
-                }
-                EndpointConfig::Http(endpoint) => {
-                    builder.with_http().with_endpoint(endpoint).build()?
-                }
+                EndpointConfig::Grpc(endpoint) => builder
+                    .with_tonic()
+                    .with_endpoint(endpoint)
+                    .build()
+                    .into_diagnostic()?,
+                EndpointConfig::Http(endpoint) => builder
+                    .with_http()
+                    .with_endpoint(endpoint)
+                    .build()
+                    .into_diagnostic()?,
             }
         };
 
@@ -87,8 +89,8 @@ pub async fn init(config: &Config) -> TelemetryResult<()> {
             .with_tracer(tracer)
             .with_filter(
                 EnvFilter::from_default_env()
-                    .add_directive("tower_http=debug".parse()?)
-                    .add_directive("aes67_vsc_2=debug".parse()?),
+                    .add_directive("tower_http=debug".parse().into_diagnostic()?)
+                    .add_directive("aes67_vsc_2=debug".parse().into_diagnostic()?),
             );
 
         subscriber.with(opentelemetry).init();

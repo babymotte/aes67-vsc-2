@@ -17,7 +17,6 @@
 
 use axum::{http::StatusCode, response::IntoResponse};
 use miette::Diagnostic;
-use opentelemetry_otlp::ExporterBuildError;
 use rtp_rs::{RtpPacketBuildError, RtpReaderError};
 use std::{
     fmt::{Debug, Display},
@@ -27,7 +26,6 @@ use std::{
 use thiserror::Error;
 use tokio::sync::{oneshot, watch};
 use tracing::error;
-use tracing_subscriber::{filter::ParseError, util::TryInitError};
 use worterbuch_client::ConnectionError;
 
 pub enum ErrorCode {
@@ -91,8 +89,6 @@ pub enum VscInternalError {
     IoError(#[from] io::Error),
     #[error("Channel error.")]
     ChannelError(#[from] oneshot::error::RecvError),
-    #[error("Telemetry error: {0}")]
-    TelemetryError(#[from] TelemetryError),
     #[error("Error in VSC child app: {0}")]
     ChildAppError(#[from] ChildAppError),
     #[error("Worterbuch error: {0}")]
@@ -146,16 +142,6 @@ pub enum JackError {}
 
 #[derive(Error, Debug, Diagnostic)]
 pub enum AlsaError {}
-
-#[derive(Error, Debug, Diagnostic)]
-pub enum TelemetryError {
-    #[error("Tracing init error: {0}")]
-    TryInitError(#[from] TryInitError),
-    #[error("Tracing init error: {0}")]
-    TraceError(#[from] ExporterBuildError),
-    #[error("Tracing config parse error: {0}")]
-    ParseError(#[from] ParseError),
-}
 
 #[derive(Error, Debug, Diagnostic)]
 pub enum ConfigError {
@@ -223,8 +209,6 @@ pub enum Aes67Vsc2Error {
     JackError(#[from] Box<JackError>),
     #[error("Alsa error: {0}")]
     AlsaError(#[from] Box<AlsaError>),
-    #[error("Telemetry error: {0}")]
-    TelemetryError(#[from] Box<TelemetryError>),
     #[error("Worterbuch error: {0}")]
     WorterbuchError(#[from] Box<worterbuch_client::ConnectionError>),
     #[error("Error in child app{0}: {1}")]
@@ -248,7 +232,6 @@ pub type SenderInternalResult<T> = Result<T, SenderInternalError>;
 pub type ReceiverInternalResult<T> = Result<T, ReceiverInternalError>;
 pub type JackResult<T> = Result<T, JackError>;
 pub type AlsaResult<T> = Result<T, AlsaError>;
-pub type TelemetryResult<T> = Result<T, TelemetryError>;
 pub type ConfigResult<T> = Result<T, ConfigError>;
 pub type ClockResult<T> = Result<T, ClockError>;
 pub type DiscoveryResult<T> = Result<T, DiscoveryError>;

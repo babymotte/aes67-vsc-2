@@ -27,7 +27,6 @@ pub mod receiver;
 pub mod sender;
 pub mod serde;
 pub mod socket;
-pub mod telemetry;
 pub mod time;
 pub mod utils;
 pub mod vsc;

@@ -10,7 +10,6 @@ axum = "0.8.1"
 chrono = "0.4.41"
 clap = { version = "4.5.44", features = ["derive", "env"] }
 clock-steering = "0.2.1"
-console-subscriber = { version = "0.4.1", optional = true }
 crossbeam = "0.8.4"
 dashmap = "6.1.0"
 dirs = "6.0.0"
@@ -21,11 +20,6 @@ hex = "0.4.3"
 lazy_static = "1.5.0"
 libc = "0.2.175"
 miette = { version = "7.5.0", features = ["fancy"] }
-opentelemetry = "0.31.0"
-opentelemetry-otlp = { version = "0.31.0", features = ["grpc-tonic"] }
-opentelemetry-resource-detectors = "0.10.0"
-opentelemetry-semantic-conventions = "0.31.0"
-opentelemetry_sdk = "0.31.0"
 pin-project-lite = "0.2.16"
 pnet = "0.35.0"
 rand = "0.9.2"
@@ -42,7 +36,6 @@ serde_yaml = "0.9.34"
 socket2 = "0.6.0"
 statime = { version = "0.2.2", optional = true }
 statime-linux = { version = "0.2.2", optional = true }
-supports-color = "3.0.2"
 thiserror = "2.0.16"
 thread-priority = "3.0.0"
 timestamped-socket = "0.2.7"
@@ -52,9 +45,7 @@ tokio-metrics = { version = "0.4.5", optional = true }
 tokio-util = "0.7.16"
 tower-http = { version = "0.6.2", features = ["trace"] }
 tracing = "0.1.41"
-tracing-opentelemetry = "0.32.0"
-tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
-worterbuch-client = { version = "1.4.0-rc.1", optional = true, path = "../../../worterbuch/worterbuch/worterbuch-client" }
+worterbuch-client = { version = "1.4.0-rc.2", optional = true }
 
 [lib]
 crate-type = ["lib", "staticlib", "cdylib"]
@@ -68,7 +59,6 @@ headers = ["safer-ffi/headers"]
 c = []
 statime = ["dep:statime", "statime-linux"]
 worterbuch = ["worterbuch-client"]
-tokio-console = ["console-subscriber"]
 tokio-metrics = ["dep:tokio-metrics"]
 default = ["c", "worterbuch"]
 

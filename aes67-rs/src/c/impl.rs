@@ -23,7 +23,6 @@ use crate::{
         ToBoxedResult, VscApiResult, VscInternalError, VscInternalResult,
     },
     receiver::{api::ReceiverApi, config::ReceiverConfig},
-    telemetry,
     vsc::VirtualSoundCardApi,
 };
 use ::safer_ffi::prelude::*;
@@ -64,7 +63,7 @@ fn try_init() -> VscInternalResult<()> {
     //     .enable_all()
     //     .build()?;
     let init_future = async {
-        telemetry::init(&config).await?;
+        // telemetry::init(&config).await?;
         Ok::<(), VscInternalError>(())
     };
     // runtime.block_on(init_future)?;

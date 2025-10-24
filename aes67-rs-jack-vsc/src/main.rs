@@ -19,11 +19,12 @@ mod common;
 mod play;
 mod record;
 mod session_manager;
+mod telemetry;
 
 use crate::{play::start_playout, record::start_recording};
 use aes67_rs::{
     discovery::start_sap_discovery, receiver::config::RxDescriptor, sender::config::TxDescriptor,
-    telemetry, time::get_clock, vsc::VirtualSoundCardApi,
+    time::get_clock, vsc::VirtualSoundCardApi,
 };
 use aes67_rs_ui::{Aes67VscUi, config::PersistentConfig};
 use miette::IntoDiagnostic;
@@ -40,7 +41,7 @@ async fn main() -> miette::Result<()> {
 
     let config = PersistentConfig::load(app_id).await?;
 
-    telemetry::init(&config.vsc).await.into_diagnostic()?;
+    telemetry::init(&config.vsc).await?;
 
     Toplevel::new(move |s| async move {
         s.start(SubsystemBuilder::new(app_id, move |s| run(s, config)));
