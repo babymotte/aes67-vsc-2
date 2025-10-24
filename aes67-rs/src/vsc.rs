@@ -95,6 +95,8 @@ impl VirtualSoundCardApi {
     ) -> VscInternalResult<ApiMessageSender> {
         let subsystem_name = name.clone();
         let (api_tx, api_rx) = mpsc::channel(1024);
+        #[cfg(feature = "tokio-metrics")]
+        let wb = worterbuch_client.clone();
 
         let subsystem = |s: SubsystemHandle| async move {
             VirtualSoundCard::new(
@@ -108,7 +110,15 @@ impl VirtualSoundCardApi {
             Ok::<(), VscInternalError>(())
         };
 
-        let mut app = spawn_child_app(subsystem_name.clone(), subsystem, shutdown_token.clone())?;
+        let mut app = spawn_child_app(
+            #[cfg(feature = "tokio-metrics")]
+            subsystem_name.clone(),
+            subsystem_name.clone(),
+            subsystem,
+            shutdown_token.clone(),
+            #[cfg(feature = "tokio-metrics")]
+            wb,
+        )?;
         wait_for_start(subsystem_name, &mut app).await?;
         propagate_exit(app, shutdown_token);
         Ok(api_tx)
@@ -181,6 +191,8 @@ struct VirtualSoundCard {
     rx_counter: u32,
     monitoring: Monitoring,
     shutdown_token: CancellationToken,
+    #[cfg(feature = "tokio-metrics")]
+    wb: Worterbuch,
 }
 
 impl VirtualSoundCard {
@@ -190,8 +202,11 @@ impl VirtualSoundCard {
         shutdown_token: CancellationToken,
         worterbuch_client: Worterbuch,
     ) -> VscInternalResult<Self> {
-        let monitoring =
-            start_monitoring_service(name.clone(), shutdown_token.clone(), worterbuch_client)?;
+        let monitoring = start_monitoring_service(
+            name.clone(),
+            shutdown_token.clone(),
+            worterbuch_client.clone(),
+        )?;
         Ok(VirtualSoundCard {
             name,
             api_rx,
@@ -203,6 +218,8 @@ impl VirtualSoundCard {
             rx_counter: 0,
             monitoring,
             shutdown_token,
+            #[cfg(feature = "tokio-metrics")]
+            wb: worterbuch_client,
         })
     }
 
@@ -247,11 +264,14 @@ impl VirtualSoundCard {
         info!("Creating sender '{label}' ({qualified_id}) …");
 
         let sender_api = start_sender(
+            self.name.clone(),
             qualified_id.clone(),
             label,
             config,
             self.monitoring.child(qualified_id.clone()),
             self.shutdown_token.clone(),
+            #[cfg(feature = "tokio-metrics")]
+            self.wb.clone(),
         )
         .await?;
 
@@ -285,12 +305,15 @@ impl VirtualSoundCard {
         let clock = get_clock(ptp_mode, desc.audio_format)?;
         let monitoring = self.monitoring.child(qulified_id.clone());
         let receiver_api = start_receiver(
+            self.name.clone(),
             qulified_id.clone(),
             label,
             config,
             clock,
             monitoring.clone(),
             self.shutdown_token.clone(),
+            #[cfg(feature = "tokio-metrics")]
+            self.wb.clone(),
         )
         .await?;
 

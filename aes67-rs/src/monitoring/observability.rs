@@ -24,6 +24,7 @@ use crate::{
     },
     receiver::config::RxDescriptor,
     sender::config::TxDescriptor,
+    utils::publish_individual,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -454,23 +455,5 @@ impl ObservabilityActor {
 
     async fn unpublish_receiver(&self, qualified_id: &str) {
         self.wb.delete_async(topic!(qualified_id)).await.ok();
-    }
-}
-
-async fn publish_individual(wb: &Worterbuch, key: String, object: impl Serialize) {
-    let Ok(json) = serde_json::to_value(object) else {
-        return;
-    };
-
-    publish_individual_values(wb, key, json).await;
-}
-
-async fn publish_individual_values(wb: &Worterbuch, key: String, object: Value) {
-    if let Value::Object(map) = object {
-        for (k, v) in map {
-            Box::pin(publish_individual_values(wb, topic!(key, k), v)).await;
-        }
-    } else {
-        wb.set_async(key, object).await.ok();
     }
 }

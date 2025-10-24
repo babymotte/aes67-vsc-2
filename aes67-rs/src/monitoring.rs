@@ -324,6 +324,8 @@ fn monitoring(
     shutdown_token: CancellationToken,
     worterbuch_client: Worterbuch,
 ) -> ChildAppResult<()> {
+    #[cfg(feature = "tokio-metrics")]
+    let app_id = client_name.clone();
     let name = format!("{client_name}-monitoring");
 
     let (stats_tx, stats_rx) = mpsc::channel::<Report>(1024);
@@ -331,8 +333,8 @@ fn monitoring(
 
     let stats = |s: SubsystemHandle| stats(s, mon_rx, stats_tx);
     let health = |s: SubsystemHandle| health(s, stats_rx, observ_tx);
-    let observability =
-        |s: SubsystemHandle| observability(s, client_name, observ_rx, worterbuch_client);
+    let wb = worterbuch_client.clone();
+    let observability = |s: SubsystemHandle| observability(s, client_name, observ_rx, wb);
 
     let subsystem = |s: SubsystemHandle| async move {
         spawn(start);
@@ -344,7 +346,15 @@ fn monitoring(
     };
 
     propagate_exit(
-        spawn_child_app(name, subsystem, shutdown_token.clone())?,
+        spawn_child_app(
+            #[cfg(feature = "tokio-metrics")]
+            app_id,
+            name,
+            subsystem,
+            shutdown_token.clone(),
+            #[cfg(feature = "tokio-metrics")]
+            worterbuch_client,
+        )?,
         shutdown_token,
     );
 

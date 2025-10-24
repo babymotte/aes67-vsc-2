@@ -18,7 +18,6 @@
 use sdp::SessionDescription;
 use serde::{Deserialize, Deserializer, Serializer};
 use std::io::Cursor;
-use tokio::task::block_in_place;
 use tracing::instrument;
 
 #[instrument(skip(deserializer))]
@@ -26,21 +25,20 @@ pub fn deserialize_sdp<'de, D>(deserializer: D) -> Result<SessionDescription, D:
 where
     D: Deserializer<'de>,
 {
-    let s = String::deserialize(deserializer)?;
-    let resp = block_in_place(|| fetch_sdp::<'de, D>(s))?;
-    SessionDescription::unmarshal(&mut Cursor::new(&resp)).map_err(serde::de::Error::custom)
+    let sdp = String::deserialize(deserializer)?;
+    SessionDescription::unmarshal(&mut Cursor::new(&sdp)).map_err(serde::de::Error::custom)
 }
 
-fn fetch_sdp<'de, D>(s: String) -> Result<String, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let sdp = reqwest::blocking::get(s)
-        .map_err(serde::de::Error::custom)?
-        .text()
-        .map_err(serde::de::Error::custom)?;
-    Ok(sdp)
-}
+// fn fetch_sdp<'de, D>(s: String) -> Result<String, D::Error>
+// where
+//     D: Deserializer<'de>,
+// {
+//     let sdp = reqwest::blocking::get(s)
+//         .map_err(serde::de::Error::custom)?
+//         .text()
+//         .map_err(serde::de::Error::custom)?;
+//     Ok(sdp)
+// }
 
 #[instrument(skip(serializer))]
 pub fn serialize_sdp<S>(value: &SessionDescription, serializer: S) -> Result<S::Ok, S::Error>

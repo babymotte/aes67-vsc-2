@@ -1,31 +1,14 @@
-import { createEffect, createSignal } from "solid-js";
-import { subscribeLs } from "./worterbuch";
+import { createSignal } from "solid-js";
 import axios from "axios";
 
 const [appName, setAppName] = createSignal<string | null>(null);
-const [selectedVsc, setSelectedVsc] = createSignal<string | null>(null);
-const [vscs, setVscs] = createSignal<string[]>([]);
 
 export function VscState() {
   axios.get("/api/v1/backend/app-name").then((response) => {
     setAppName(response.data);
   });
 
-  createEffect(() => {
-    let name = appName();
-    if (name) {
-      subscribeLs(name, setVscs);
-    }
-  });
-
-  createEffect(() => {
-    let vscList = vscs();
-    if (vscList.length > 0 && !selectedVsc()) {
-      setSelectedVsc(vscList[0]);
-    }
-  });
-
   return null;
 }
 
-export { vscs, appName, selectedVsc };
+export { appName };

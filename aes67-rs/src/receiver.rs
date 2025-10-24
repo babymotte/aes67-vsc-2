@@ -41,15 +41,19 @@ use tokio::{net::UdpSocket, select, sync::mpsc};
 use tokio_graceful_shutdown::SubsystemHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, instrument, warn};
+#[cfg(feature = "tokio-metrics")]
+use worterbuch_client::Worterbuch;
 
-#[instrument(skip(clock, monitoring))]
+#[instrument(skip(clock, monitoring, shutdown_token, wb))]
 pub(crate) async fn start_receiver(
+    app_id: String,
     id: String,
     label: String,
     config: ReceiverConfig,
     clock: Box<dyn MediaClock>,
     monitoring: Monitoring,
     shutdown_token: CancellationToken,
+    #[cfg(feature = "tokio-metrics")] wb: Worterbuch,
 ) -> ReceiverInternalResult<ReceiverApi> {
     let receiver_id = id.clone();
     let (api_tx, api_rx) = mpsc::channel(1024);
@@ -77,7 +81,15 @@ pub(crate) async fn start_receiver(
         .await
     };
 
-    let mut app = spawn_child_app(subsystem_name.clone(), subsystem, shutdown_token)?;
+    let mut app = spawn_child_app(
+        #[cfg(feature = "tokio-metrics")]
+        app_id,
+        subsystem_name.clone(),
+        subsystem,
+        shutdown_token,
+        #[cfg(feature = "tokio-metrics")]
+        wb,
+    )?;
     wait_for_start(subsystem_name, &mut app).await?;
 
     info!("Receiver '{receiver_id}' started successfully.");
@@ -244,6 +256,7 @@ impl Receiver {
         let local_wrapped_timestamp = (media_time % U32_WRAP) as u32;
 
         if local_wrapped_timestamp < rtp_timestamp {
+            dbg!(rtp_timestamp - local_wrapped_timestamp);
             warn!(
                 "Either the clock has wrapped while packet was in flight or the local clock is not properly synced to PTP. Skipping calibration."
             );

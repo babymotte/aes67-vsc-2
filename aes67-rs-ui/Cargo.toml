@@ -16,5 +16,9 @@ tokio = "1.47.1"
 tokio-graceful-shutdown = { version = "0.18.0", features = ["tracing"] }
 tokio-util = "0.7.16"
 tracing = "0.1.41"
-worterbuch = { version = "1.4.0-rc.0", path = "../../../worterbuch/worterbuch/worterbuch", default-features = false }
-worterbuch-client = { version = "1.4.0-rc.0", path = "../../../worterbuch/worterbuch/worterbuch-client" }
+worterbuch = { version = "1.4.0-rc.1", default-features = false, path = "../../../worterbuch/worterbuch/worterbuch" }
+worterbuch-client = { version = "1.4.0-rc.1", path = "../../../worterbuch/worterbuch/worterbuch-client" }
+
+[features]
+tokio-metrics = []
+default = []

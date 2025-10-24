@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 aes67-rs = { path = "../aes67-rs" }
 aes67-rs-ui = { path = "../aes67-rs-ui" }
+console-subscriber = { version = "0.4.1", optional = true }
 directories = "6.0.0"
 dirs = "6.0.0"
 futures-lite = "2.6.1"
@@ -14,10 +15,17 @@ lazy_static = "1.5.0"
 miette = { version = "7.6.0", features = ["fancy"] }
 rand = "0.9.2"
 serde = "1.0.219"
+serde_json = "1.0.145"
 serde_yaml = "0.9.34"
-tokio = { version = "1.47.1", features = ["full"] }
+tokio = { version = "1.48.0", features = ["full", "tracing"] }
 tokio-graceful-shutdown = { version = "0.18.0", features = ["tracing"] }
 tokio-util = "0.7.16"
 tracing = "0.1.41"
-worterbuch = { version = "1.4.0-rc.0", path = "../../../worterbuch/worterbuch/worterbuch" }
-worterbuch-client = { version = "1.4.0-rc.0", path = "../../../worterbuch/worterbuch/worterbuch-client" }
+worterbuch = { version = "1.4.0-rc.1", default-features = false, path = "../../../worterbuch/worterbuch/worterbuch" }
+worterbuch-client = { version = "1.4.0-rc.1", path = "../../../worterbuch/worterbuch/worterbuch-client" }
+
+[features]
+tokio-console = ["aes67-rs/tokio-console"]
+jemalloc = ["worterbuch/jemalloc"]
+tokio-metrics = ["aes67-rs/tokio-metrics", "aes67-rs-ui/tokio-metrics"]
+default = ["jemalloc"]

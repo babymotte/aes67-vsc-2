@@ -29,11 +29,17 @@ impl Aes67VscUi {
         worterbuch: CloneableWbApi,
         shutdown_token: CancellationToken,
     ) -> Result<()> {
+        #[cfg(feature = "tokio-metrics")]
+        let wb = worterbuch_client::local_client_wrapper(worterbuch.clone());
         propagate_exit(
             spawn_child_app(
+                #[cfg(feature = "tokio-metrics")]
+                persistent_config.vsc.app.name.clone(),
                 "aes67-rs-ui".to_owned(),
                 |s| run(s, persistent_config, worterbuch),
                 shutdown_token.clone(),
+                #[cfg(feature = "tokio-metrics")]
+                wb,
             )
             .into_diagnostic()?,
             shutdown_token,

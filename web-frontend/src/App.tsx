@@ -3,7 +3,7 @@ import Receivers from "./components/Receivers";
 import Senders from "./components/Senders";
 import Config from "./components/Config";
 import "./App.css";
-import { vscs, VscState } from "./vscState";
+import { VscState } from "./vscState";
 import { Worterbuch } from "./worterbuch";
 
 function AddSenderButton() {
@@ -43,8 +43,6 @@ export default function App() {
             <AddReceiverButton />
           </Match>
         </Switch>
-        <div class="spacer" />
-        <span>{vscs()}</span>
       </div>
       <div class="tab" classList={{ pending: pending() }}>
         <Suspense fallback={<div class="loader">Loading...</div>}>

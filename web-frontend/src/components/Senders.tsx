@@ -8,7 +8,7 @@ import {
   useTransition,
 } from "solid-js";
 import { pSubscribe } from "../worterbuch";
-import { selectedVsc, appName } from "../vscState";
+import { appName } from "../vscState";
 import { sortTransceivers, transceiverID } from "../utils";
 
 export default function Senders() {
@@ -19,8 +19,7 @@ export default function Senders() {
 
   createEffect(() => {
     const an = appName();
-    const sv = selectedVsc();
-    pSubscribe(`${an}/${sv}/tx/?/label`, setSenders);
+    pSubscribe(`${an}/tx/?/label`, setSenders);
   });
 
   return (

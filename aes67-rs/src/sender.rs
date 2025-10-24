@@ -37,14 +37,18 @@ use tokio::{net::UdpSocket, select, sync::mpsc};
 use tokio_graceful_shutdown::SubsystemHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, instrument};
+#[cfg(feature = "tokio-metrics")]
+use worterbuch_client::Worterbuch;
 
-#[instrument(skip(monitoring))]
+#[instrument(skip(monitoring, shutdown_token, wb))]
 pub(crate) async fn start_sender(
+    app_id: String,
     id: String,
     label: String,
     config: SenderConfig,
     monitoring: Monitoring,
     shutdown_token: CancellationToken,
+    #[cfg(feature = "tokio-metrics")] wb: Worterbuch,
 ) -> SenderInternalResult<SenderApi> {
     let sender_id = id.clone();
     let (api_tx, api_rx) = mpsc::channel(1024);
@@ -72,7 +76,15 @@ pub(crate) async fn start_sender(
         .await
     };
 
-    let mut app = spawn_child_app(subsystem_name.clone(), subsystem, shutdown_token)?;
+    let mut app = spawn_child_app(
+        #[cfg(feature = "tokio-metrics")]
+        app_id,
+        subsystem_name.clone(),
+        subsystem,
+        shutdown_token,
+        #[cfg(feature = "tokio-metrics")]
+        wb,
+    )?;
     wait_for_start(subsystem_name, &mut app).await?;
 
     info!("Sender '{sender_id}' started successfully.");

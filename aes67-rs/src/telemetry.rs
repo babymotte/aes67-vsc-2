@@ -43,6 +43,12 @@ pub async fn init(config: &Config) -> TelemetryResult<()> {
             })),
     );
 
+    #[cfg(feature = "tokio-console")]
+    let subscriber = {
+        let console_layer = console_subscriber::spawn();
+        subscriber.with(console_layer)
+    };
+
     if let Some(tracing_config) = &config.telemetry {
         global::set_text_map_propagator(TraceContextPropagator::new());
 

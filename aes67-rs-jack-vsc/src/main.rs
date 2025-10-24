@@ -27,10 +27,12 @@ use aes67_rs::{
 };
 use aes67_rs_ui::{Aes67VscUi, config::PersistentConfig};
 use miette::IntoDiagnostic;
+use serde_json::json;
 use std::time::Duration;
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle, Toplevel};
 use tracing::{error, info};
 use worterbuch::PersistenceMode;
+use worterbuch_client::{KeyValuePair, topic};
 
 #[tokio::main]
 async fn main() -> miette::Result<()> {
@@ -74,6 +76,20 @@ async fn run(subsys: SubsystemHandle, config: PersistentConfig) -> miette::Resul
     let worterbuch = worterbuch::spawn_worterbuch(&subsys, wb_config).await?;
 
     let wb = worterbuch_client::local_client_wrapper(worterbuch.clone());
+
+    wb.set_grave_goods(&[
+        &topic!(id, "metrics", "#"),
+        &topic!(id, "tx", "#"),
+        &topic!(id, "rx", "#"),
+    ])
+    .await
+    .ok();
+    wb.set_last_will(&[KeyValuePair {
+        key: topic!(id, "running"),
+        value: json!(false),
+    }])
+    .await
+    .ok();
 
     let wbd = wb.clone();
     subsys.start(SubsystemBuilder::new("discovery", |s| {

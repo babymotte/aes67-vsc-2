@@ -15,6 +15,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+use serde::Serialize;
 use std::{
     any::Any,
     fmt::Debug,
@@ -27,6 +28,7 @@ use thread_priority::{
 };
 use tokio::sync::mpsc::{self, error::TryRecvError};
 use tracing::{info, warn};
+use worterbuch_client::{Value, Worterbuch, topic};
 
 pub const U8_WRAP: u16 = 256;
 pub const U16_WRAP: u32 = 65536;
@@ -113,5 +115,23 @@ pub fn set_realtime_priority() {
         warn!("Could not set thread priority: {e}");
     } else {
         info!("Successfully set real time priority for thread {pid}.");
+    }
+}
+
+pub async fn publish_individual(wb: &Worterbuch, key: String, object: impl Serialize) {
+    let Ok(json) = serde_json::to_value(object) else {
+        return;
+    };
+
+    publish_individual_values(wb, key, json).await;
+}
+
+async fn publish_individual_values(wb: &Worterbuch, key: String, object: Value) {
+    if let Value::Object(map) = object {
+        for (k, v) in map {
+            Box::pin(publish_individual_values(wb, topic!(key, k), v)).await;
+        }
+    } else {
+        wb.set_async(key, object).await.ok();
     }
 }

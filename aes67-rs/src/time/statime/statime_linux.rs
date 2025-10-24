@@ -730,69 +730,69 @@ fn publish_stats(
 ) {
     spawn(async move {
         while let Some(stats) = instance_state_receiver.recv().await {
-            wb.publish(
+            wb.publish_async(
                 topic!(root_key, "status", "current", "offsetFromMaster"),
                 &stats.current_ds.offset_from_master,
             )
             .await
             .ok();
-            wb.publish(
+            wb.publish_async(
                 topic!(root_key, "status", "current", "stepsRemoved"),
                 &stats.current_ds.steps_removed,
             )
             .await
             .ok();
 
-            wb.set(
+            wb.set_async(
                 topic!(root_key, "status", "default", "clock", "id"),
                 &stats.default_ds.clock_identity,
             )
             .await
             .ok();
-            wb.set(
+            wb.set_async(
                 topic!(root_key, "status", "default", "clock", "quality"),
                 &stats.default_ds.clock_quality,
             )
             .await
             .ok();
-            wb.set(
+            wb.set_async(
                 topic!(root_key, "status", "default", "domain"),
                 &stats.default_ds.domain_number,
             )
             .await
             .ok();
-            wb.set(
+            wb.set_async(
                 topic!(root_key, "status", "default", "ports"),
                 &stats.default_ds.number_ports,
             )
             .await
             .ok();
-            wb.set(
+            wb.set_async(
                 topic!(root_key, "status", "default", "priority1"),
                 &stats.default_ds.priority_1,
             )
             .await
             .ok();
-            wb.set(
+            wb.set_async(
                 topic!(root_key, "status", "default", "priority2"),
                 &stats.default_ds.priority_2,
             )
             .await
             .ok();
-            wb.set(
+            wb.set_async(
                 topic!(root_key, "status", "default", "sdoID"),
                 &stats.default_ds.sdo_id,
             )
             .await
             .ok();
-            wb.set(
+            wb.set_async(
                 topic!(root_key, "status", "default", "slaveOnly"),
                 &stats.default_ds.slave_only,
             )
             .await
             .ok();
 
-            wb.set(
+            wb.set_async(
                 topic!(
                     root_key,
                     "status",
@@ -806,13 +806,13 @@ fn publish_stats(
             )
             .await
             .ok();
-            wb.set(
+            wb.set_async(
                 topic!(root_key, "status", "parent", "grandmaster", "id"),
                 &stats.parent_ds.grandmaster_identity,
             )
             .await
             .ok();
-            wb.set(
+            wb.set_async(
                 topic!(
                     root_key,
                     "status",
@@ -825,7 +825,7 @@ fn publish_stats(
             )
             .await
             .ok();
-            wb.set(
+            wb.set_async(
                 topic!(
                     root_key,
                     "status",
@@ -838,33 +838,33 @@ fn publish_stats(
             )
             .await
             .ok();
-            wb.set(
+            wb.set_async(
                 topic!(root_key, "status", "parent", "port", "id"),
                 &stats.parent_ds.parent_port_identity,
             )
             .await
             .ok();
 
-            wb.set(
+            wb.set_async(
                 topic!(root_key, "status", "pathTrace", "enabled"),
                 &stats.path_trace_ds.enable,
             )
             .await
             .ok();
-            wb.set(
+            wb.set_async(
                 topic!(root_key, "status", "pathTrace", "list"),
                 &stats.path_trace_ds.list,
             )
             .await
             .ok();
 
-            wb.publish(
+            wb.publish_async(
                 topic!(root_key, "status", "time", "properties", "utcOffset"),
                 &stats.time_properties_ds.current_utc_offset,
             )
             .await
             .ok();
-            wb.set(
+            wb.set_async(
                 topic!(
                     root_key,
                     "status",
@@ -877,13 +877,13 @@ fn publish_stats(
             )
             .await
             .ok();
-            wb.set(
+            wb.set_async(
                 topic!(root_key, "status", "time", "properties", "isPtp"),
                 &stats.time_properties_ds.is_ptp(),
             )
             .await
             .ok();
-            wb.set(
+            wb.set_async(
                 topic!(
                     root_key,
                     "status",
@@ -896,7 +896,7 @@ fn publish_stats(
             )
             .await
             .ok();
-            wb.set(
+            wb.set_async(
                 topic!(
                     root_key,
                     "status",

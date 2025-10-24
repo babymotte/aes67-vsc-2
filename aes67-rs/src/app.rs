@@ -4,6 +4,8 @@ use tokio::{runtime, spawn, sync::mpsc};
 use tokio_graceful_shutdown::{ErrTypeTraits, SubsystemBuilder, SubsystemHandle, Toplevel};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
+#[cfg(feature = "tokio-metrics")]
+use worterbuch_client::Worterbuch;
 
 pub enum AppState {
     Started,
@@ -12,9 +14,11 @@ pub enum AppState {
 }
 
 pub fn spawn_child_app<'a, ErrType, Err, Fut, Subsys>(
+    #[cfg(feature = "tokio-metrics")] app_id: String,
     name: String,
     subsystem: Subsys,
     shutdown_token: CancellationToken,
+    #[cfg(feature = "tokio-metrics")] wb: Worterbuch,
 ) -> ChildAppResult<mpsc::Receiver<AppState>>
 where
     ErrType: ErrTypeTraits,
@@ -32,10 +36,19 @@ where
     };
 
     let n = name.clone();
-    if let Err(e) = thread::Builder::new()
-        .name(name.clone())
-        .spawn(move || start_child_app_runtime(n, subsystem, runtime, state_tx, shutdown_token))
-    {
+    if let Err(e) = thread::Builder::new().name(name.clone()).spawn(move || {
+        start_child_app_runtime(
+            #[cfg(feature = "tokio-metrics")]
+            app_id,
+            n,
+            subsystem,
+            runtime,
+            state_tx,
+            shutdown_token,
+            #[cfg(feature = "tokio-metrics")]
+            wb,
+        )
+    }) {
         return Err(ChildAppError(name, e.to_string()));
     }
 
@@ -43,11 +56,13 @@ where
 }
 
 fn start_child_app_runtime<'a, ErrType, Err, Fut, Subsys>(
+    #[cfg(feature = "tokio-metrics")] app_id: String,
     name: String,
     subsystem: Subsys,
     runtime: tokio::runtime::Runtime,
     state_tx: mpsc::Sender<AppState>,
     shutdown_token: CancellationToken,
+    #[cfg(feature = "tokio-metrics")] wb: Worterbuch,
 ) where
     ErrType: ErrTypeTraits,
     Subsys: 'static + FnOnce(SubsystemHandle<ErrType>) -> Fut + Send,
@@ -55,6 +70,9 @@ fn start_child_app_runtime<'a, ErrType, Err, Fut, Subsys>(
     Err: Into<ErrType> + Send,
 {
     runtime.block_on(async move {
+        #[cfg(feature = "tokio-metrics")]
+        setup_metrics(app_id, name.clone(), wb).await;
+
         let n = name.clone();
         let tx = state_tx.clone();
         if let Err(e) = Toplevel::new_with_shutdown_token(
@@ -74,6 +92,76 @@ fn start_child_app_runtime<'a, ErrType, Err, Fut, Subsys>(
         .await
         {
             state_tx.send(AppState::Crashed(Box::new(e))).await.ok();
+        }
+    });
+}
+
+#[cfg(feature = "tokio-metrics")]
+async fn setup_metrics(app_id: String, subsystem_name: String, wb: Worterbuch) {
+    let handle = tokio::runtime::Handle::current();
+    let runtime_monitor = tokio_metrics::RuntimeMonitor::new(&handle);
+    let frequency = std::time::Duration::from_millis(500);
+    tokio::spawn(async move {
+        for metrics in runtime_monitor.intervals() {
+            use worterbuch_client::topic;
+
+            let root_key = topic!(app_id, "tokio", "metrics", subsystem_name, "metrics");
+
+            wb.set_async(topic!(root_key, "elapsed"), metrics.elapsed)
+                .await
+                .ok();
+            wb.set_async(
+                topic!(root_key, "global_queue_depth"),
+                metrics.global_queue_depth,
+            )
+            .await
+            .ok();
+            wb.set_async(topic!(root_key, "workers_count"), metrics.workers_count)
+                .await
+                .ok();
+
+            wb.set_async(topic!(root_key, "busy", "ratio"), metrics.busy_ratio())
+                .await
+                .ok();
+            wb.set_async(
+                topic!(root_key, "busy", "max_duration"),
+                metrics.max_busy_duration,
+            )
+            .await
+            .ok();
+            wb.set_async(
+                topic!(root_key, "busy", "min_duration"),
+                metrics.min_busy_duration,
+            )
+            .await
+            .ok();
+            wb.set_async(
+                topic!(root_key, "busy", "total_duration"),
+                metrics.total_busy_duration,
+            )
+            .await
+            .ok();
+
+            wb.set_async(
+                topic!(root_key, "park_count", "max"),
+                metrics.max_park_count,
+            )
+            .await
+            .ok();
+            wb.set_async(
+                topic!(root_key, "park_count", "min"),
+                metrics.min_park_count,
+            )
+            .await
+            .ok();
+            wb.set_async(
+                topic!(root_key, "park_count", "total"),
+                metrics.total_park_count,
+            )
+            .await
+            .ok();
+
+            tokio::time::sleep(frequency).await;
         }
     });
 }
