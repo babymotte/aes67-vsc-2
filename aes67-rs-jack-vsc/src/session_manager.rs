@@ -113,13 +113,14 @@ pub fn start_session_manager<N, P>(
     N: 'static + Send + Sync + NotificationHandler,
     P: 'static + Send + ProcessHandler,
 {
-    subsys.start(SubsystemBuilder::new("session_manager", |s| {
-        run(s, client, notifications, app_id)
-    }));
+    subsys.start(SubsystemBuilder::new(
+        "session_manager",
+        async |s: &mut SubsystemHandle| run(s, client, notifications, app_id).await,
+    ));
 }
 
 async fn run<N, P>(
-    subsys: SubsystemHandle,
+    subsys: &mut SubsystemHandle,
     client: AsyncClient<N, P>,
     mut notifications: mpsc::Receiver<Notification>,
     app_id: String,

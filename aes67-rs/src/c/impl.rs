@@ -23,6 +23,7 @@ use crate::{
         ToBoxedResult, VscApiResult, VscInternalError, VscInternalResult,
     },
     receiver::{api::ReceiverApi, config::ReceiverConfig},
+    serde::SdpWrapper,
     vsc::VirtualSoundCardApi,
 };
 use ::safer_ffi::prelude::*;
@@ -76,8 +77,10 @@ impl<'a> TryFrom<&Aes67VscReceiverConfig<'a>> for ReceiverConfig {
     type Error = ConfigError;
     fn try_from(value: &Aes67VscReceiverConfig<'a>) -> ConfigResult<Self> {
         let id = value.name.map(|it| it.to_string());
-        let session = SessionDescription::unmarshal(&mut Cursor::new(value.sdp.to_str()))
-            .map_err(|e| ConfigError::InvalidSdp(e.to_string()))?;
+        let session = SdpWrapper(
+            SessionDescription::unmarshal(&mut Cursor::new(value.sdp.to_str()))
+                .map_err(|e| ConfigError::InvalidSdp(e.to_string()))?,
+        );
         let link_offset = value.link_offset;
         let delay_calculation_interval = None;
         let interface_ip = value.interface_ip.to_str().parse()?;

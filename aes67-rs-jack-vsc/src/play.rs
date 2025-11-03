@@ -32,7 +32,7 @@ impl State {}
 
 pub async fn start_playout(
     app_id: String,
-    subsys: SubsystemHandle,
+    subsys: &mut SubsystemHandle,
     receiver: ReceiverApi,
     descriptor: RxDescriptor,
     clock: Box<dyn MediaClock>,

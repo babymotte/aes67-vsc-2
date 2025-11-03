@@ -43,8 +43,11 @@ async fn main() -> miette::Result<()> {
 
     telemetry::init(&config.vsc).await?;
 
-    Toplevel::new(move |s| async move {
-        s.start(SubsystemBuilder::new(app_id, move |s| run(s, config)));
+    Toplevel::new(async move |s: &mut SubsystemHandle| {
+        s.start(SubsystemBuilder::new(
+            app_id,
+            async move |s: &mut SubsystemHandle| run(s, config).await,
+        ));
     })
     .catch_signals()
     .handle_shutdown_requests(Duration::from_secs(1))
@@ -54,7 +57,7 @@ async fn main() -> miette::Result<()> {
     Ok(())
 }
 
-async fn run(subsys: SubsystemHandle, config: PersistentConfig) -> miette::Result<()> {
+async fn run(subsys: &mut SubsystemHandle, config: PersistentConfig) -> miette::Result<()> {
     let id = config.vsc.instance_name().to_owned();
 
     info!("Starting {} …", id);
@@ -93,9 +96,12 @@ async fn run(subsys: SubsystemHandle, config: PersistentConfig) -> miette::Resul
     .ok();
 
     let wbd = wb.clone();
-    subsys.start(SubsystemBuilder::new("discovery", |s| {
-        start_sap_discovery(wbd, s.create_cancellation_token())
-    }));
+    subsys.start(SubsystemBuilder::new(
+        "discovery",
+        async |s: &mut SubsystemHandle| {
+            start_sap_discovery(wbd, s.create_cancellation_token()).await
+        },
+    ));
 
     let vsc_config = config.vsc.clone();
 
@@ -114,16 +120,18 @@ async fn run(subsys: SubsystemHandle, config: PersistentConfig) -> miette::Resul
         let app_id = id.clone();
         subsys.start(SubsystemBuilder::new(
             format!("sender/{}", descriptor.id),
-            |s| async move {
-                match vsc.create_sender(tx_config).await.into_diagnostic() {
-                    Ok((sender, _)) => {
-                        let clock = get_clock(ptp_mode, descriptor.audio_format)?;
-                        start_recording(app_id, s, sender, descriptor, clock).await
-                    }
-                    Err(e) => {
-                        error!("Error creating sender '{}': {}", descriptor.id, e);
-                        Ok(())
-                    }
+            async move |s: &mut SubsystemHandle| match vsc
+                .create_sender(tx_config)
+                .await
+                .into_diagnostic()
+            {
+                Ok((sender, _)) => {
+                    let clock = get_clock(ptp_mode, descriptor.audio_format)?;
+                    start_recording(app_id, s, sender, descriptor, clock).await
+                }
+                Err(e) => {
+                    error!("Error creating sender '{}': {}", descriptor.id, e);
+                    Ok(())
                 }
             },
         ));
@@ -136,20 +144,18 @@ async fn run(subsys: SubsystemHandle, config: PersistentConfig) -> miette::Resul
         let app_id = id.clone();
         subsys.start(SubsystemBuilder::new(
             format!("receiver/{}", descriptor.id),
-            |s| async move {
-                match vsc
-                    .create_receiver(rx_config, ptp_mode.clone())
-                    .await
-                    .into_diagnostic()
-                {
-                    Ok((receiver, monitoring, _)) => {
-                        let clock = get_clock(ptp_mode, descriptor.audio_format)?;
-                        start_playout(app_id, s, receiver, descriptor, clock, monitoring).await
-                    }
-                    Err(e) => {
-                        error!("Error creating receiver '{}': {}", descriptor.id, e);
-                        Ok(())
-                    }
+            async move |s: &mut SubsystemHandle| match vsc
+                .create_receiver(rx_config, ptp_mode.clone())
+                .await
+                .into_diagnostic()
+            {
+                Ok((receiver, monitoring, _)) => {
+                    let clock = get_clock(ptp_mode, descriptor.audio_format)?;
+                    start_playout(app_id, s, receiver, descriptor, clock, monitoring).await
+                }
+                Err(e) => {
+                    error!("Error creating receiver '{}': {}", descriptor.id, e);
+                    Ok(())
                 }
             },
         ));

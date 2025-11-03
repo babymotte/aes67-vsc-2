@@ -37,7 +37,7 @@ receivers:
   #   # interfaceIp: 192.168.178.36
   #   # interfaceIp: 172.50.0.177
   # Bluetooth
-  - session: http://127.0.0.1:55667/api/v1/get/discovery/sap/192.168.178.97/25614?raw
+  - session: http://127.0.0.1:43567/api/v1/get/discovery/sap/192.168.178.97/25614?raw
     linkOffset: 4.0
     interfaceIp: 192.168.178.39
   # interfaceIp: 192.168.178.36

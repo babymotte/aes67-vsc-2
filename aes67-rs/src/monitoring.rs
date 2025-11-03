@@ -21,6 +21,7 @@ mod stats;
 
 use crate::{
     app::{propagate_exit, spawn_child_app},
+    buffer::AudioBufferPointer,
     error::{ChildAppError, ChildAppResult},
     formats::{Frames, MilliSeconds},
     monitoring::{health::health, observability::observability, stats::stats},
@@ -72,6 +73,7 @@ pub enum SenderState {
         id: String,
         descriptor: TxDescriptor,
         label: String,
+        address: AudioBufferPointer,
     },
     Renamed {
         id: String,
@@ -88,6 +90,7 @@ pub enum ReceiverState {
         id: String,
         descriptor: RxDescriptor,
         label: String,
+        address: AudioBufferPointer,
     },
     Renamed {
         id: String,
@@ -175,7 +178,7 @@ pub enum TxStats {
 
 #[derive(Debug, Clone)]
 pub enum RxStats {
-    Started(RxDescriptor),
+    Started(RxDescriptor, AudioBufferPointer),
     BufferUnderrun,
     InconsistentTimestamp,
     PacketReceived {
@@ -331,12 +334,13 @@ fn monitoring(
     let (stats_tx, stats_rx) = mpsc::channel::<Report>(1024);
     let (observ_tx, observ_rx) = broadcast::channel::<Report>(1024);
 
-    let stats = |s: SubsystemHandle| stats(s, mon_rx, stats_tx);
-    let health = |s: SubsystemHandle| health(s, stats_rx, observ_tx);
+    let stats = async |s: &mut SubsystemHandle| stats(s, mon_rx, stats_tx).await;
+    let health = async |s: &mut SubsystemHandle| health(s, stats_rx, observ_tx).await;
     let wb = worterbuch_client.clone();
-    let observability = |s: SubsystemHandle| observability(s, client_name, observ_rx, wb);
+    let observability =
+        async |s: &mut SubsystemHandle| observability(s, client_name, observ_rx, wb).await;
 
-    let subsystem = |s: SubsystemHandle| async move {
+    let subsystem = async move |s: &mut SubsystemHandle| {
         spawn(start);
         s.start(SubsystemBuilder::new("stats", stats));
         s.start(SubsystemBuilder::new("health", health));

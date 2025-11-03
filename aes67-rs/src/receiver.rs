@@ -24,7 +24,7 @@ pub mod config;
 
 use crate::{
     app::{spawn_child_app, wait_for_start},
-    buffer::{ReceiverBufferProducer, receiver_buffer_channel},
+    buffer::{AudioBufferPointer, ReceiverBufferProducer, receiver_buffer_channel},
     error::ReceiverInternalResult,
     monitoring::{Monitoring, ReceiverState, RxStats},
     receiver::{
@@ -62,7 +62,7 @@ pub(crate) async fn start_receiver(
     let socket = create_rx_socket(&config.session, config.interface_ip)?;
 
     let subsystem_name = id.clone();
-    let subsystem = move |s: SubsystemHandle| async move {
+    let subsystem = async move |s: &mut SubsystemHandle| {
         Receiver {
             id,
             label,
@@ -96,10 +96,10 @@ pub(crate) async fn start_receiver(
     Ok(ReceiverApi::new(api_tx, rx))
 }
 
-struct Receiver {
+struct Receiver<'a> {
     id: String,
     label: String,
-    subsys: SubsystemHandle,
+    subsys: &'a mut SubsystemHandle,
     desc: RxDescriptor,
     clock: Box<dyn MediaClock>,
     api_rx: mpsc::Receiver<ReceiverApiMessage>,
@@ -111,13 +111,14 @@ struct Receiver {
     tx: ReceiverBufferProducer,
 }
 
-impl Receiver {
+impl<'a> Receiver<'a> {
     async fn run(mut self) -> ReceiverInternalResult<()> {
         let mut receive_buffer = [0; 65_535];
 
         info!("Receiver '{}' started.", self.id);
 
-        self.report_receiver_created().await;
+        self.report_receiver_created(AudioBufferPointer::from_slice(&receive_buffer))
+            .await;
 
         loop {
             select! {
@@ -281,15 +282,18 @@ impl Receiver {
 }
 
 mod monitoring {
+    use crate::buffer::AudioBufferPointer;
+
     use super::*;
 
-    impl Receiver {
-        pub(crate) async fn report_receiver_created(&mut self) {
+    impl<'a> Receiver<'a> {
+        pub(crate) async fn report_receiver_created(&mut self, buffer: AudioBufferPointer) {
             self.monitoring
                 .receiver_state(ReceiverState::Created {
                     id: self.id.clone(),
                     label: self.label.clone(),
                     descriptor: self.desc.clone(),
+                    address: buffer,
                 })
                 .await;
         }

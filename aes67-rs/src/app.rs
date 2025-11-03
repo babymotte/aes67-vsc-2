@@ -1,7 +1,7 @@
 use crate::error::{ChildAppError, ChildAppResult};
 use std::{error::Error, thread, time::Duration};
 use tokio::{runtime, spawn, sync::mpsc};
-use tokio_graceful_shutdown::{ErrTypeTraits, SubsystemBuilder, SubsystemHandle, Toplevel};
+use tokio_graceful_shutdown::{AsyncSubsysFn, SubsystemBuilder, SubsystemHandle, Toplevel};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 #[cfg(feature = "tokio-metrics")]
@@ -13,7 +13,7 @@ pub enum AppState {
     Crashed(Box<dyn Error + Send + Sync>),
 }
 
-pub fn spawn_child_app<'a, ErrType, Err, Fut, Subsys>(
+pub fn spawn_child_app<'a, Err, Subsys>(
     #[cfg(feature = "tokio-metrics")] app_id: String,
     name: String,
     subsystem: Subsys,
@@ -21,10 +21,12 @@ pub fn spawn_child_app<'a, ErrType, Err, Fut, Subsys>(
     #[cfg(feature = "tokio-metrics")] wb: Worterbuch,
 ) -> ChildAppResult<mpsc::Receiver<AppState>>
 where
-    ErrType: ErrTypeTraits,
-    Subsys: 'static + FnOnce(SubsystemHandle<ErrType>) -> Fut + Send,
-    Fut: 'static + Future<Output = Result<(), Err>> + Send,
-    Err: Into<ErrType> + Send,
+    Subsys: 'static
+        + for<'b> AsyncSubsysFn<
+            &'b mut SubsystemHandle<Box<dyn std::error::Error + Send + Sync + 'static>>,
+            Result<(), Err>,
+        >,
+    Err: std::error::Error + Send + Sync + 'static,
 {
     let (state_tx, state_rx) = mpsc::channel(1);
 
@@ -55,7 +57,7 @@ where
     Ok(state_rx)
 }
 
-fn start_child_app_runtime<'a, ErrType, Err, Fut, Subsys>(
+fn start_child_app_runtime<'a, Err, Subsys>(
     #[cfg(feature = "tokio-metrics")] app_id: String,
     name: String,
     subsystem: Subsys,
@@ -64,10 +66,12 @@ fn start_child_app_runtime<'a, ErrType, Err, Fut, Subsys>(
     shutdown_token: CancellationToken,
     #[cfg(feature = "tokio-metrics")] wb: Worterbuch,
 ) where
-    ErrType: ErrTypeTraits,
-    Subsys: 'static + FnOnce(SubsystemHandle<ErrType>) -> Fut + Send,
-    Fut: 'static + Future<Output = Result<(), Err>> + Send,
-    Err: Into<ErrType> + Send,
+    Subsys: 'static
+        + for<'b> AsyncSubsysFn<
+            &'b mut SubsystemHandle<Box<dyn std::error::Error + Send + Sync + 'static>>,
+            Result<(), Err>,
+        >,
+    Err: std::error::Error + Send + Sync + 'static,
 {
     runtime.block_on(async move {
         #[cfg(feature = "tokio-metrics")]
@@ -76,15 +80,18 @@ fn start_child_app_runtime<'a, ErrType, Err, Fut, Subsys>(
         let n = name.clone();
         let tx = state_tx.clone();
         if let Err(e) = Toplevel::new_with_shutdown_token(
-            |s| async move {
-                s.start(SubsystemBuilder::new(n, |s| async move {
-                    info!("Child app '{}' starting …", name);
-                    tx.send(AppState::Started).await.ok();
-                    let res = subsystem(s).await;
-                    info!("Child app '{}' stopped.", name);
-                    tx.send(AppState::TerminatedNormally).await.ok();
-                    res
-                }));
+            async move |s: &mut SubsystemHandle| {
+                s.start(SubsystemBuilder::new(
+                    n,
+                    async move |s: &mut SubsystemHandle| {
+                        info!("Child app '{}' starting …", name);
+                        tx.send(AppState::Started).await.ok();
+                        let res = subsystem(s).await;
+                        info!("Child app '{}' stopped.", name);
+                        tx.send(AppState::TerminatedNormally).await.ok();
+                        res
+                    },
+                ));
             },
             shutdown_token.clone(),
         )
@@ -105,7 +112,7 @@ async fn setup_metrics(app_id: String, subsystem_name: String, wb: Worterbuch) {
         for metrics in runtime_monitor.intervals() {
             use worterbuch_client::topic;
 
-            let root_key = topic!(app_id, "tokio", "metrics", subsystem_name, "metrics");
+            let root_key = topic!(app_id, "metrics", "tokio", subsystem_name, "metrics");
 
             wb.set_async(topic!(root_key, "elapsed"), metrics.elapsed)
                 .await

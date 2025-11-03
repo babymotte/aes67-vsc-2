@@ -21,6 +21,8 @@ use tokio_util::sync::CancellationToken;
 use tracing::{error, info, instrument, warn};
 use worterbuch::server::{CloneableWbApi, axum::build_worterbuch_router};
 
+// TODO track sessions from which receivers were created and keep them up to date with changed SDP files
+
 pub struct Aes67VscUi {}
 
 impl Aes67VscUi {
@@ -36,7 +38,7 @@ impl Aes67VscUi {
                 #[cfg(feature = "tokio-metrics")]
                 persistent_config.vsc.app.name.clone(),
                 "aes67-rs-ui".to_owned(),
-                |s| run(s, persistent_config, worterbuch),
+                async |s: &mut SubsystemHandle| run(s, persistent_config, worterbuch).await,
                 shutdown_token.clone(),
                 #[cfg(feature = "tokio-metrics")]
                 wb,
@@ -49,7 +51,7 @@ impl Aes67VscUi {
 }
 
 async fn run(
-    subsys: SubsystemHandle,
+    subsys: &SubsystemHandle,
     mut persistent_config: PersistentConfig,
     worterbuch: CloneableWbApi,
 ) -> WebUIResult<()> {
@@ -57,9 +59,10 @@ async fn run(
 
     let cfg = persistent_config.vsc.clone();
     let wb = worterbuch_client::local_client_wrapper(worterbuch.clone());
-    subsys.start(SubsystemBuilder::new("state-transformers", |s| {
-        state_transformers::start(s, cfg, wb)
-    }));
+    subsys.start(SubsystemBuilder::new(
+        "state-transformers",
+        async |s: &mut SubsystemHandle| state_transformers::start(s, cfg, wb).await,
+    ));
 
     let mut port = persistent_config.web_ui.port;
 
@@ -88,7 +91,7 @@ async fn run(
     };
 
     let app = build_worterbuch_router(
-        &subsys,
+        subsys,
         worterbuch,
         false,
         port,

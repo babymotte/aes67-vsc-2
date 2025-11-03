@@ -16,6 +16,7 @@
  */
 
 use crate::{
+    buffer::AudioBufferPointer,
     formats::{Frames, MilliSeconds},
     monitoring::{
         HealthReport, ReceiverHealthReport, ReceiverState, ReceiverStatsReport, Report,
@@ -27,7 +28,6 @@ use crate::{
     utils::publish_individual,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::{collections::HashMap, time::SystemTime};
 use tokio::{select, sync::broadcast};
 use tokio_graceful_shutdown::SubsystemHandle;
@@ -65,6 +65,7 @@ struct SenderData {
     config: TxDescriptor,
     stats: SenderStats,
     label: String,
+    address: AudioBufferPointer,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -73,10 +74,11 @@ struct ReceiverData {
     config: RxDescriptor,
     stats: ReceiverStats,
     label: String,
+    address: AudioBufferPointer,
 }
 
 pub async fn observability(
-    subsys: SubsystemHandle,
+    subsys: &mut SubsystemHandle,
     client_name: String,
     rx: broadcast::Receiver<Report>,
     worterbuch_client: Worterbuch,
@@ -87,8 +89,8 @@ pub async fn observability(
     Ok(())
 }
 
-struct ObservabilityActor {
-    subsys: SubsystemHandle,
+struct ObservabilityActor<'a> {
+    subsys: &'a mut SubsystemHandle,
     client_name: String,
     rx: broadcast::Receiver<Report>,
     wb: Worterbuch,
@@ -97,9 +99,9 @@ struct ObservabilityActor {
     running: bool,
 }
 
-impl ObservabilityActor {
+impl<'a> ObservabilityActor<'a> {
     fn new(
-        subsys: SubsystemHandle,
+        subsys: &'a mut SubsystemHandle,
         client_name: String,
         rx: broadcast::Receiver<Report>,
         wb: Worterbuch,
@@ -170,7 +172,8 @@ impl ObservabilityActor {
                 id,
                 descriptor,
                 label,
-            } => self.sender_created(id, label, descriptor).await,
+                address,
+            } => self.sender_created(id, label, descriptor, address).await,
             SenderState::Renamed { id, label } => self.sender_renamed(id, label).await,
             SenderState::Destroyed { id } => self.sender_destroyed(id).await,
         }
@@ -182,7 +185,11 @@ impl ObservabilityActor {
                 id: name,
                 descriptor,
                 label,
-            } => self.receiver_created(name, label, descriptor).await,
+                address,
+            } => {
+                self.receiver_created(name, label, descriptor, address)
+                    .await
+            }
             ReceiverState::Renamed { id, label } => self.receiver_renamed(id, label).await,
             ReceiverState::Destroyed { id: name } => self.receiver_destroyed(name).await,
         }
@@ -210,11 +217,18 @@ impl ObservabilityActor {
         self.publish_vsc().await;
     }
 
-    async fn sender_created(&mut self, name: String, label: String, descriptor: TxDescriptor) {
+    async fn sender_created(
+        &mut self,
+        name: String,
+        label: String,
+        descriptor: TxDescriptor,
+        address: AudioBufferPointer,
+    ) {
         let data = SenderData {
             config: descriptor.clone(),
             stats: SenderStats::default(),
             label,
+            address,
         };
         self.senders.insert(name.clone(), data.clone());
         self.publish_sender(&name, data).await;
@@ -238,11 +252,13 @@ impl ObservabilityActor {
         qualified_id: String,
         label: String,
         descriptor: RxDescriptor,
+        address: AudioBufferPointer,
     ) {
         let data = ReceiverData {
             config: descriptor.clone(),
             stats: ReceiverStats::default(),
             label,
+            address,
         };
         self.receivers.insert(qualified_id.clone(), data.clone());
         self.publish_receiver(&qualified_id, data).await;

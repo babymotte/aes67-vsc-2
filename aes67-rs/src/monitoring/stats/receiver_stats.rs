@@ -38,6 +38,7 @@ pub struct ReceiverStats {
     lost_packet_counter: usize,
     late_packet_counter: usize,
     muted: bool,
+    buffer_address: Option<crate::buffer::AudioBufferPointer>,
 }
 
 impl ReceiverStats {
@@ -46,6 +47,7 @@ impl ReceiverStats {
             id,
             tx,
             desc: None,
+            buffer_address: None,
             measured_link_offset: AverageCalculationBuffer::new(vec![0; 1000].into()),
             delay_buffer: AverageCalculationBuffer::new(vec![0; 1000].into()),
             timestamp_offset: None,
@@ -58,8 +60,9 @@ impl ReceiverStats {
 
     pub(crate) async fn process(&mut self, stats: RxStats) {
         match stats {
-            RxStats::Started(rx_descriptor) => {
+            RxStats::Started(rx_descriptor, buffer_address) => {
                 self.desc = Some(rx_descriptor);
+                self.buffer_address = Some(buffer_address);
             }
             RxStats::BufferUnderrun => {
                 // TODO

@@ -1,19 +1,20 @@
 use crate::error::WebUIResult;
-use aes67_rs::{config::Config, receiver::config::Session};
+use aes67_rs::{config::Config, discovery::Session, receiver::config::SessionId};
+use std::{collections::HashMap, time::Duration};
 use tokio::{select, sync::mpsc};
 use tokio_graceful_shutdown::SubsystemHandle;
 use tracing::info;
 use worterbuch_client::{TypedPStateEvent, Worterbuch, topic};
 
 pub async fn start(
-    subsys: SubsystemHandle,
+    subsys: &mut SubsystemHandle,
     config: Config,
     worterbuch_client: Worterbuch,
 ) -> WebUIResult<()> {
     info!("Starting available sessions state transformer …");
 
     let (used_sessions, _) = worterbuch_client
-        .psubscribe::<Session>(
+        .psubscribe(
             topic![config.instance_name(), "rx", "?", "config", "session"],
             true,
             false,
@@ -22,25 +23,36 @@ pub async fn start(
         .await?;
 
     let (all_sessions, _) = worterbuch_client
-        .psubscribe::<String>(topic!["discovery", "sap", "?", "?"], true, false, None)
+        .psubscribe(
+            topic!["discovery", "sessions", "?"],
+            true,
+            false,
+            Some(Duration::from_millis(100)),
+        )
         .await?;
 
-    ProcessLopp { worterbuch_client }
-        .start(subsys, used_sessions, all_sessions)
-        .await?;
+    let sessions_by_name = HashMap::new();
+
+    ProcessLopp {
+        worterbuch_client,
+        sessions_by_name,
+    }
+    .start(subsys, used_sessions, all_sessions)
+    .await?;
 
     Ok(())
 }
 
 struct ProcessLopp {
     worterbuch_client: Worterbuch,
+    sessions_by_name: HashMap<String, Session>,
 }
 
 impl ProcessLopp {
     async fn start(
-        self,
-        subsys: SubsystemHandle,
-        mut used_sessions: mpsc::UnboundedReceiver<TypedPStateEvent<Session>>,
+        mut self,
+        subsys: &mut SubsystemHandle,
+        mut used_sessions: mpsc::UnboundedReceiver<TypedPStateEvent<SessionId>>,
         mut all_sessions: mpsc::UnboundedReceiver<TypedPStateEvent<String>>,
     ) -> WebUIResult<()> {
         loop {
@@ -57,13 +69,37 @@ impl ProcessLopp {
         Ok(())
     }
 
-    async fn process_used_session(&self, event: TypedPStateEvent<Session>) -> WebUIResult<()> {
+    async fn process_used_session(&self, event: TypedPStateEvent<SessionId>) -> WebUIResult<()> {
         info!("Processing used session event: {:?}", event);
         Ok(())
     }
 
-    async fn process_session(&self, event: TypedPStateEvent<String>) -> WebUIResult<()> {
-        info!("Processing session event: {:?}", event);
+    async fn process_session(&mut self, event: TypedPStateEvent<String>) -> WebUIResult<()> {
+        match event {
+            TypedPStateEvent::KeyValuePairs(kvps) => {
+                for kvp in kvps {
+                    self.session_added(kvp.key, kvp.value).await?;
+                }
+            }
+            TypedPStateEvent::Deleted(kvps) => {
+                for kvp in kvps {
+                    self.session_removed(kvp.key, kvp.value).await?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn session_added(&mut self, key: String, session: String) -> WebUIResult<()> {
+        info!("Session added: {:?}", session);
+        // TODO
+        Ok(())
+    }
+
+    async fn session_removed(&mut self, key: String, session: String) -> WebUIResult<()> {
+        info!("Session removed: {:?}", session);
+        // TODO
         Ok(())
     }
 }

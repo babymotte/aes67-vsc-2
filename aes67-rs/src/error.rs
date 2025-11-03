@@ -22,6 +22,7 @@ use std::{
     fmt::{Debug, Display},
     io,
     net::AddrParseError,
+    time::SystemTimeError,
 };
 use thiserror::Error;
 use tokio::sync::{oneshot, watch};
@@ -221,6 +222,8 @@ pub enum DiscoveryError {
     SapError(#[from] sap_rs::error::Error),
     #[error("Worterbuch error: {0}")]
     WorterbuchError(#[from] ConnectionError),
+    #[error("System time error: {0}")]
+    SystemTimeError(#[from] SystemTimeError),
 }
 
 pub type Aes67Vsc2Result<T> = Result<T, Aes67Vsc2Error>;

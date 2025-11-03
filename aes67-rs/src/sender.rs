@@ -20,7 +20,7 @@ pub mod config;
 
 use crate::{
     app::{spawn_child_app, wait_for_start},
-    buffer::{SenderBufferConsumer, sender_buffer_channel},
+    buffer::{AudioBufferPointer, SenderBufferConsumer, sender_buffer_channel},
     error::{SenderInternalError, SenderInternalResult, WrappedRtpPacketBuildError},
     formats::Frames,
     monitoring::Monitoring,
@@ -57,7 +57,7 @@ pub(crate) async fn start_sender(
     let socket = create_tx_socket(config.target, config.interface_ip)?;
 
     let subsystem_name = id.clone();
-    let subsystem = move |s: SubsystemHandle| async move {
+    let subsystem = async move |s: &mut SubsystemHandle| {
         Sender {
             id,
             label,
@@ -91,10 +91,10 @@ pub(crate) async fn start_sender(
     Ok(SenderApi::new(api_tx, tx))
 }
 
-struct Sender {
+struct Sender<'a> {
     id: String,
     label: String,
-    subsys: SubsystemHandle,
+    subsys: &'a SubsystemHandle,
     desc: TxDescriptor,
     api_rx: mpsc::Receiver<SenderApiMessage>,
     sequence_number: Seq,
@@ -106,11 +106,12 @@ struct Sender {
     ssrc: u32,
 }
 
-impl Sender {
+impl<'a> Sender<'a> {
     async fn run(mut self) -> SenderInternalResult<()> {
         info!("Sender '{}' started.", self.id);
 
-        self.report_sender_created().await;
+        self.report_sender_created(AudioBufferPointer::from_slice(&self.rx.buffer))
+            .await;
 
         let shutdown_token = self.subsys.create_cancellation_token();
 
@@ -179,19 +180,21 @@ impl Sender {
 
 mod monitoring {
     use crate::{
+        buffer::AudioBufferPointer,
         formats::Frames,
         monitoring::{SenderState, TxStats},
     };
 
     use super::*;
 
-    impl Sender {
-        pub(crate) async fn report_sender_created(&self) {
+    impl<'a> Sender<'a> {
+        pub(crate) async fn report_sender_created(&self, buffer: AudioBufferPointer) {
             self.monitoring
                 .sender_state(SenderState::Created {
                     id: self.id.clone(),
                     label: self.label.clone(),
                     descriptor: self.desc.clone(),
+                    address: buffer,
                 })
                 .await;
         }

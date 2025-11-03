@@ -17,6 +17,8 @@ pub enum WebUIError {
     WbConfigError(#[from] worterbuch::common::error::ConfigError),
     #[error("YAML error: {0}")]
     YamlError(#[from] serde_yaml::Error),
+    #[error("SDP error: {0}")]
+    SdpError(#[from] sdp::Error),
 }
 
 pub type WebUIResult<T> = Result<T, WebUIError>;

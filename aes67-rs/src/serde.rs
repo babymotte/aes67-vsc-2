@@ -16,9 +16,24 @@
  */
 
 use sdp::SessionDescription;
-use serde::{Deserialize, Deserializer, Serializer};
-use std::io::Cursor;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::{io::Cursor, ops::Deref};
 use tracing::instrument;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct SdpWrapper(
+    #[serde(deserialize_with = "deserialize_sdp", serialize_with = "serialize_sdp")]
+    pub  SessionDescription,
+);
+
+impl Deref for SdpWrapper {
+    type Target = SessionDescription;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 #[instrument(skip(deserializer))]
 pub fn deserialize_sdp<'de, D>(deserializer: D) -> Result<SessionDescription, D::Error>

@@ -31,7 +31,7 @@ struct State {
 
 pub async fn start_recording(
     app_id: String,
-    subsys: SubsystemHandle,
+    subsys: &mut SubsystemHandle,
     sender: SenderApi,
     descriptor: TxDescriptor,
     clock: Box<dyn MediaClock>,

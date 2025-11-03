@@ -18,6 +18,7 @@
 use crate::{
     error::{ConfigError, ConfigResult},
     formats::{self, AudioFormat, FrameFormat, Frames, MilliSeconds, Seconds},
+    serde::SdpWrapper,
     time::MICROS_PER_MILLI_F,
 };
 use lazy_static::lazy_static;
@@ -43,11 +44,7 @@ lazy_static! {
 #[serde(rename_all = "camelCase")]
 pub struct ReceiverConfig {
     pub id: Option<String>,
-    #[serde(
-        deserialize_with = "crate::serde::deserialize_sdp",
-        serialize_with = "crate::serde::serialize_sdp"
-    )]
-    pub session: SessionDescription,
+    pub session: SdpWrapper,
     pub link_offset: MilliSeconds,
     #[serde(default)]
     pub delay_calculation_interval: Option<Seconds>,
@@ -64,14 +61,27 @@ impl ReceiverConfig {
     }
 }
 
-pub type Session = (u64, u64);
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct SessionId {
+    pub id: u64,
+    pub version: u64,
+}
+
+impl<T: AsRef<(u64, u64)>> From<T> for SessionId {
+    fn from(value: T) -> Self {
+        let r = value.as_ref();
+        let id = r.0;
+        let version = r.1;
+        SessionId { id, version }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RxDescriptor {
     pub id: String,
     pub session_name: String,
-    pub session: Session,
+    pub session_id: SessionId,
     pub packet_time: MilliSeconds,
     pub link_offset: MilliSeconds,
     pub origin_ip: IpAddr,
@@ -187,11 +197,15 @@ impl RxDescriptor {
             frame_format,
             sample_rate,
         };
+        let session_id = SessionId {
+            id: session_id,
+            version: session_version,
+        };
         // let channel_labels = sd.session_information.
         Ok(RxDescriptor {
             id: receiver_id,
             session_name,
-            session: (session_id, session_version),
+            session_id,
             audio_format,
             packet_time,
             origin_ip,
@@ -206,7 +220,7 @@ impl RxDescriptor {
     }
 
     pub fn session_id(&self) -> String {
-        format!("{} {}", self.session.0, self.session.1)
+        format!("{} {}", self.session_id.id, self.session_id.version)
     }
 
     pub fn bytes_per_sample(&self) -> usize {

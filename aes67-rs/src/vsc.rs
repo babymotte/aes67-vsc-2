@@ -98,7 +98,7 @@ impl VirtualSoundCardApi {
         #[cfg(feature = "tokio-metrics")]
         let wb = worterbuch_client.clone();
 
-        let subsystem = |s: SubsystemHandle| async move {
+        let subsystem = async move |s: &mut SubsystemHandle| {
             VirtualSoundCard::new(
                 name,
                 api_rx,

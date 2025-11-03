@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use tokio::fs;
 use tracing::error;
 
-pub const DEFAULT_PORT: u16 = 55667;
+pub const DEFAULT_PORT: u16 = 43567;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PersistentConfig {

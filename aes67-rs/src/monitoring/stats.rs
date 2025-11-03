@@ -31,7 +31,7 @@ use tokio_graceful_shutdown::SubsystemHandle;
 use tracing::{info, warn};
 
 pub async fn stats(
-    subsys: SubsystemHandle,
+    subsys: &mut SubsystemHandle,
     rx: mpsc::Receiver<(MonitoringEvent, String)>,
     tx: mpsc::Sender<Report>,
 ) -> Result<(), &'static str> {
@@ -39,8 +39,8 @@ pub async fn stats(
     Ok(())
 }
 
-struct StatsActor {
-    subsys: SubsystemHandle,
+struct StatsActor<'a> {
+    subsys: &'a mut SubsystemHandle,
     rx: mpsc::Receiver<(MonitoringEvent, String)>,
     tx: mpsc::Sender<Report>,
     senders: HashMap<String, SenderStats>,
@@ -48,9 +48,9 @@ struct StatsActor {
     playouts: HashMap<String, PlayoutStats>,
 }
 
-impl StatsActor {
+impl<'a> StatsActor<'a> {
     fn new(
-        subsys: SubsystemHandle,
+        subsys: &'a mut SubsystemHandle,
         rx: mpsc::Receiver<(MonitoringEvent, String)>,
         tx: mpsc::Sender<Report>,
     ) -> Self {
@@ -139,9 +139,10 @@ impl StatsActor {
                 id,
                 descriptor,
                 label: _,
+                address,
             } => {
                 self.rx_stats(id.to_owned())
-                    .process(RxStats::Started(descriptor.to_owned()))
+                    .process(RxStats::Started(descriptor.to_owned(), address.to_owned()))
                     .await;
             }
             ReceiverState::Renamed { id: _, label: _ } => (),

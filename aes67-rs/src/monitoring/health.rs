@@ -26,7 +26,7 @@ use tokio_graceful_shutdown::SubsystemHandle;
 use tracing::info;
 
 pub async fn health(
-    subsys: SubsystemHandle,
+    subsys: &mut SubsystemHandle,
     rx: mpsc::Receiver<Report>,
     tx: broadcast::Sender<Report>,
 ) -> Result<(), &'static str> {
@@ -58,8 +58,8 @@ impl PlayoutHealth {
     }
 }
 
-struct HealthActor {
-    subsys: SubsystemHandle,
+struct HealthActor<'a> {
+    subsys: &'a mut SubsystemHandle,
     rx: mpsc::Receiver<Report>,
     tx: broadcast::Sender<Report>,
     senders: HashMap<String, SenderHealth>,
@@ -67,9 +67,9 @@ struct HealthActor {
     playouts: HashMap<String, PlayoutHealth>,
 }
 
-impl HealthActor {
+impl<'a> HealthActor<'a> {
     fn new(
-        subsys: SubsystemHandle,
+        subsys: &'a mut SubsystemHandle,
         rx: mpsc::Receiver<Report>,
         tx: broadcast::Sender<Report>,
     ) -> Self {
