@@ -24,6 +24,7 @@ use crate::{
     },
     receiver::{api::ReceiverApi, config::ReceiverConfig},
     serde::SdpWrapper,
+    time::get_clock,
     vsc::VirtualSoundCardApi,
 };
 use ::safer_ffi::prelude::*;
@@ -42,23 +43,30 @@ lazy_static! {
 }
 
 fn init_vsc() -> VscApiResult<Arc<VirtualSoundCardApi>> {
-    try_init().boxed()?;
+    let config = try_init().boxed()?;
     let (wb, _, _) = block_on(worterbuch_client::connect_with_default_config())
         .map_err(VscInternalError::from)
         .boxed()?;
     let vsc_name = env::var("AES67_VSC_NAME").unwrap_or("aes67-virtual-sound-card".to_owned());
     info!("Creating new VSC with name '{vsc_name}' …");
     let shutdown_token = CancellationToken::new();
+    let clock = block_on(get_clock(
+        vsc_name.clone(),
+        config.ptp,
+        config.sample_rate,
+        wb.clone(),
+    ))?;
     let vsc = block_on(VirtualSoundCardApi::new(
         vsc_name.clone(),
         shutdown_token,
         wb,
+        clock,
     ))?;
     info!("VSC '{}' created.", vsc_name);
     Ok(Arc::new(vsc))
 }
 
-fn try_init() -> VscInternalResult<()> {
+fn try_init() -> VscInternalResult<Config> {
     let config = Config::load()?;
     // let runtime = runtime::Builder::new_current_thread()
     //     .enable_all()
@@ -70,7 +78,7 @@ fn try_init() -> VscInternalResult<()> {
     // runtime.block_on(init_future)?;
     block_on(init_future)?;
     info!("AES67 VSC subsystem initialized successfully.");
-    Ok(())
+    Ok(config)
 }
 
 impl<'a> TryFrom<&Aes67VscReceiverConfig<'a>> for ReceiverConfig {
@@ -95,16 +103,12 @@ impl<'a> TryFrom<&Aes67VscReceiverConfig<'a>> for ReceiverConfig {
     }
 }
 
-pub fn try_create_receiver(
-    config: &Aes67VscReceiverConfig,
-    ptp_mode: Option<PtpMode>,
-) -> ReceiverInternalResult<i32> {
+pub fn try_create_receiver(config: &Aes67VscReceiverConfig) -> ReceiverInternalResult<i32> {
     let config = match ReceiverConfig::try_from(config) {
         Ok(it) => it,
         Err(err) => return Ok(-(err.error_code() as i32)),
     };
-    let (receiver_api, _, id) = match block_on(VIRTUAL_SOUND_CARD.create_receiver(config, ptp_mode))
-    {
+    let (receiver_api, _, id) = match block_on(VIRTUAL_SOUND_CARD.create_receiver(config)) {
         Ok(it) => it,
         Err(err) => return Ok(-(err.error_code() as i32)),
     };

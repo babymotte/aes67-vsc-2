@@ -15,7 +15,10 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{error::ConfigResult, receiver::config::ReceiverConfig, sender::config::SenderConfig};
+use crate::{
+    error::ConfigResult, formats::FramesPerSecond, receiver::config::ReceiverConfig,
+    sender::config::SenderConfig,
+};
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -117,6 +120,8 @@ pub enum PtpMode {
 pub struct Config {
     #[serde(default = "AppConfig::default")]
     pub app: AppConfig,
+    #[serde(default = "default_sample_rate")]
+    pub sample_rate: FramesPerSecond,
     #[serde(default)]
     pub telemetry: Option<TelemetryConfig>,
     #[serde(default)]
@@ -176,4 +181,8 @@ impl Config {
     pub fn instance_name(&self) -> &str {
         &self.app.name
     }
+}
+
+fn default_sample_rate() -> FramesPerSecond {
+    48_000
 }

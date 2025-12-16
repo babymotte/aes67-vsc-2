@@ -17,7 +17,7 @@
 
 use crate::{
     error::{ClockError, ClockResult},
-    formats::AudioFormat,
+    formats::FramesPerSecond,
     time::{MediaClock, get_time, timestamp_to_duration, to_media_time, to_nanos},
 };
 use clock_steering::Timestamp;
@@ -33,8 +33,9 @@ use std::{
 use std::{sync::atomic::AtomicI64, time::Instant};
 use tracing::{info, warn};
 
+#[derive(Debug, Clone)]
 pub struct PhcClock {
-    audio_format: AudioFormat,
+    sample_rate: FramesPerSecond,
 }
 
 lazy_static! {
@@ -43,7 +44,7 @@ lazy_static! {
 }
 
 impl PhcClock {
-    pub fn open(path: impl AsRef<Path>, audio_format: AudioFormat) -> ClockResult<Self> {
+    pub fn open(path: impl AsRef<Path>, sample_rate: FramesPerSecond) -> ClockResult<Self> {
         let clock = {
             let mut guard = CLOCK_ID.lock().expect("mutex poisoned");
             if let Some((clock_id, _)) = guard.as_ref() {
@@ -79,7 +80,7 @@ impl PhcClock {
 
         LAST_OFFSET.store(offset, Ordering::Release);
 
-        Ok(Self { audio_format })
+        Ok(Self { sample_rate })
     }
 
     fn now(&mut self) -> ClockResult<Timestamp> {
@@ -125,7 +126,7 @@ impl MediaClock for PhcClock {
             Ok(it) => it,
             Err(e) => return Err(ClockError::other(e)),
         };
-        Ok(to_media_time(ptp_time, &self.audio_format))
+        Ok(to_media_time(ptp_time, self.sample_rate))
     }
 
     fn current_ptp_time_millis(&mut self) -> ClockResult<u64> {

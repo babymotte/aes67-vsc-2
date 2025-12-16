@@ -1,11 +1,14 @@
 use aes67_rs::{
-    error::ClockResult, formats::Frames, time::MediaClock, utils::AverageCalculationBuffer,
+    error::ClockResult,
+    formats::Frames,
+    time::{Clock, MediaClock},
+    utils::AverageCalculationBuffer,
 };
 use jack::ProcessScope;
 use tracing::{debug, warn};
 
 pub struct JackClock {
-    ptp_clock: Box<dyn MediaClock>,
+    ptp_clock: Clock,
     jack_clock_offset: Option<i64>,
     drift_buffer: AverageCalculationBuffer<i64>,
     slew: i64,
@@ -22,7 +25,7 @@ pub enum ClockState {
 }
 
 impl JackClock {
-    pub fn new(ptp_clock: Box<dyn MediaClock>) -> Self {
+    pub fn new(ptp_clock: Clock) -> Self {
         JackClock {
             ptp_clock,
             jack_clock_offset: None,

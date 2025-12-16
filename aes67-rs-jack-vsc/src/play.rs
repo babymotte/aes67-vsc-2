@@ -5,7 +5,7 @@ use crate::{
 use aes67_rs::{
     monitoring::Monitoring,
     receiver::{api::ReceiverApi, config::RxDescriptor},
-    time::{MILLIS_PER_SEC_F, MediaClock},
+    time::{Clock, MILLIS_PER_SEC_F},
 };
 use futures_lite::future::block_on;
 use jack::{
@@ -35,7 +35,7 @@ pub async fn start_playout(
     subsys: &mut SubsystemHandle,
     receiver: ReceiverApi,
     descriptor: RxDescriptor,
-    clock: Box<dyn MediaClock>,
+    clock: Clock,
     monitoring: Monitoring,
 ) -> miette::Result<()> {
     // TODO evaluate client status

@@ -16,22 +16,17 @@
  */
 
 use crate::app::{propagate_exit, spawn_child_app, wait_for_start};
-use crate::config::PtpMode;
 use crate::error::{SenderInternalError, SenderInternalResult};
 use crate::monitoring::{Monitoring, VscState, start_monitoring_service};
 use crate::sender::config::SenderConfig;
 use crate::sender::start_sender;
-use crate::time::get_clock;
+use crate::time::Clock;
 use crate::{
     error::{
         ReceiverInternalError, ReceiverInternalResult, ToBoxedResult, VscApiResult,
         VscInternalError, VscInternalResult,
     },
-    receiver::{
-        api::ReceiverApi,
-        config::{ReceiverConfig, RxDescriptor},
-        start_receiver,
-    },
+    receiver::{api::ReceiverApi, config::ReceiverConfig, start_receiver},
     sender::api::SenderApi,
 };
 use std::collections::HashMap;
@@ -53,7 +48,6 @@ enum VscApiMessage {
     CreateReceiver(
         String,
         Box<ReceiverConfig>,
-        Option<PtpMode>,
         oneshot::Sender<ReceiverInternalResult<(ReceiverApi, Monitoring, u32)>>,
     ),
     DestroyReceiverById(u32, oneshot::Sender<ReceiverInternalResult<()>>),
@@ -70,9 +64,10 @@ impl VirtualSoundCardApi {
         name: String,
         shutdown_token: CancellationToken,
         worterbuch_client: Worterbuch,
+        clock: Clock,
     ) -> VscApiResult<Self> {
         Ok(
-            VirtualSoundCardApi::try_new(name, shutdown_token, worterbuch_client)
+            VirtualSoundCardApi::try_new(name, shutdown_token, worterbuch_client, clock)
                 .await
                 .boxed()?,
         )
@@ -82,9 +77,10 @@ impl VirtualSoundCardApi {
         name: String,
         shutdown_token: CancellationToken,
         worterbuch_client: Worterbuch,
+        clock: Clock,
     ) -> VscInternalResult<Self> {
         let api_tx =
-            VirtualSoundCardApi::create_vsc(name, shutdown_token, worterbuch_client).await?;
+            VirtualSoundCardApi::create_vsc(name, shutdown_token, worterbuch_client, clock).await?;
         Ok(VirtualSoundCardApi { api_tx })
     }
 
@@ -92,6 +88,7 @@ impl VirtualSoundCardApi {
         name: String,
         shutdown_token: CancellationToken,
         worterbuch_client: Worterbuch,
+        clock: Clock,
     ) -> VscInternalResult<ApiMessageSender> {
         let subsystem_name = name.clone();
         let (api_tx, api_rx) = mpsc::channel(1024);
@@ -104,6 +101,7 @@ impl VirtualSoundCardApi {
                 api_rx,
                 s.create_cancellation_token(),
                 worterbuch_client,
+                clock,
             )?
             .run()
             .await;
@@ -149,14 +147,12 @@ impl VirtualSoundCardApi {
     pub async fn create_receiver(
         &self,
         config: ReceiverConfig,
-        ptp_mode: Option<PtpMode>,
     ) -> VscApiResult<(ReceiverApi, Monitoring, u32)> {
         let (tx, rx) = oneshot::channel();
         self.api_tx
             .send(VscApiMessage::CreateReceiver(
                 config.id().to_owned(),
                 Box::new(config),
-                ptp_mode,
                 tx,
             ))
             .await
@@ -182,6 +178,7 @@ impl VirtualSoundCardApi {
 
 struct VirtualSoundCard {
     name: String,
+    clock: Clock,
     api_rx: mpsc::Receiver<VscApiMessage>,
     txs: HashMap<u32, SenderApi>,
     rxs: HashMap<u32, ReceiverApi>,
@@ -191,7 +188,7 @@ struct VirtualSoundCard {
     rx_counter: u32,
     monitoring: Monitoring,
     shutdown_token: CancellationToken,
-    #[cfg(feature = "tokio-metrics")]
+    #[cfg(any(feature = "tokio-metrics", feature = "statime"))]
     wb: Worterbuch,
 }
 
@@ -201,6 +198,7 @@ impl VirtualSoundCard {
         api_rx: mpsc::Receiver<VscApiMessage>,
         shutdown_token: CancellationToken,
         worterbuch_client: Worterbuch,
+        clock: Clock,
     ) -> VscInternalResult<Self> {
         let monitoring = start_monitoring_service(
             name.clone(),
@@ -218,8 +216,9 @@ impl VirtualSoundCard {
             rx_counter: 0,
             monitoring,
             shutdown_token,
-            #[cfg(feature = "tokio-metrics")]
+            #[cfg(any(feature = "tokio-metrics", feature = "statime"))]
             wb: worterbuch_client,
+            clock,
         })
     }
 
@@ -236,9 +235,8 @@ impl VirtualSoundCard {
                 VscApiMessage::DestroySenderById(id, tx) => {
                     tx.send(self.destroy_sender(id).await).ok();
                 }
-                VscApiMessage::CreateReceiver(id, config, ptp_mode, tx) => {
-                    tx.send(self.create_receiver(id, *config, ptp_mode).await)
-                        .ok();
+                VscApiMessage::CreateReceiver(id, config, tx) => {
+                    tx.send(self.create_receiver(id, *config).await).ok();
                 }
                 VscApiMessage::DestroyReceiverById(id, tx) => {
                     tx.send(self.destroy_receiver(id).await).ok();
@@ -294,19 +292,17 @@ impl VirtualSoundCard {
         &mut self,
         label: String,
         config: ReceiverConfig,
-        ptp_mode: Option<PtpMode>,
     ) -> ReceiverInternalResult<(ReceiverApi, Monitoring, u32)> {
         self.rx_counter += 1;
         let id: u32 = self.rx_counter;
-        let qulified_id = format!("{}/rx/{}", self.name, id);
-        info!("Creating receiver '{label}' ({qulified_id}) …");
+        let qualified_id = format!("{}/rx/{}", self.name, id);
+        info!("Creating receiver '{label}' ({qualified_id}) …");
 
-        let desc = RxDescriptor::try_from(&config)?;
-        let clock = get_clock(ptp_mode, desc.audio_format)?;
-        let monitoring = self.monitoring.child(qulified_id.clone());
+        let clock = self.clock.clone();
+        let monitoring = self.monitoring.child(qualified_id.clone());
         let receiver_api = start_receiver(
             self.name.clone(),
-            qulified_id.clone(),
+            qualified_id.clone(),
             label,
             config,
             clock,
@@ -320,7 +316,7 @@ impl VirtualSoundCard {
         // self.rx_names.insert(id, name.clone());
         self.rxs.insert(id, receiver_api.clone());
 
-        info!("Receiver {qulified_id} successfully created.");
+        info!("Receiver {qualified_id} successfully created.");
         Ok((receiver_api, monitoring, id))
     }
 

@@ -21,7 +21,6 @@ mod r#impl;
 
 use crate::{
     c::r#impl::{try_create_receiver, try_destroy_receiver, try_receive},
-    config::PtpMode,
     error::GetErrorCode,
 };
 use ::safer_ffi::prelude::*;
@@ -69,11 +68,7 @@ pub struct Aes67VscReceiverConfig<'a> {
 #[ffi_export]
 fn aes67_vsc_create_receiver<'a>(config: &'a Aes67VscReceiverConfig<'a>) -> i32 {
     eprintln!("config: {:?}", config);
-    let Ok(ptp_mode) = PtpMode::try_from((config.ptp_mode.as_ref(), config.ptp_nic.as_ref()))
-    else {
-        return -(AES_VSC_ERROR_INVALID_PTP_CONFIG as i32);
-    };
-    match try_create_receiver(config, Some(ptp_mode)) {
+    match try_create_receiver(config) {
         Ok(it) => it,
         Err(err) => -(err.error_code() as i32),
     }

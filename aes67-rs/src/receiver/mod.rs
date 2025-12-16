@@ -32,7 +32,7 @@ use crate::{
         config::{ReceiverConfig, RxDescriptor},
     },
     socket::create_rx_socket,
-    time::MediaClock,
+    time::{Clock, MediaClock},
     utils::U32_WRAP,
 };
 use rtp_rs::{RtpReader, Seq};
@@ -50,7 +50,7 @@ pub(crate) async fn start_receiver(
     id: String,
     label: String,
     config: ReceiverConfig,
-    clock: Box<dyn MediaClock>,
+    clock: Clock,
     monitoring: Monitoring,
     shutdown_token: CancellationToken,
     #[cfg(feature = "tokio-metrics")] wb: Worterbuch,
@@ -101,7 +101,7 @@ struct Receiver<'a> {
     label: String,
     subsys: &'a mut SubsystemHandle,
     desc: RxDescriptor,
-    clock: Box<dyn MediaClock>,
+    clock: Clock,
     api_rx: mpsc::Receiver<ReceiverApiMessage>,
     last_timestamp: Option<u32>,
     last_sequence_number: Option<Seq>,
@@ -258,10 +258,10 @@ impl<'a> Receiver<'a> {
         let local_wrapped_timestamp = (media_time % U32_WRAP) as u32;
 
         if local_wrapped_timestamp < rtp_timestamp {
-            dbg!(rtp_timestamp - local_wrapped_timestamp);
-            warn!(
-                "Either the clock has wrapped while packet was in flight or the local clock is not properly synced to PTP. Skipping calibration."
-            );
+            // dbg!(rtp_timestamp - local_wrapped_timestamp);
+            // warn!(
+            //     "Either the clock has wrapped while packet was in flight or the local clock is not properly synced to PTP. Skipping calibration."
+            // );
             return Ok(());
         }
 

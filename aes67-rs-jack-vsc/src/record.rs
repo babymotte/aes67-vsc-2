@@ -5,7 +5,7 @@ use crate::{
 use aes67_rs::{
     buffer::AudioBufferPointer,
     sender::{api::SenderApi, config::TxDescriptor},
-    time::{MILLIS_PER_SEC_F, MediaClock},
+    time::{Clock, MILLIS_PER_SEC_F, MediaClock},
 };
 use futures_lite::future::block_on;
 use jack::{
@@ -34,7 +34,7 @@ pub async fn start_recording(
     subsys: &mut SubsystemHandle,
     sender: SenderApi,
     descriptor: TxDescriptor,
-    clock: Box<dyn MediaClock>,
+    clock: Clock,
 ) -> miette::Result<()> {
     // TODO evaluate client status
     let (client, status) =

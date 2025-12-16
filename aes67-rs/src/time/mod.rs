@@ -28,17 +28,19 @@ mod statime;
 use crate::{
     config::PtpMode,
     error::{ClockError, ClockResult, ConfigResult},
-    formats::{AudioFormat, Frames},
+    formats::{AudioFormat, Frames, FramesPerSecond},
     nic::{find_nic_with_name, phc_device_for_interface_ethtool},
-    time::phc::PhcClock,
+    time::{phc::PhcClock, statime::StatimePtpMediaClock},
 };
-use clock_steering::{Clock, Timestamp, unix::UnixClock};
+use clock_steering::{Clock as CSClock, Timestamp, unix::UnixClock};
 use libc::{clock_gettime, clockid_t, timespec};
 use std::{
     io,
     time::{Duration, Instant, SystemTime},
 };
 use tracing::{error, info, warn};
+#[cfg(feature = "statime")]
+use worterbuch_client::Worterbuch;
 
 pub const NANOS_PER_SEC: u128 = 1_000_000_000;
 pub const NANOS_PER_MILLI: u64 = 1_000_000;
@@ -54,22 +56,51 @@ pub const NANOS_PER_MICRO_F: f64 = 1_000.0;
 pub const MILLIS_PER_SEC_F: f32 = 1_000.0;
 pub const MICROS_PER_SEC_F: f64 = 1_000_000.0;
 
-pub trait MediaClock: Send + 'static {
+pub trait MediaClock: Clone + Send + 'static {
     fn current_media_time(&mut self) -> ClockResult<Frames>;
 
     fn current_ptp_time_millis(&mut self) -> ClockResult<u64>;
 }
 
+#[derive(Clone)]
+pub enum Clock {
+    System(UnixMediaClock),
+    Phc(PhcClock),
+    #[cfg(feature = "statime")]
+    Statime(StatimePtpMediaClock),
+}
+
+impl MediaClock for Clock {
+    fn current_media_time(&mut self) -> ClockResult<Frames> {
+        match self {
+            Clock::System(clock) => clock.current_media_time(),
+            Clock::Phc(clock) => clock.current_media_time(),
+            #[cfg(feature = "statime")]
+            Clock::Statime(clock) => clock.current_media_time(),
+        }
+    }
+
+    fn current_ptp_time_millis(&mut self) -> ClockResult<u64> {
+        match self {
+            Clock::System(clock) => clock.current_ptp_time_millis(),
+            Clock::Phc(clock) => clock.current_ptp_time_millis(),
+            #[cfg(feature = "statime")]
+            Clock::Statime(clock) => clock.current_ptp_time_millis(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct UnixMediaClock {
     unix_clock: UnixClock,
-    audio_format: AudioFormat,
+    sample_rate: FramesPerSecond,
 }
 
 impl UnixMediaClock {
-    fn system_clock(audio_format: AudioFormat) -> Self {
+    fn system_clock(sample_rate: FramesPerSecond) -> Self {
         UnixMediaClock {
             unix_clock: UnixClock::CLOCK_TAI,
-            audio_format,
+            sample_rate,
         }
     }
 }
@@ -89,7 +120,7 @@ impl MediaClock for UnixMediaClock {
             Ok(it) => it,
             Err(e) => return Err(ClockError::other(e)),
         };
-        Ok(to_media_time(ptp_time, &self.audio_format))
+        Ok(to_media_time(ptp_time, self.sample_rate))
     }
 
     fn current_ptp_time_millis(&mut self) -> ClockResult<u64> {
@@ -113,9 +144,9 @@ pub fn to_system_time(ts: Timestamp) -> SystemTime {
     SystemTime::UNIX_EPOCH + timestamp_to_duration(ts)
 }
 
-pub fn to_media_time(ptp_time: Timestamp, audio_format: &AudioFormat) -> u64 {
+pub fn to_media_time(ptp_time: Timestamp, sample_rate: FramesPerSecond) -> u64 {
     let ptp_nanos = timestamp_to_duration(ptp_time).as_nanos();
-    let total_frames = (ptp_nanos * audio_format.sample_rate as u128) / NANOS_PER_SEC;
+    let total_frames = (ptp_nanos * sample_rate as u128) / NANOS_PER_SEC;
     total_frames as u64
 }
 
@@ -133,22 +164,50 @@ pub fn get_time(clock_id: clockid_t) -> io::Result<timespec> {
     }
 }
 
-pub fn get_clock(
+pub async fn get_clock(
+    app_name: String,
     ptp_mode: Option<PtpMode>,
-    audio_format: AudioFormat,
-) -> ConfigResult<Box<dyn MediaClock>> {
+    sample_rate: FramesPerSecond,
+    wb: Worterbuch,
+) -> ConfigResult<Clock> {
     match ptp_mode {
-        Some(PtpMode::System) => Ok(Box::new(UnixMediaClock::system_clock(audio_format))),
-        Some(PtpMode::Phc { nic }) => {
-            let iface = find_nic_with_name(&nic)?;
-            info!("Creating new PHC clock …");
-            let Some(path) = phc_device_for_interface_ethtool(&iface)? else {
-                return Err(ClockError::PtpNotSupported(iface.name.clone()).into());
-            };
-            Ok(Box::new(PhcClock::open(path, audio_format)?))
-        }
-        None => Ok(Box::new(UnixMediaClock::system_clock(audio_format))),
+        Some(PtpMode::System) => create_system_clock(sample_rate).map(Clock::System),
+        Some(PtpMode::Phc { nic }) => create_phc_clock(sample_rate, nic).map(Clock::Phc),
+        #[cfg(feature = "statime")]
+        Some(PtpMode::Internal { nic }) => create_statime_clock(app_name, sample_rate, wb, nic)
+            .await
+            .map(Clock::Statime),
+        None => create_system_clock(sample_rate).map(Clock::System),
     }
+}
+
+fn create_system_clock(sample_rate: FramesPerSecond) -> ConfigResult<UnixMediaClock> {
+    info!("Creating new system clock …");
+    let clock = UnixMediaClock::system_clock(sample_rate);
+    Ok(clock)
+}
+
+fn create_phc_clock(sample_rate: FramesPerSecond, nic: String) -> ConfigResult<PhcClock> {
+    info!("Creating new PHC clock for on NIC {nic} …");
+    let iface = find_nic_with_name(&nic)?;
+    let Some(path) = phc_device_for_interface_ethtool(&iface)? else {
+        return Err(ClockError::PtpNotSupported(iface.name.clone()).into());
+    };
+    let clock = PhcClock::open(path, sample_rate)?;
+    Ok(clock)
+}
+
+#[cfg(feature = "statime")]
+async fn create_statime_clock(
+    app_name: String,
+    sample_rate: FramesPerSecond,
+    wb: Worterbuch,
+    nic: String,
+) -> ConfigResult<StatimePtpMediaClock> {
+    info!("Creating new statime clock on NIC {nic} …");
+    let iface = find_nic_with_name(&nic)?;
+    let clock = StatimePtpMediaClock::new(app_name, iface, sample_rate, wb).await?;
+    Ok(clock)
 }
 
 pub fn to_nanos(tp: timespec) -> i128 {

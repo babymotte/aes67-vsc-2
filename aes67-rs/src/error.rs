@@ -64,6 +64,10 @@ pub enum VscApiError {
     Receiver(#[from] Box<ReceiverApiError>),
     #[error("Channel error.")]
     ChannelError(#[from] oneshot::error::RecvError),
+    #[error("Clock error: {0}")]
+    ClockError(#[from] ClockError),
+    #[error("Config error: {0}")]
+    ConfigError(#[from] ConfigError),
 }
 
 #[derive(Error, Debug, Diagnostic)]
@@ -160,6 +164,8 @@ pub enum ConfigError {
     UnsupportedSampleFormat(String),
     #[error("NIC with specified IP not found: {0}")]
     NoSuchNIC(String),
+    #[error("NIC {0} has no IP address assigned")]
+    NoIPAddressForNIC(String),
     #[error("Receiver not configured")]
     MissingReceiverConfig,
     #[error("Clock error: {0}")]
@@ -346,6 +352,8 @@ impl GetErrorCode for VscApiError {
             VscApiError::Sender(e) => error!("{:?}", e),
             VscApiError::Receiver(e) => error!("{:?}", e),
             VscApiError::ChannelError(e) => error!("{:?}", e),
+            VscApiError::ClockError(e) => error!("{:?}", e),
+            VscApiError::ConfigError(e) => error!("{:?}", e),
         }
         // TODO
         3

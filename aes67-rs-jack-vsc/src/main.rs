@@ -121,19 +121,26 @@ async fn run(subsys: &mut SubsystemHandle, config: PersistentConfig) -> miette::
 
     let vsc_config = config.vsc.clone();
 
+    let ptp_mode = vsc_config.ptp;
+
+    let clock = get_clock(id.to_owned(), ptp_mode, vsc_config.sample_rate, wb.clone()).await?;
+
     Aes67VscUi::new(config, worterbuch, subsys.create_cancellation_token()).await?;
 
-    let vsc = VirtualSoundCardApi::new(id.to_owned(), subsys.create_cancellation_token(), wb)
-        .await
-        .into_diagnostic()?;
-
-    let ptp_mode = vsc_config.ptp;
+    let vsc = VirtualSoundCardApi::new(
+        id.to_owned(),
+        subsys.create_cancellation_token(),
+        wb,
+        clock.clone(),
+    )
+    .await
+    .into_diagnostic()?;
 
     for tx_config in vsc_config.senders {
         let descriptor = TxDescriptor::try_from(&tx_config).into_diagnostic()?;
         let vsc = vsc.clone();
-        let ptp_mode = ptp_mode.clone();
         let app_id = id.clone();
+        let clk = clock.clone();
         subsys.start(SubsystemBuilder::new(
             format!("sender/{}", descriptor.id),
             async move |s: &mut SubsystemHandle| match vsc
@@ -141,10 +148,7 @@ async fn run(subsys: &mut SubsystemHandle, config: PersistentConfig) -> miette::
                 .await
                 .into_diagnostic()
             {
-                Ok((sender, _)) => {
-                    let clock = get_clock(ptp_mode, descriptor.audio_format)?;
-                    start_recording(app_id, s, sender, descriptor, clock).await
-                }
+                Ok((sender, _)) => start_recording(app_id, s, sender, descriptor, clk).await,
                 Err(e) => {
                     error!("Error creating sender '{}': {}", descriptor.id, e);
                     Ok(())
@@ -156,18 +160,17 @@ async fn run(subsys: &mut SubsystemHandle, config: PersistentConfig) -> miette::
     for rx_config in vsc_config.receivers {
         let descriptor = RxDescriptor::try_from(&rx_config).into_diagnostic()?;
         let vsc = vsc.clone();
-        let ptp_mode = ptp_mode.clone();
         let app_id = id.clone();
+        let clk = clock.clone();
         subsys.start(SubsystemBuilder::new(
             format!("receiver/{}", descriptor.id),
             async move |s: &mut SubsystemHandle| match vsc
-                .create_receiver(rx_config, ptp_mode.clone())
+                .create_receiver(rx_config)
                 .await
                 .into_diagnostic()
             {
                 Ok((receiver, monitoring, _)) => {
-                    let clock = get_clock(ptp_mode, descriptor.audio_format)?;
-                    start_playout(app_id, s, receiver, descriptor, clock, monitoring).await
+                    start_playout(app_id, s, receiver, descriptor, clk, monitoring).await
                 }
                 Err(e) => {
                     error!("Error creating receiver '{}': {}", descriptor.id, e);

@@ -6,7 +6,7 @@ use pnet::datalink::NetworkInterface;
 use rand::{SeedableRng, rngs::StdRng};
 use statime::{
     OverlayClock, PtpInstance, PtpInstanceState, SharedClock,
-    config::{ClockIdentity, InstanceConfig, SdoId, TimePropertiesDS, TimeSource},
+    config::{ClockIdentity, InstanceConfig, PtpMinorVersion, SdoId, TimePropertiesDS, TimeSource},
     filters::{KalmanConfiguration, KalmanFilter},
     port::{
         InBmca, MAX_DATA_LEN, Port, PortAction, PortActionIterator, TimestampContext,
@@ -16,7 +16,7 @@ use statime::{
 };
 use statime_linux::{
     clock::{LinuxClock, PortTimestampToTime},
-    config::{DelayType, NetworkMode, PortConfig},
+    config::{DelayType, HardwareClock, NetworkMode, PortConfig},
     observer::ObservableInstanceState,
     socket::{
         PtpTargetAddress, open_ethernet_socket, open_ipv4_event_socket, open_ipv4_general_socket,
@@ -43,7 +43,7 @@ use tokio::{
 use tracing::{error, info, trace};
 use worterbuch_client::{Worterbuch, topic};
 
-pub type PtpClock = SharedClock<OverlayClock<LinuxClock>>;
+pub type StatimeClock = SharedClock<OverlayClock<LinuxClock>>;
 
 pin_project_lite::pin_project! {
     struct Timer {
@@ -109,13 +109,13 @@ pub async fn statime_linux(
         priority_1: 255,
         priority_2: 255,
         domain_number: 0,
-        slave_only: false,
+        slave_only: true,
         sdo_id: SdoId::try_from(sdo_id).expect("sdo-id should be between 0 and 4095"),
         path_trace,
     };
 
     let time_properties_ds =
-        TimePropertiesDS::new_arbitrary_time(false, false, TimeSource::InternalOscillator);
+        TimePropertiesDS::new_arbitrary_time(false, false, TimeSource::default());
 
     let system_clock = SharedClock::new(OverlayClock::new(LinuxClock::CLOCK_TAI));
 
@@ -140,7 +140,6 @@ pub async fn statime_linux(
     let (port_clock, timestamping) = (system_clock.clone(), InterfaceTimestampMode::SoftwareAll);
 
     let rng = StdRng::from_entropy();
-    let bind_phc = port_config.hardware_clock;
     let port = instance.add_port(
         port_config.into(),
         KalmanConfiguration::default(),
@@ -153,7 +152,7 @@ pub async fn statime_linux(
 
     match network_mode {
         statime_linux::config::NetworkMode::Ipv4 => {
-            let event_socket = open_ipv4_event_socket(interface, timestamping, bind_phc)
+            let event_socket = open_ipv4_event_socket(interface, timestamping, None)
                 .expect("Could not open event socket");
             let general_socket =
                 open_ipv4_general_socket(interface).expect("Could not open general socket");
@@ -169,7 +168,7 @@ pub async fn statime_linux(
             ));
         }
         statime_linux::config::NetworkMode::Ipv6 => {
-            let event_socket = open_ipv6_event_socket(interface, timestamping, bind_phc)
+            let event_socket = open_ipv6_event_socket(interface, timestamping, None)
                 .expect("Could not open event socket");
             let general_socket =
                 open_ipv6_general_socket(interface).expect("Could not open general socket");
@@ -185,8 +184,8 @@ pub async fn statime_linux(
             ));
         }
         statime_linux::config::NetworkMode::Ethernet => {
-            let socket = open_ethernet_socket(interface, timestamping, bind_phc)
-                .expect("Could not open socket");
+            let socket =
+                open_ethernet_socket(interface, timestamping, None).expect("Could not open socket");
 
             tokio::spawn(ethernet_port_task(
                 port_task_receiver,
@@ -260,10 +259,11 @@ async fn run(
         instance_state_sender
             .send(ObservableInstanceState {
                 default_ds: instance.default_ds(),
-                current_ds: instance.current_ds(),
+                current_ds: instance.current_ds(None),
                 parent_ds: instance.parent_ds(),
                 time_properties_ds: instance.time_properties_ds(),
                 path_trace_ds: instance.path_trace_ds(),
+                port_ds: vec![],
             })
             .await
             .ok();
@@ -279,7 +279,7 @@ type BmcaPort = Port<
     InBmca,
     Option<Vec<ClockIdentity>>,
     StdRng,
-    PtpClock,
+    StatimeClock,
     KalmanFilter,
     RwLock<PtpInstanceState>,
 >;
@@ -297,7 +297,7 @@ async fn port_task<A: NetworkAddress + PtpTargetAddress>(
     mut general_socket: Socket<A, Open>,
     mut bmca_notify: tokio::sync::watch::Receiver<bool>,
     mut tlv_forwarder: TlvForwarder,
-    clock: PtpClock,
+    clock: StatimeClock,
 ) {
     let mut timers = Timers {
         port_sync_timer: pin!(Timer::new()),
@@ -417,7 +417,7 @@ async fn ethernet_port_task(
     mut socket: Socket<EthernetAddress, Open>,
     mut bmca_notify: tokio::sync::watch::Receiver<bool>,
     mut tlv_forwarder: TlvForwarder,
-    clock: PtpClock,
+    clock: StatimeClock,
 ) {
     let mut timers = Timers {
         port_sync_timer: pin!(Timer::new()),
@@ -535,7 +535,7 @@ async fn handle_actions<A: NetworkAddress + PtpTargetAddress>(
     general_socket: &mut Socket<A, Open>,
     timers: &mut Timers<'_>,
     tlv_forwarder: &TlvForwarder,
-    clock: &PtpClock,
+    clock: &StatimeClock,
 ) -> Option<(TimestampContext, Time)> {
     let mut pending_timestamp = None;
 
@@ -610,7 +610,7 @@ async fn handle_actions_ethernet(
     socket: &mut Socket<EthernetAddress, Open>,
     timers: &mut Timers<'_>,
     tlv_forwarder: &TlvForwarder,
-    clock: &PtpClock,
+    clock: &StatimeClock,
 ) -> Option<(TimestampContext, Time)> {
     let mut pending_timestamp = None;
 
@@ -698,7 +698,7 @@ fn port_config(ip: IpAddr) -> PortConfig {
         .expect("no interface")
         .expect("no interface");
     let acceptable_master_list = None;
-    let hardware_clock = None;
+    let hardware_clock = HardwareClock::None;
     let network_mode = NetworkMode::Ipv4;
     let announce_interval = 1;
     let sync_interval = 0;
@@ -707,6 +707,7 @@ fn port_config(ip: IpAddr) -> PortConfig {
     let delay_asymmetry = 0;
     let delay_mechanism = DelayType::E2E;
     let delay_interval = 1;
+    let minor_ptp_version = PtpMinorVersion::One;
 
     PortConfig {
         interface,
@@ -720,6 +721,7 @@ fn port_config(ip: IpAddr) -> PortConfig {
         delay_asymmetry,
         delay_mechanism,
         delay_interval,
+        minor_ptp_version,
     }
 }
 
