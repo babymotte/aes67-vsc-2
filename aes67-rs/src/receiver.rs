@@ -234,7 +234,8 @@ impl<'a> Receiver<'a> {
 
         if ingress_time > media_time_at_reception {
             self.report_time_travelling_packet(media_time_at_reception, &rtp, ingress_time);
-            return Ok(());
+            // TODO check how far packet is off and if it is save to insert into the buffer
+            // return Ok(());
         }
 
         self.tx.write(rtp.payload(), ingress_time).await;

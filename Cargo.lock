@@ -4889,9 +4889,9 @@ dependencies = [
 
 [[package]]
 name = "worterbuch"
-version = "1.4.0-rc.6"
+version = "1.4.0-rc.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5722e2dc532d03ae92fa016f361c42cf7aab6d32c0e4764565053f5310abd1f9"
+checksum = "2b8f388564666752416d5989f907af283f25fd8878c54780522d6a2a5c594726"
 dependencies = [
  "axum 0.8.6",
  "axum-extra",
@@ -4941,9 +4941,9 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-client"
-version = "1.4.0-rc.6"
+version = "1.4.0-rc.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1192c7267bada9be5e05d3e2bfb56f98ed11619049c82a7da933f317a13b7c55"
+checksum = "7e56d85214e6b14efcbc24fe5115ff46a32d138e8daa3c7534708bd09fcc7044"
 dependencies = [
  "async-stream",
  "futures-util",
@@ -4958,9 +4958,9 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-common"
-version = "1.4.0-rc.6"
+version = "1.4.0-rc.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1f530742589427c295bef3eae326b5086b705fceaef3a20a23ad2ac06c679c15"
+checksum = "e7957b97f6564f7e3f13daabb7efa482f49253591257d1a91a7bd20c1fbe48d0"
 dependencies = [
  "axum 0.8.6",
  "http",

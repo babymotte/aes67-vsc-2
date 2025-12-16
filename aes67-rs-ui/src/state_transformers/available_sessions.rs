@@ -92,13 +92,13 @@ impl ProcessLopp {
     }
 
     async fn session_added(&mut self, key: String, session: String) -> WebUIResult<()> {
-        info!("Session added: {:?}", session);
+        info!("Session added:\n{session}");
         // TODO
         Ok(())
     }
 
     async fn session_removed(&mut self, key: String, session: String) -> WebUIResult<()> {
-        info!("Session removed: {:?}", session);
+        info!("Session removed:\n{session}");
         // TODO
         Ok(())
     }

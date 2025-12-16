@@ -27,10 +27,12 @@ use aes67_rs::{
     time::get_clock, vsc::VirtualSoundCardApi,
 };
 use aes67_rs_ui::{Aes67VscUi, config::PersistentConfig};
-use miette::IntoDiagnostic;
+use miette::{IntoDiagnostic, miette};
 use serde_json::json;
 use std::time::Duration;
-use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle, Toplevel};
+use tokio_graceful_shutdown::{
+    SubsystemBuilder, SubsystemHandle, Toplevel, errors::SubsystemError,
+};
 use tracing::{error, info};
 use worterbuch::PersistenceMode;
 use worterbuch_client::{KeyValuePair, topic};
@@ -43,16 +45,30 @@ async fn main() -> miette::Result<()> {
 
     telemetry::init(&config.vsc).await?;
 
-    Toplevel::new(async move |s: &mut SubsystemHandle| {
+    let res = Toplevel::new(async move |s: &mut SubsystemHandle| {
         s.start(SubsystemBuilder::new(
             app_id,
             async move |s: &mut SubsystemHandle| run(s, config).await,
         ));
     })
     .catch_signals()
-    .handle_shutdown_requests(Duration::from_secs(1))
-    .await
-    .into_diagnostic()?;
+    .handle_shutdown_requests(Duration::from_secs(2))
+    .await;
+
+    if let Err(e) = &res {
+        for e in e.get_subsystem_errors() {
+            match e {
+                SubsystemError::Failed(_, err) => {
+                    error!("{e}: {err}");
+                    eprintln!("{:?}", err.get_error());
+                }
+                SubsystemError::Panicked(_) => {
+                    error!("{e}");
+                }
+            }
+        }
+        return Err(miette!("aes67-jack-vsc exited with errors"));
+    }
 
     Ok(())
 }

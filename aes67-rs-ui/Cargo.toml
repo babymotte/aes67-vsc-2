@@ -17,8 +17,8 @@ tokio = "1.47.1"
 tokio-graceful-shutdown = { version = "0.19.0", features = ["tracing"] }
 tokio-util = "0.7.16"
 tracing = "0.1.41"
-worterbuch = { version = "1.4.0-rc.6" }
-worterbuch-client = { version = "1.4.0-rc.6" }
+worterbuch = { version = "1.4.0-rc.9" }
+worterbuch-client = { version = "1.4.0-rc.9" }
 
 [features]
 tokio-metrics = []
