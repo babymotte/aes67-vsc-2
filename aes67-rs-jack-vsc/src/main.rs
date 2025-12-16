@@ -23,8 +23,8 @@ mod telemetry;
 
 use crate::{play::start_playout, record::start_recording};
 use aes67_rs::{
-    discovery::start_sap_discovery, receiver::config::RxDescriptor, sender::config::TxDescriptor,
-    time::get_clock, vsc::VirtualSoundCardApi,
+    discovery::start_sap_discovery, nic::find_nic_with_name, receiver::config::RxDescriptor,
+    sender::config::TxDescriptor, time::get_clock, vsc::VirtualSoundCardApi,
 };
 use aes67_rs_ui::{Aes67VscUi, config::PersistentConfig};
 use miette::{IntoDiagnostic, miette};
@@ -124,6 +124,7 @@ async fn run(subsys: &mut SubsystemHandle, config: PersistentConfig) -> miette::
     let ptp_mode = vsc_config.ptp;
 
     let clock = get_clock(id.to_owned(), ptp_mode, vsc_config.sample_rate, wb.clone()).await?;
+    let audio_nic = find_nic_with_name(&config.vsc.audio.nic)?;
 
     Aes67VscUi::new(config, worterbuch, subsys.create_cancellation_token()).await?;
 
@@ -132,6 +133,7 @@ async fn run(subsys: &mut SubsystemHandle, config: PersistentConfig) -> miette::
         subsys.create_cancellation_token(),
         wb,
         clock.clone(),
+        audio_nic,
     )
     .await
     .into_diagnostic()?;

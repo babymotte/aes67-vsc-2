@@ -22,6 +22,7 @@ use crate::{
         ConfigError, ConfigResult, GetErrorCode, ReceiverApiResult, ReceiverInternalResult,
         ToBoxedResult, VscApiResult, VscInternalError, VscInternalResult,
     },
+    nic::find_nic_with_name,
     receiver::{api::ReceiverApi, config::ReceiverConfig},
     serde::SdpWrapper,
     time::get_clock,
@@ -47,6 +48,7 @@ fn init_vsc() -> VscApiResult<Arc<VirtualSoundCardApi>> {
     let (wb, _, _) = block_on(worterbuch_client::connect_with_default_config())
         .map_err(VscInternalError::from)
         .boxed()?;
+    let audio_nic = find_nic_with_name(config.audio.nic)?;
     let vsc_name = env::var("AES67_VSC_NAME").unwrap_or("aes67-virtual-sound-card".to_owned());
     info!("Creating new VSC with name '{vsc_name}' …");
     let shutdown_token = CancellationToken::new();
@@ -61,6 +63,7 @@ fn init_vsc() -> VscApiResult<Arc<VirtualSoundCardApi>> {
         shutdown_token,
         wb,
         clock,
+        audio_nic,
     ))?;
     info!("VSC '{}' created.", vsc_name);
     Ok(Arc::new(vsc))
@@ -91,14 +94,12 @@ impl<'a> TryFrom<&Aes67VscReceiverConfig<'a>> for ReceiverConfig {
         );
         let link_offset = value.link_offset;
         let delay_calculation_interval = None;
-        let interface_ip = value.interface_ip.to_str().parse()?;
 
         Ok(ReceiverConfig {
             id,
             session,
             link_offset,
             delay_calculation_interval,
-            interface_ip,
         })
     }
 }

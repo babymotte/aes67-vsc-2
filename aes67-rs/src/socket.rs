@@ -20,13 +20,17 @@ use crate::{
     error::{ConfigError, ConfigResult, ReceiverInternalResult, SenderInternalResult},
 };
 use miette::{IntoDiagnostic, Result};
+use pnet::datalink::NetworkInterface;
 use sdp::{
     SessionDescription,
     description::common::{Address, ConnectionInformation},
 };
-use socket2::{Domain, Protocol as SockProto, SockAddr, Socket, TcpKeepalive, Type};
+use socket2::{
+    Domain, InterfaceIndexOrAddress, Protocol as SockProto, SockAddr, Socket, TcpKeepalive, Type,
+};
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener},
+    num::NonZeroU32,
     time::Duration,
 };
 use tokio::net::UdpSocket;
@@ -67,12 +71,15 @@ pub fn init_tcp_socket(bind_addr: IpAddr, port: u16, config: SocketConfig) -> Re
 #[instrument]
 pub fn create_rx_socket(
     sdp: &SessionDescription,
-    local_ip: IpAddr,
+    iface: NetworkInterface,
 ) -> ReceiverInternalResult<UdpSocket> {
-    Ok(try_create_rx_socket(sdp, local_ip)?)
+    Ok(try_create_rx_socket(sdp, iface)?)
 }
 
-fn try_create_rx_socket(sdp: &SessionDescription, local_ip: IpAddr) -> ConfigResult<UdpSocket> {
+fn try_create_rx_socket(
+    sdp: &SessionDescription,
+    iface: NetworkInterface,
+) -> ConfigResult<UdpSocket> {
     let global_c = sdp.connection_information.as_ref();
 
     if sdp.media_descriptions.len() > 1 {
@@ -159,19 +166,9 @@ fn try_create_rx_socket(sdp: &SessionDescription, local_ip: IpAddr) -> ConfigRes
 
     let port = media.media_name.port.value.to_owned() as u16;
 
-    let socket = match (ip_addr, local_ip) {
-        (IpAddr::V4(ipv4_addr), IpAddr::V4(local_ip)) => {
-            create_ipv4_rx_socket(ipv4_addr, local_ip, port)?
-        }
-        (IpAddr::V6(ipv6_addr), IpAddr::V6(local_ip)) => {
-            create_ipv6_rx_socket(ipv6_addr, local_ip, port)?
-        }
-        (IpAddr::V4(_), IpAddr::V6(_)) => Err(ConfigError::InvalidLocalIP(
-            "Cannot receive IPv4 stream when bound to local IPv6 address".to_owned(),
-        ))?,
-        (IpAddr::V6(_), IpAddr::V4(_)) => Err(ConfigError::InvalidLocalIP(
-            "Cannot receive IPv6 stream when bound to local IPv4 address".to_owned(),
-        ))?,
+    let socket = match ip_addr {
+        IpAddr::V4(ipv4_addr) => create_ipv4_rx_socket(ipv4_addr, iface, port)?,
+        IpAddr::V6(ipv6_addr) => create_ipv6_rx_socket(ipv6_addr, iface, port)?,
     };
     socket.set_nonblocking(true)?;
 
@@ -179,13 +176,25 @@ fn try_create_rx_socket(sdp: &SessionDescription, local_ip: IpAddr) -> ConfigRes
 }
 
 #[instrument]
-pub fn create_tx_socket(target: SocketAddr, local_ip: IpAddr) -> SenderInternalResult<UdpSocket> {
-    let socket = match local_ip {
-        IpAddr::V4(_) => Socket::new(Domain::IPV4, Type::DGRAM, Some(SockProto::UDP)),
-        IpAddr::V6(_) => Socket::new(Domain::IPV6, Type::DGRAM, Some(SockProto::UDP)),
-    }?;
-    let socket_addr = SockAddr::from(SocketAddr::new(local_ip, 0));
-    socket.bind(&socket_addr)?;
+pub fn create_tx_socket(
+    target: SocketAddr,
+    iface: NetworkInterface,
+) -> SenderInternalResult<UdpSocket> {
+    let has_v4_address = iface.ips.iter().any(|it| match it.ip() {
+        IpAddr::V4(_) => true,
+        IpAddr::V6(_) => false,
+    });
+
+    let socket = if has_v4_address {
+        let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(SockProto::UDP))?;
+        socket.bind_device_by_index_v4(NonZeroU32::new(iface.index))?;
+        socket
+    } else {
+        let socket = Socket::new(Domain::IPV6, Type::DGRAM, Some(SockProto::UDP))?;
+        socket.bind_device_by_index_v6(NonZeroU32::new(iface.index))?;
+        socket
+    };
+
     socket.set_reuse_address(true)?;
     socket.set_nonblocking(true)?;
 
@@ -195,11 +204,11 @@ pub fn create_tx_socket(target: SocketAddr, local_ip: IpAddr) -> SenderInternalR
 #[instrument]
 pub fn create_ipv4_rx_socket(
     ip_addr: Ipv4Addr,
-    local_ip: Ipv4Addr,
+    iface: NetworkInterface,
     port: u16,
 ) -> ConfigResult<Socket> {
     info!(
-        "Creating IPv4 {} RX socket for stream {}:{} at {}:{}",
+        "Creating IPv4 {} RX socket for stream {}:{} at {}",
         if ip_addr.is_multicast() {
             "multicast"
         } else {
@@ -207,21 +216,18 @@ pub fn create_ipv4_rx_socket(
         },
         ip_addr,
         port,
-        local_ip,
-        port
+        iface.name
     );
-
-    let local_addr = SocketAddr::new(IpAddr::V4(local_ip), port);
 
     let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(SockProto::UDP))?;
 
     socket.set_reuse_address(true)?;
 
     if ip_addr.is_multicast() {
-        socket.join_multicast_v4(&ip_addr, &local_ip)?;
+        socket.join_multicast_v4_n(&ip_addr, &InterfaceIndexOrAddress::Index(iface.index))?;
         socket.bind(&SockAddr::from(SocketAddr::new(IpAddr::V4(ip_addr), port)))?;
     } else {
-        socket.bind(&SockAddr::from(local_addr))?;
+        socket.bind_device_by_index_v4(NonZeroU32::new(iface.index))?;
     }
     Ok(socket)
 }
@@ -229,11 +235,11 @@ pub fn create_ipv4_rx_socket(
 #[instrument]
 pub fn create_ipv6_rx_socket(
     ip_addr: Ipv6Addr,
-    local_ip: Ipv6Addr,
+    iface: NetworkInterface,
     port: u16,
 ) -> ConfigResult<Socket> {
     info!(
-        "Creating IPv6 {} RX socket for stream {}:{} at {}:{}",
+        "Creating IPv6 {} RX socket for stream {}:{} at {}",
         if ip_addr.is_multicast() {
             "multicast"
         } else {
@@ -241,11 +247,8 @@ pub fn create_ipv6_rx_socket(
         },
         ip_addr,
         port,
-        local_ip,
-        port
+        iface.name
     );
-
-    let local_addr = SocketAddr::new(IpAddr::V6(local_ip), port);
 
     let socket = Socket::new(Domain::IPV6, Type::DGRAM, Some(SockProto::UDP))?;
 
@@ -256,7 +259,7 @@ pub fn create_ipv6_rx_socket(
         socket.join_multicast_v6(&ip_addr, 0)?;
         socket.bind(&SockAddr::from(SocketAddr::new(IpAddr::V6(ip_addr), port)))?;
     } else {
-        socket.bind(&SockAddr::from(local_addr))?;
+        socket.bind_device_by_index_v6(NonZeroU32::new(iface.index))?;
     }
     Ok(socket)
 }

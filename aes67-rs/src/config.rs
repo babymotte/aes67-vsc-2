@@ -117,6 +117,12 @@ pub enum PtpMode {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AudioConfig {
+    pub nic: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Config {
     #[serde(default = "AppConfig::default")]
     pub app: AppConfig,
@@ -126,6 +132,7 @@ pub struct Config {
     pub telemetry: Option<TelemetryConfig>,
     #[serde(default)]
     pub ptp: Option<PtpMode>,
+    pub audio: AudioConfig,
     #[serde(default)]
     pub receivers: Vec<ReceiverConfig>,
     #[serde(default)]

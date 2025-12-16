@@ -39,7 +39,7 @@ async fn main() -> ConfigResult<()> {
     let nic = "enp0s13f0u3";
 
     let mut phc_clock = get_clock(
-        "test-clock".into(),
+        "phc_clock".into(),
         Some(PtpMode::Phc {
             nic: nic.to_owned(),
         }),
@@ -49,7 +49,7 @@ async fn main() -> ConfigResult<()> {
     .await?;
 
     let mut statime_clock = get_clock(
-        "test-clock".into(),
+        "statime_clock".into(),
         Some(PtpMode::Internal {
             nic: nic.to_owned(),
         }),
@@ -59,14 +59,14 @@ async fn main() -> ConfigResult<()> {
     .await?;
 
     loop {
-        let phc_time_1 = phc_clock.current_media_time()?;
+        let phc_time_1 = phc_clock.current_media_time()? as f64;
         let statime_time = statime_clock.current_media_time()?;
-        let phc_time_2 = phc_clock.current_media_time()?;
-        let phc_time = (phc_time_1 + phc_time_2) / 2;
+        let phc_time_2 = phc_clock.current_media_time()? as f64;
+        let phc_time = (phc_time_1 + phc_time_2) / 2.0;
 
         eprintln!("Current phc media time: {}", phc_time);
         eprintln!("Current statime media time: {}", statime_time);
-        eprintln!("Diff: {}", phc_time as i64 - statime_time as i64);
+        eprintln!("Diff: {}", phc_time - statime_time as f64);
 
         thread::sleep(Duration::from_secs(1));
     }

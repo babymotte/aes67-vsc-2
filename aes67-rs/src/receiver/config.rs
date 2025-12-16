@@ -48,7 +48,6 @@ pub struct ReceiverConfig {
     pub link_offset: MilliSeconds,
     #[serde(default)]
     pub delay_calculation_interval: Option<Seconds>,
-    pub interface_ip: IpAddr,
 }
 
 impl ReceiverConfig {

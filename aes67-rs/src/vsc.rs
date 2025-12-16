@@ -29,6 +29,7 @@ use crate::{
     receiver::{api::ReceiverApi, config::ReceiverConfig, start_receiver},
     sender::api::SenderApi,
 };
+use pnet::datalink::NetworkInterface;
 use std::collections::HashMap;
 use tokio::sync::{mpsc, oneshot};
 use tokio_graceful_shutdown::SubsystemHandle;
@@ -65,9 +66,10 @@ impl VirtualSoundCardApi {
         shutdown_token: CancellationToken,
         worterbuch_client: Worterbuch,
         clock: Clock,
+        audio_nic: NetworkInterface,
     ) -> VscApiResult<Self> {
         Ok(
-            VirtualSoundCardApi::try_new(name, shutdown_token, worterbuch_client, clock)
+            VirtualSoundCardApi::try_new(name, shutdown_token, worterbuch_client, clock, audio_nic)
                 .await
                 .boxed()?,
         )
@@ -78,9 +80,16 @@ impl VirtualSoundCardApi {
         shutdown_token: CancellationToken,
         worterbuch_client: Worterbuch,
         clock: Clock,
+        audio_nic: NetworkInterface,
     ) -> VscInternalResult<Self> {
-        let api_tx =
-            VirtualSoundCardApi::create_vsc(name, shutdown_token, worterbuch_client, clock).await?;
+        let api_tx = VirtualSoundCardApi::create_vsc(
+            name,
+            shutdown_token,
+            worterbuch_client,
+            clock,
+            audio_nic,
+        )
+        .await?;
         Ok(VirtualSoundCardApi { api_tx })
     }
 
@@ -89,6 +98,7 @@ impl VirtualSoundCardApi {
         shutdown_token: CancellationToken,
         worterbuch_client: Worterbuch,
         clock: Clock,
+        audio_nic: NetworkInterface,
     ) -> VscInternalResult<ApiMessageSender> {
         let subsystem_name = name.clone();
         let (api_tx, api_rx) = mpsc::channel(1024);
@@ -102,6 +112,7 @@ impl VirtualSoundCardApi {
                 s.create_cancellation_token(),
                 worterbuch_client,
                 clock,
+                audio_nic,
             )?
             .run()
             .await;
@@ -179,6 +190,7 @@ impl VirtualSoundCardApi {
 struct VirtualSoundCard {
     name: String,
     clock: Clock,
+    audio_nic: NetworkInterface,
     api_rx: mpsc::Receiver<VscApiMessage>,
     txs: HashMap<u32, SenderApi>,
     rxs: HashMap<u32, ReceiverApi>,
@@ -199,6 +211,7 @@ impl VirtualSoundCard {
         shutdown_token: CancellationToken,
         worterbuch_client: Worterbuch,
         clock: Clock,
+        audio_nic: NetworkInterface,
     ) -> VscInternalResult<Self> {
         let monitoring = start_monitoring_service(
             name.clone(),
@@ -219,6 +232,7 @@ impl VirtualSoundCard {
             #[cfg(any(feature = "tokio-metrics", feature = "statime"))]
             wb: worterbuch_client,
             clock,
+            audio_nic,
         })
     }
 
@@ -265,6 +279,7 @@ impl VirtualSoundCard {
             self.name.clone(),
             qualified_id.clone(),
             label,
+            self.audio_nic.clone(),
             config,
             self.monitoring.child(qualified_id.clone()),
             self.shutdown_token.clone(),
@@ -304,6 +319,7 @@ impl VirtualSoundCard {
             self.name.clone(),
             qualified_id.clone(),
             label,
+            self.audio_nic.clone(),
             config,
             clock,
             monitoring.clone(),

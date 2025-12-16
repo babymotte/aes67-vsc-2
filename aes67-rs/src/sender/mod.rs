@@ -31,6 +31,7 @@ use crate::{
     socket::create_tx_socket,
     utils::U32_WRAP,
 };
+use pnet::datalink::NetworkInterface;
 use rtp_rs::{RtpPacketBuilder, Seq};
 use std::net::SocketAddr;
 use tokio::{net::UdpSocket, select, sync::mpsc};
@@ -45,6 +46,7 @@ pub(crate) async fn start_sender(
     app_id: String,
     id: String,
     label: String,
+    iface: NetworkInterface,
     config: SenderConfig,
     monitoring: Monitoring,
     shutdown_token: CancellationToken,
@@ -54,7 +56,7 @@ pub(crate) async fn start_sender(
     let (api_tx, api_rx) = mpsc::channel(1024);
     let desc = TxDescriptor::try_from(&config)?;
     let (tx, rx) = sender_buffer_channel(desc.clone());
-    let socket = create_tx_socket(config.target, config.interface_ip)?;
+    let socket = create_tx_socket(config.target, iface)?;
 
     let subsystem_name = id.clone();
     let subsystem = async move |s: &mut SubsystemHandle| {

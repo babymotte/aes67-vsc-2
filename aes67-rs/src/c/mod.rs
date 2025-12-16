@@ -55,12 +55,6 @@ pub struct Aes67VscReceiverConfig<'a> {
     sdp: char_p::Ref<'a>,
     /// Link offset in milliseconds
     link_offset: f32,
-    /// String representation of an IP address (e.g. "192.168.1.123") that is assigned to the network interface
-    /// this receiver should bind to.
-    interface_ip: char_p::Ref<'a>,
-
-    ptp_mode: Option<char_p::Ref<'a>>,
-    ptp_nic: Option<char_p::Ref<'a>>,
 }
 
 /// Create a new AES67 receiver

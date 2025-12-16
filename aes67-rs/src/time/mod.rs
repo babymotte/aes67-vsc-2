@@ -40,7 +40,7 @@ use std::{
 };
 use tracing::{error, info, warn};
 #[cfg(feature = "statime")]
-use worterbuch_client::Worterbuch;
+use worterbuch_client::{Worterbuch, topic};
 
 pub const NANOS_PER_SEC: u128 = 1_000_000_000;
 pub const NANOS_PER_MILLI: u64 = 1_000_000;
@@ -174,9 +174,11 @@ pub async fn get_clock(
         Some(PtpMode::System) => create_system_clock(sample_rate).map(Clock::System),
         Some(PtpMode::Phc { nic }) => create_phc_clock(sample_rate, nic).map(Clock::Phc),
         #[cfg(feature = "statime")]
-        Some(PtpMode::Internal { nic }) => create_statime_clock(app_name, sample_rate, wb, nic)
-            .await
-            .map(Clock::Statime),
+        Some(PtpMode::Internal { nic }) => {
+            create_statime_clock(topic!(app_name, "clock"), sample_rate, wb, nic)
+                .await
+                .map(Clock::Statime)
+        }
         None => create_system_clock(sample_rate).map(Clock::System),
     }
 }

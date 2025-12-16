@@ -35,6 +35,7 @@ use crate::{
     time::{Clock, MediaClock},
     utils::U32_WRAP,
 };
+use pnet::datalink::NetworkInterface;
 use rtp_rs::{RtpReader, Seq};
 use std::net::SocketAddr;
 use tokio::{net::UdpSocket, select, sync::mpsc};
@@ -49,6 +50,7 @@ pub(crate) async fn start_receiver(
     app_id: String,
     id: String,
     label: String,
+    iface: NetworkInterface,
     config: ReceiverConfig,
     clock: Clock,
     monitoring: Monitoring,
@@ -59,7 +61,7 @@ pub(crate) async fn start_receiver(
     let (api_tx, api_rx) = mpsc::channel(1024);
     let desc = RxDescriptor::try_from(&config)?;
     let (tx, rx) = receiver_buffer_channel(desc.clone(), monitoring.clone());
-    let socket = create_rx_socket(&config.session, config.interface_ip)?;
+    let socket = create_rx_socket(&config.session, iface)?;
 
     let subsystem_name = id.clone();
     let subsystem = async move |s: &mut SubsystemHandle| {

@@ -17,14 +17,13 @@
 
 use crate::{error::ConfigError, formats::AudioFormat};
 use serde::{Deserialize, Serialize};
-use std::net::{IpAddr, SocketAddr};
+use std::net::SocketAddr;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SenderConfig {
     pub id: String,
     pub audio_format: AudioFormat,
-    pub interface_ip: IpAddr,
     pub target: SocketAddr,
     pub payload_type: u8,
     pub channel_labels: Option<Vec<String>>,
