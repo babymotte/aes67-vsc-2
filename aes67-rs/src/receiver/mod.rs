@@ -236,6 +236,7 @@ impl<'a> Receiver<'a> {
 
         if ingress_time > media_time_at_reception {
             self.report_time_travelling_packet(media_time_at_reception, &rtp, ingress_time);
+            self.calibrate_timestamp_offset(ts).await?;
             // TODO check how far packet is off and if it is save to insert into the buffer
             // return Ok(());
         }

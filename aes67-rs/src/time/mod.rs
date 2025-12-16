@@ -190,7 +190,7 @@ fn create_system_clock(sample_rate: FramesPerSecond) -> ConfigResult<UnixMediaCl
 }
 
 fn create_phc_clock(sample_rate: FramesPerSecond, nic: String) -> ConfigResult<PhcClock> {
-    info!("Creating new PHC clock for on NIC {nic} …");
+    info!("Creating new PHC clock on NIC {nic} …");
     let iface = find_nic_with_name(&nic)?;
     let Some(path) = phc_device_for_interface_ethtool(&iface)? else {
         return Err(ClockError::PtpNotSupported(iface.name.clone()).into());

@@ -7,13 +7,12 @@ use aes67_rs::{
     receiver::{api::ReceiverApi, config::RxDescriptor},
     time::{Clock, MILLIS_PER_SEC_F},
 };
-use futures_lite::future::block_on;
 use jack::{
     AudioOut, Client, ClientOptions, Control, Port, ProcessScope, contrib::ClosureProcessHandler,
 };
 use miette::IntoDiagnostic;
-use std::time::Instant;
-use tokio::sync::mpsc;
+use std::time::{Duration, Instant};
+use tokio::{runtime::Handle, sync::mpsc, time::timeout};
 use tokio_graceful_shutdown::SubsystemHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
@@ -26,6 +25,7 @@ struct State {
     muted: bool,
     monitoring: Monitoring,
     shutdown_token: CancellationToken,
+    async_runtime: Handle,
 }
 
 impl State {}
@@ -37,6 +37,7 @@ pub async fn start_playout(
     descriptor: RxDescriptor,
     clock: Clock,
     monitoring: Monitoring,
+    async_runtime: Handle,
 ) -> miette::Result<()> {
     // TODO evaluate client status
     let (client, status) =
@@ -69,6 +70,7 @@ pub async fn start_playout(
         muted: false,
         monitoring,
         shutdown_token: subsys.create_cancellation_token(),
+        async_runtime,
     };
     let process_handler =
         ClosureProcessHandler::with_state(process_handler_state, process, buffer_change);
@@ -112,20 +114,30 @@ fn process(state: &mut State, _: &Client, ps: &ProcessScope) -> Control {
 
     let pre_req = Instant::now();
 
-    match block_on(
-        state
-            .receiver
-            .receive(buffers, ingress_time, &state.shutdown_token),
-    ) {
-        Ok(true) => {
+    match state.async_runtime.block_on(async {
+        timeout(
+            Duration::from_millis(100),
+            state
+                .receiver
+                .receive(buffers, ingress_time, &state.shutdown_token),
+        )
+        .await
+    }) {
+        Ok(Ok(true)) => {
             unmuted(state);
         }
-        Ok(false) => {
+        Ok(Ok(false)) => {
             muted(state, ps);
         }
-        Err(e) => {
+        Ok(Err(e)) => {
             error!("Error receiving audio data: {e}");
             return Control::Quit;
+        }
+        Err(_) => {
+            if !state.muted {
+                error!("Receiving audio data timed out.");
+            }
+            muted(state, ps);
         }
     }
 

@@ -30,6 +30,7 @@ use aes67_rs_ui::{Aes67VscUi, config::PersistentConfig};
 use miette::{IntoDiagnostic, miette};
 use serde_json::json;
 use std::time::Duration;
+use tokio::runtime::Handle;
 use tokio_graceful_shutdown::{
     SubsystemBuilder, SubsystemHandle, Toplevel, errors::SubsystemError,
 };
@@ -164,6 +165,7 @@ async fn run(subsys: &mut SubsystemHandle, config: PersistentConfig) -> miette::
         let vsc = vsc.clone();
         let app_id = id.clone();
         let clk = clock.clone();
+        let rt = Handle::current();
         subsys.start(SubsystemBuilder::new(
             format!("receiver/{}", descriptor.id),
             async move |s: &mut SubsystemHandle| match vsc
@@ -172,7 +174,7 @@ async fn run(subsys: &mut SubsystemHandle, config: PersistentConfig) -> miette::
                 .into_diagnostic()
             {
                 Ok((receiver, monitoring, _)) => {
-                    start_playout(app_id, s, receiver, descriptor, clk, monitoring).await
+                    start_playout(app_id, s, receiver, descriptor, clk, monitoring, rt).await
                 }
                 Err(e) => {
                     error!("Error creating receiver '{}': {}", descriptor.id, e);
