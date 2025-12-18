@@ -54,7 +54,7 @@ impl PersistentConfig {
     }
 
     async fn try_store(&self) -> WebUIResult<()> {
-        let path = config_path(&self.vsc.instance_name()).await;
+        let path = config_path(self.vsc.instance_name()).await;
         let contents = serde_yaml::to_string(&self)?;
         fs::write(path, contents).await?;
         Ok(())

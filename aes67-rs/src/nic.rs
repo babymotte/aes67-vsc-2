@@ -60,7 +60,7 @@ pub fn find_ptp_interfaces() -> Vec<NetworkInterface> {
 pub fn find_nic_with_name(name: impl AsRef<str>) -> ConfigResult<NetworkInterface> {
     let name = name.as_ref();
     for iface in datalink::interfaces() {
-        if &iface.name == name {
+        if iface.name == name {
             return Ok(iface);
         }
     }

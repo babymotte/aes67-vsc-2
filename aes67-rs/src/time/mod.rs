@@ -28,7 +28,7 @@ mod statime;
 use crate::{
     config::PtpMode,
     error::{ClockError, ClockResult, ConfigResult},
-    formats::{AudioFormat, Frames, FramesPerSecond},
+    formats::{Frames, FramesPerSecond},
     nic::{find_nic_with_name, phc_device_for_interface_ethtool},
     time::{phc::PhcClock, statime::StatimePtpMediaClock},
 };

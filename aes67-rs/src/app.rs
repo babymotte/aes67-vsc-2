@@ -178,12 +178,12 @@ pub async fn wait_for_start(
     app: &mut mpsc::Receiver<AppState>,
 ) -> ChildAppResult<()> {
     match app.recv().await {
-        Some(AppState::Started) => return Ok(()),
+        Some(AppState::Started) => Ok(()),
         None | Some(AppState::TerminatedNormally) => {
             let msg = format!("{name} terminated immediately after start.");
-            return Err(ChildAppError(name, msg));
+            Err(ChildAppError(name, msg))
         }
-        Some(AppState::Crashed(e)) => return Err(ChildAppError(name, e.to_string()).into()),
+        Some(AppState::Crashed(e)) => Err(ChildAppError(name, e.to_string())),
     }
 }
 

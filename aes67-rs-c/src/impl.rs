@@ -17,7 +17,7 @@
 
 use ::safer_ffi::prelude::*;
 use aes67_rs::{
-    config::{Config, PtpMode},
+    config::Config,
     error::{
         ConfigError, ConfigResult, GetErrorCode, ReceiverApiResult, ReceiverInternalResult,
         ToBoxedResult, VscApiResult, VscInternalError, VscInternalResult,
@@ -120,10 +120,10 @@ pub fn try_create_receiver(config: &Aes67VscReceiverConfig) -> ReceiverInternalR
 
 pub fn try_receive<'a>(
     receiver_id: u32,
-    playout_time: u64,
-    buffer_ptr: c_slice::Mut<'a, f32>,
+    _playout_time: u64,
+    _buffer_ptr: c_slice::Mut<'a, f32>,
 ) -> ReceiverApiResult<u8> {
-    let Some(receiver) = RECEIVERS.get(&receiver_id) else {
+    let Some(_receiver) = RECEIVERS.get(&receiver_id) else {
         return Ok(AES_VSC_ERROR_RECEIVER_NOT_FOUND);
     };
 

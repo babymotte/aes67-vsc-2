@@ -95,7 +95,7 @@ async fn run(subsys: &mut SubsystemHandle, config: PersistentConfig) -> miette::
     wb_config.ws_endpoint = None;
     wb_config.tcp_endpoint = None;
     wb_config.unix_endpoint = None;
-    let worterbuch = worterbuch::spawn_worterbuch(&subsys, wb_config).await?;
+    let worterbuch = worterbuch::spawn_worterbuch(subsys, wb_config).await?;
 
     let wb = worterbuch_client::local_client_wrapper(worterbuch.clone());
 

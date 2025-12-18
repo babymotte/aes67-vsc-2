@@ -22,7 +22,6 @@ use std::{
     fmt::{Debug, Display},
     io,
     net::AddrParseError,
-    time::SystemTimeError,
 };
 use thiserror::Error;
 use tokio::sync::{oneshot, watch};

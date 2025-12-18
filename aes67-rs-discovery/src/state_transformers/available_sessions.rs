@@ -94,13 +94,13 @@ impl ProcessLopp {
         Ok(())
     }
 
-    async fn session_added(&mut self, key: String, session: String) -> DiscoveryResult<()> {
+    async fn session_added(&mut self, _key: String, session: String) -> DiscoveryResult<()> {
         info!("Session added:\n{session}");
         // TODO
         Ok(())
     }
 
-    async fn session_removed(&mut self, key: String, session: String) -> DiscoveryResult<()> {
+    async fn session_removed(&mut self, _key: String, session: String) -> DiscoveryResult<()> {
         info!("Session removed:\n{session}");
         // TODO
         Ok(())

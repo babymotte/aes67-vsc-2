@@ -125,11 +125,11 @@ impl<'a> StatsActor<'a> {
         }
     }
 
-    async fn process_vsc_state(&mut self, s: &VscState) {
+    async fn process_vsc_state(&mut self, _s: &VscState) {
         // TODO
     }
 
-    async fn process_sender_state(&mut self, s: &SenderState) {
+    async fn process_sender_state(&mut self, _s: &SenderState) {
         // TODO
     }
 

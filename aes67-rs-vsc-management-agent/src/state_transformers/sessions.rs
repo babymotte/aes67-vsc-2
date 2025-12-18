@@ -12,7 +12,7 @@ use worterbuch_client::{TypedPStateEvent, Worterbuch, topic};
 
 pub async fn start(
     subsys: &mut SubsystemHandle,
-    config: Config,
+    _config: Config,
     worterbuch_client: Worterbuch,
 ) -> WebUIResult<()> {
     info!("Starting sessions state transformer …");
@@ -102,7 +102,7 @@ impl ProcessLopp {
         Ok(())
     }
 
-    async fn session_removed(&mut self, key: String, session: Session) -> WebUIResult<()> {
+    async fn session_removed(&mut self, _key: String, session: Session) -> WebUIResult<()> {
         debug!("Session removed: {:?}", session);
 
         let id = session.description.origin.session_id;

@@ -37,7 +37,7 @@ pub async fn health(
 #[derive(Debug, Clone)]
 pub struct SenderHealth {}
 impl SenderHealth {
-    fn new(src: String) -> Self {
+    fn new(_src: String) -> Self {
         Self {}
     }
 }
@@ -45,7 +45,7 @@ impl SenderHealth {
 #[derive(Debug, Clone)]
 pub struct ReceiverHealth {}
 impl ReceiverHealth {
-    fn new(src: String) -> Self {
+    fn new(_src: String) -> Self {
         Self {}
     }
 }
@@ -53,7 +53,7 @@ impl ReceiverHealth {
 #[derive(Debug, Clone)]
 pub struct PlayoutHealth {}
 impl PlayoutHealth {
-    fn new(src: String) -> Self {
+    fn new(_src: String) -> Self {
         Self {}
     }
 }

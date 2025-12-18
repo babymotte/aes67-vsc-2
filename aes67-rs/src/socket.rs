@@ -180,10 +180,7 @@ pub fn create_tx_socket(
     target: SocketAddr,
     iface: NetworkInterface,
 ) -> SenderInternalResult<UdpSocket> {
-    let has_v4_address = iface.ips.iter().any(|it| match it.ip() {
-        IpAddr::V4(_) => true,
-        IpAddr::V6(_) => false,
-    });
+    let has_v4_address = iface.ips.iter().any(|it| it.ip().is_ipv4());
 
     let socket = if has_v4_address {
         let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(SockProto::UDP))?;

@@ -5,7 +5,7 @@ use crate::{
 use aes67_rs::{
     buffer::AudioBufferPointer,
     sender::{api::SenderApi, config::TxDescriptor},
-    time::{Clock, MILLIS_PER_SEC_F, MediaClock},
+    time::{Clock, MILLIS_PER_SEC_F},
 };
 use futures_lite::future::block_on;
 use jack::{
@@ -83,7 +83,7 @@ pub async fn start_recording(
     let active_client = client
         .activate_async(notification_handler, process_handler)
         .into_diagnostic()?;
-    start_session_manager(&subsys, active_client, notifications, app_id);
+    start_session_manager(subsys, active_client, notifications, app_id);
 
     subsys.on_shutdown_requested().await;
 
@@ -135,8 +135,8 @@ fn process(state: &mut State, _: &Client, ps: &ProcessScope) -> Control {
 
     // TODO send to monitoring
 
-    let total = post_req.duration_since(start).as_micros();
-    let req = post_req.duration_since(pre_req).as_micros();
+    let _total = post_req.duration_since(start).as_micros();
+    let _req = post_req.duration_since(pre_req).as_micros();
 
     // if total > 100 {
     //     eprintln!("latency record req: {req} µs");

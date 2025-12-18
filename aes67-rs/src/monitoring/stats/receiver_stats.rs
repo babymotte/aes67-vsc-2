@@ -42,7 +42,7 @@ pub struct ReceiverStats {
 }
 
 impl ReceiverStats {
-    pub fn new(id: String, label: Option<String>, tx: mpsc::Sender<Report>) -> Self {
+    pub fn new(id: String, _label: Option<String>, tx: mpsc::Sender<Report>) -> Self {
         Self {
             id,
             tx,
@@ -154,7 +154,7 @@ impl ReceiverStats {
 
     async fn process_packet_reception(
         &mut self,
-        seq: Seq,
+        _seq: Seq,
         payload_len: usize,
         ingress_time: Frames,
         media_time_at_reception: Frames,
