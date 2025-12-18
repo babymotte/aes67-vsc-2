@@ -15,8 +15,8 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{
-    AES_VSC_ERROR_RECEIVER_NOT_FOUND, AES_VSC_OK, Aes67VscReceiverConfig,
+use ::safer_ffi::prelude::*;
+use aes67_rs::{
     config::{Config, PtpMode},
     error::{
         ConfigError, ConfigResult, GetErrorCode, ReceiverApiResult, ReceiverInternalResult,
@@ -27,7 +27,6 @@ use crate::{
     time::get_clock,
     vsc::VirtualSoundCardApi,
 };
-use ::safer_ffi::prelude::*;
 use aes67_rs_sdp::SdpWrapper;
 use dashmap::DashMap;
 use futures_lite::future::block_on;
@@ -36,6 +35,8 @@ use sdp::SessionDescription;
 use std::{env, io::Cursor, sync::Arc};
 use tokio_util::sync::CancellationToken;
 use tracing::info;
+
+use crate::{AES_VSC_ERROR_RECEIVER_NOT_FOUND, AES_VSC_OK, Aes67VscReceiverConfig};
 
 lazy_static! {
     static ref VIRTUAL_SOUND_CARD: Arc<VirtualSoundCardApi> =
@@ -143,16 +144,6 @@ pub fn try_receive<'a>(
 pub fn try_destroy_receiver(id: u32) -> VscApiResult<u8> {
     block_on(VIRTUAL_SOUND_CARD.destroy_receiver(id))?;
     Ok(AES_VSC_OK)
-}
-
-impl TryFrom<(Option<&char_p::Ref<'_>>, Option<&char_p::Ref<'_>>)> for PtpMode {
-    type Error = ConfigError;
-
-    fn try_from(
-        value: (Option<&char_p::Ref<'_>>, Option<&char_p::Ref<'_>>),
-    ) -> Result<Self, Self::Error> {
-        todo!()
-    }
 }
 
 // The following function is only necessary for the header generation.

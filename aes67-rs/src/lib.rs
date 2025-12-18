@@ -28,8 +28,3 @@ pub mod socket;
 pub mod time;
 pub mod utils;
 pub mod vsc;
-
-#[cfg(feature = "c")]
-pub mod c;
-#[cfg(feature = "c")]
-pub use c::*;

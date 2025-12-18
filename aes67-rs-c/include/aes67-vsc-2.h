@@ -7,8 +7,8 @@
  *                                         *
  *******************************************/
 
-#ifndef __RUST_AES67_RS__
-#define __RUST_AES67_RS__
+#ifndef __RUST_AES67_RS_C__
+#define __RUST_AES67_RS_C__
 
 #include "./aes67-vsc-2-constants.h"
 
@@ -35,18 +35,6 @@ typedef struct Aes67VscReceiverConfig {
      *  Link offset in milliseconds
      */
     float link_offset;
-
-    /** \brief
-     *  String representation of an IP address (e.g. "192.168.1.123") that is assigned to the network interface
-     *  this receiver should bind to.
-     */
-    char const * interface_ip;
-
-    /** <No documentation available> */
-    char const * ptp_mode;
-
-    /** <No documentation available> */
-    char const * ptp_nic;
 } Aes67VscReceiverConfig_t;
 
 
@@ -121,4 +109,4 @@ aes67_vsc_receive (
 } /* extern \"C\" */
 #endif
 
-#endif /* __RUST_AES67_RS__ */
+#endif /* __RUST_AES67_RS_C__ */

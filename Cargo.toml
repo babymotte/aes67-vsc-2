@@ -4,7 +4,7 @@ members = [
     "aes67-rs",
     "aes67-rs-vsc-management-agent",
     "aes67-rs-discovery",
-    "aes67-rs-sdp",
+    "aes67-rs-sdp", "aes67-rs-c",
 ]
 resolver = "3"
 

@@ -99,7 +99,6 @@ async fn run(
         true,
     )
     .await?
-    .route("/api/v1/backend/wb-servers", get(wb_servers))
     .route(
         "/api/v1/backend/app-name",
         get(app_name).with_state(persistent_config.vsc.clone()),
@@ -148,12 +147,6 @@ async fn run(
     info!("AES67-VSC web UI stopped.");
 
     Ok(())
-}
-
-#[instrument]
-async fn wb_servers() -> Aes67Vsc2Result<String> {
-    // TODO choose random port at start and propagate that here
-    Ok("127.0.0.1:8080".to_owned())
 }
 
 #[instrument]

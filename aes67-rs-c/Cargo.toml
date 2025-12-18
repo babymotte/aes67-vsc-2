@@ -1,0 +1,23 @@
+[package]
+name = "aes67-rs-c"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+aes67-rs = { version = "0.1.0", path = "../aes67-rs" }
+aes67-rs-sdp = { version = "0.1.0", path = "../aes67-rs-sdp" }
+dashmap = "6.1.0"
+futures-lite = "2.6.1"
+lazy_static = "1.5.0"
+safer-ffi = "0.1.13"
+sdp = "0.10.0"
+tokio-util = "0.7.17"
+tracing = "0.1.43"
+worterbuch-client = { version = "1.4.0-rc.9" }
+
+[features]
+headers = ["safer-ffi/headers"]
+
+[[bin]]
+name = "generate-headers"
+required-features = ["headers"] # Do not build unless generating headers.

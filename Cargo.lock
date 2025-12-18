@@ -41,7 +41,6 @@ dependencies = [
  "regex",
  "reqwest",
  "rtp-rs",
- "safer-ffi",
  "sap-rs",
  "sdp",
  "serde",
@@ -62,6 +61,22 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
+ "worterbuch-client",
+]
+
+[[package]]
+name = "aes67-rs-c"
+version = "0.1.0"
+dependencies = [
+ "aes67-rs",
+ "aes67-rs-sdp",
+ "dashmap",
+ "futures-lite",
+ "lazy_static",
+ "safer-ffi",
+ "sdp",
+ "tokio-util",
+ "tracing",
  "worterbuch-client",
 ]
 

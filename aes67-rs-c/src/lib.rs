@@ -19,11 +19,9 @@
 
 mod r#impl;
 
-use crate::{
-    c::r#impl::{try_create_receiver, try_destroy_receiver, try_receive},
-    error::GetErrorCode,
-};
+use crate::r#impl::{try_create_receiver, try_destroy_receiver, try_receive};
 use ::safer_ffi::prelude::*;
+use aes67_rs::error::GetErrorCode;
 
 #[cfg(feature = "headers")]
 pub use r#impl::generate_headers;

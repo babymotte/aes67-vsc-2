@@ -15,7 +15,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use aes67_rs::generate_headers;
+use aes67_rs_c::generate_headers;
 
 fn main() -> ::std::io::Result<()> {
     generate_headers()
