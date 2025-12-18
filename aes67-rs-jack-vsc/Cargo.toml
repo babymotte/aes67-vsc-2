@@ -5,7 +5,8 @@ edition = "2024"
 
 [dependencies]
 aes67-rs = { path = "../aes67-rs" }
-aes67-rs-ui = { path = "../aes67-rs-ui" }
+aes67-rs-discovery = { version = "0.1.0", path = "../aes67-rs-discovery" }
+aes67-rs-vsc-management-agent = { path = "../aes67-rs-vsc-management-agent" }
 console-subscriber = { version = "0.4.1", optional = true }
 directories = "6.0.0"
 dirs = "6.0.0"
@@ -35,5 +36,8 @@ worterbuch-client = { version = "1.4.0-rc.9" }
 [features]
 tokio-console = ["console-subscriber"]
 jemalloc = ["worterbuch/jemalloc"]
-tokio-metrics = ["aes67-rs/tokio-metrics", "aes67-rs-ui/tokio-metrics"]
+tokio-metrics = [
+    "aes67-rs/tokio-metrics",
+    "aes67-rs-vsc-management-agent/tokio-metrics",
+]
 default = ["jemalloc"]

@@ -21,6 +21,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 name = "aes67-rs"
 version = "0.1.0"
 dependencies = [
+ "aes67-rs-sdp",
  "axum 0.8.7",
  "chrono",
  "clap",
@@ -65,11 +66,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "aes67-rs-discovery"
+version = "0.1.0"
+dependencies = [
+ "aes67-rs",
+ "aes67-rs-sdp",
+ "miette",
+ "sap-rs",
+ "serde",
+ "thiserror 2.0.17",
+ "tokio",
+ "tokio-graceful-shutdown",
+ "tokio-util",
+ "tracing",
+ "worterbuch-client",
+]
+
+[[package]]
 name = "aes67-rs-jack-vsc"
 version = "0.1.0"
 dependencies = [
  "aes67-rs",
- "aes67-rs-ui",
+ "aes67-rs-discovery",
+ "aes67-rs-vsc-management-agent",
  "console-subscriber",
  "directories",
  "dirs",
@@ -98,10 +117,20 @@ dependencies = [
 ]
 
 [[package]]
-name = "aes67-rs-ui"
+name = "aes67-rs-sdp"
+version = "0.1.0"
+dependencies = [
+ "sdp",
+ "serde",
+ "tracing",
+]
+
+[[package]]
+name = "aes67-rs-vsc-management-agent"
 version = "0.1.0"
 dependencies = [
  "aes67-rs",
+ "aes67-rs-discovery",
  "axum 0.8.7",
  "axum-server 0.7.3",
  "dirs",

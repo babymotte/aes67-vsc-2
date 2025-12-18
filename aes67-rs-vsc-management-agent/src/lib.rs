@@ -37,7 +37,7 @@ impl Aes67VscUi {
             spawn_child_app(
                 #[cfg(feature = "tokio-metrics")]
                 persistent_config.vsc.app.name.clone(),
-                "aes67-rs-ui".to_owned(),
+                "aes67-rs-vsc-management-agent".to_owned(),
                 async |s: &mut SubsystemHandle| run(s, persistent_config, worterbuch).await,
                 shutdown_token.clone(),
                 #[cfg(feature = "tokio-metrics")]

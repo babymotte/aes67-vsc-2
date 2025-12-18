@@ -1,5 +1,6 @@
 use crate::error::WebUIResult;
-use aes67_rs::{config::Config, discovery::Session};
+use aes67_rs::config::Config;
+use aes67_rs_discovery::Session;
 use std::{
     collections::{BTreeSet, HashMap, hash_map::Entry},
     time::Duration,

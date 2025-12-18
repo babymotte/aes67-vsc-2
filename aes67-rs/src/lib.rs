@@ -18,14 +18,12 @@
 pub mod app;
 pub mod buffer;
 pub mod config;
-pub mod discovery;
 pub mod error;
 pub mod formats;
 pub mod monitoring;
 pub mod nic;
 pub mod receiver;
 pub mod sender;
-pub mod serde;
 pub mod socket;
 pub mod time;
 pub mod utils;

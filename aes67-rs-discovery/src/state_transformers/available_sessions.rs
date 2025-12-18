@@ -1,5 +1,5 @@
-use crate::error::WebUIResult;
-use aes67_rs::{config::Config, discovery::Session, receiver::config::SessionId};
+use crate::{Session, error::DiscoveryResult};
+use aes67_rs::{config::Config, receiver::config::SessionId};
 use std::{collections::HashMap, time::Duration};
 use tokio::{select, sync::mpsc};
 use tokio_graceful_shutdown::SubsystemHandle;
@@ -10,7 +10,7 @@ pub async fn start(
     subsys: &mut SubsystemHandle,
     config: Config,
     worterbuch_client: Worterbuch,
-) -> WebUIResult<()> {
+) -> DiscoveryResult<()> {
     info!("Starting available sessions state transformer …");
 
     let (used_sessions, _) = worterbuch_client
@@ -54,7 +54,7 @@ impl ProcessLopp {
         subsys: &mut SubsystemHandle,
         mut used_sessions: mpsc::UnboundedReceiver<TypedPStateEvent<SessionId>>,
         mut all_sessions: mpsc::UnboundedReceiver<TypedPStateEvent<String>>,
-    ) -> WebUIResult<()> {
+    ) -> DiscoveryResult<()> {
         loop {
             select! {
                 _ = subsys.on_shutdown_requested() => break,
@@ -69,12 +69,15 @@ impl ProcessLopp {
         Ok(())
     }
 
-    async fn process_used_session(&self, event: TypedPStateEvent<SessionId>) -> WebUIResult<()> {
+    async fn process_used_session(
+        &self,
+        event: TypedPStateEvent<SessionId>,
+    ) -> DiscoveryResult<()> {
         info!("Processing used session event: {:?}", event);
         Ok(())
     }
 
-    async fn process_session(&mut self, event: TypedPStateEvent<String>) -> WebUIResult<()> {
+    async fn process_session(&mut self, event: TypedPStateEvent<String>) -> DiscoveryResult<()> {
         match event {
             TypedPStateEvent::KeyValuePairs(kvps) => {
                 for kvp in kvps {
@@ -91,13 +94,13 @@ impl ProcessLopp {
         Ok(())
     }
 
-    async fn session_added(&mut self, key: String, session: String) -> WebUIResult<()> {
+    async fn session_added(&mut self, key: String, session: String) -> DiscoveryResult<()> {
         info!("Session added:\n{session}");
         // TODO
         Ok(())
     }
 
-    async fn session_removed(&mut self, key: String, session: String) -> WebUIResult<()> {
+    async fn session_removed(&mut self, key: String, session: String) -> DiscoveryResult<()> {
         info!("Session removed:\n{session}");
         // TODO
         Ok(())

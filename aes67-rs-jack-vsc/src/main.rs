@@ -23,10 +23,11 @@ mod telemetry;
 
 use crate::{play::start_playout, record::start_recording};
 use aes67_rs::{
-    discovery::start_sap_discovery, nic::find_nic_with_name, receiver::config::RxDescriptor,
-    sender::config::TxDescriptor, time::get_clock, vsc::VirtualSoundCardApi,
+    nic::find_nic_with_name, receiver::config::RxDescriptor, sender::config::TxDescriptor,
+    time::get_clock, vsc::VirtualSoundCardApi,
 };
-use aes67_rs_ui::{Aes67VscUi, config::PersistentConfig};
+use aes67_rs_discovery::sap::start_sap_discovery;
+use aes67_rs_vsc_management_agent::{Aes67VscUi, config::PersistentConfig};
 use miette::{IntoDiagnostic, miette};
 use serde_json::json;
 use std::time::Duration;

@@ -1,10 +1,12 @@
-use crate::{discovery::Session, error::DiscoveryResult, serde::SdpWrapper};
+use aes67_rs_sdp::SdpWrapper;
 use sap_rs::{Event, Sap};
 use std::time::SystemTime;
 use tokio::select;
 use tokio_util::sync::CancellationToken;
 use tracing::debug;
 use worterbuch_client::{Worterbuch, topic};
+
+use crate::{Session, error::DiscoveryResult};
 
 pub async fn start_sap_discovery(
     worterbuch_client: Worterbuch,

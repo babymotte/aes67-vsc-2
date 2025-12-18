@@ -18,9 +18,9 @@
 use crate::{
     error::{ConfigError, ConfigResult},
     formats::{self, AudioFormat, FrameFormat, Frames, MilliSeconds, Seconds},
-    serde::SdpWrapper,
     time::MICROS_PER_MILLI_F,
 };
+use aes67_rs_sdp::SdpWrapper;
 use lazy_static::lazy_static;
 use regex::Regex;
 use sdp::SessionDescription;

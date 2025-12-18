@@ -24,11 +24,11 @@ use crate::{
     },
     nic::find_nic_with_name,
     receiver::{api::ReceiverApi, config::ReceiverConfig},
-    serde::SdpWrapper,
     time::get_clock,
     vsc::VirtualSoundCardApi,
 };
 use ::safer_ffi::prelude::*;
+use aes67_rs_sdp::SdpWrapper;
 use dashmap::DashMap;
 use futures_lite::future::block_on;
 use lazy_static::lazy_static;

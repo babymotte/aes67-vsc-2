@@ -222,16 +222,6 @@ pub enum Aes67Vsc2Error {
     ChildAppError(String, Box<dyn std::error::Error + Send + Sync>),
 }
 
-#[derive(Error, Debug, Diagnostic)]
-pub enum DiscoveryError {
-    #[error("SAP error: {0}")]
-    SapError(#[from] sap_rs::error::Error),
-    #[error("Worterbuch error: {0}")]
-    WorterbuchError(#[from] ConnectionError),
-    #[error("System time error: {0}")]
-    SystemTimeError(#[from] SystemTimeError),
-}
-
 pub type Aes67Vsc2Result<T> = Result<T, Aes67Vsc2Error>;
 pub type VscApiResult<T> = Result<T, VscApiError>;
 pub type SenderApiResult<T> = Result<T, SenderApiError>;
@@ -243,7 +233,6 @@ pub type JackResult<T> = Result<T, JackError>;
 pub type AlsaResult<T> = Result<T, AlsaError>;
 pub type ConfigResult<T> = Result<T, ConfigError>;
 pub type ClockResult<T> = Result<T, ClockError>;
-pub type DiscoveryResult<T> = Result<T, DiscoveryError>;
 
 pub trait ToBoxed {
     fn boxed(self) -> Box<Self>;

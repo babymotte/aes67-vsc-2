@@ -6,6 +6,7 @@ description = "AES67 compatiple RTP stream senders and receivers"
 license = "AGPL-3.0-or-later"
 
 [dependencies]
+aes67-rs-sdp = { version = "0.1.0", path = "../aes67-rs-sdp" }
 axum = "0.8.1"
 chrono = "0.4.41"
 clap = { version = "4.5.44", features = ["derive", "env"] }

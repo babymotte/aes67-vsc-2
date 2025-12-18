@@ -1,10 +1,18 @@
 [workspace]
-members = ["aes67-rs-jack-vsc", "aes67-rs", "aes67-rs-ui"]
+members = [
+    "aes67-rs-jack-vsc",
+    "aes67-rs",
+    "aes67-rs-vsc-management-agent",
+    "aes67-rs-discovery",
+    "aes67-rs-sdp",
+]
 resolver = "3"
 
 [patch.crates-io]
 aes67-rs = { path = "./aes67-rs" }
-aes67-rs-ui = { path = "./aes67-rs-ui" }
+aes67-rs-vsc-management-agent = { path = "./aes67-rs-vsc-management-agent" }
+aes67-rs-discovery = { path = "./aes67-rs-discovery" }
+aes67-rs-sdp = { path = "./aes67-rs-sdp" }
 
 [profile.release]
 lto = "fat"

@@ -1,0 +1,9 @@
+[package]
+name = "aes67-rs-sdp"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+sdp = "0.10.0"
+serde = "1.0.228"
+tracing = "0.1.43"
