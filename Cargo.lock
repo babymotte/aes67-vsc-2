@@ -148,10 +148,13 @@ dependencies = [
  "aes67-rs-discovery",
  "axum 0.8.7",
  "axum-server 0.7.3",
+ "directories",
  "dirs",
  "miette",
+ "pnet",
  "sdp",
  "serde",
+ "serde_json",
  "serde_yaml",
  "thiserror 2.0.17",
  "tokio",
@@ -3319,15 +3322,15 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.145"
+version = "1.0.148"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "402a6f66d8c709116cf22f558eab210f5a50187f702eb4d7e5ef38d9a7f1c79c"
+checksum = "3084b546a1dd6289475996f182a22aba973866ea8e8b02c51d9f46b1336a22da"
 dependencies = [
  "itoa",
  "memchr",
- "ryu",
  "serde",
  "serde_core",
+ "zmij",
 ]
 
 [[package]]
@@ -4949,9 +4952,9 @@ dependencies = [
 
 [[package]]
 name = "worterbuch"
-version = "1.4.0-rc.10"
+version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d4cf09a1a5278177f0e4f757ec2b162dec50644f04e41b2b7fadec8953f50b8"
+checksum = "b0bc867fe583c21056078359ad1f1beaa684a556b2e69ea07eee23a3a90c2d25"
 dependencies = [
  "axum 0.8.7",
  "axum-extra",
@@ -5001,9 +5004,9 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-client"
-version = "1.4.0-rc.10"
+version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "520e3bc7c8b25360c0dd55d98f49a75afe9292429b7f335eeb213af65db30387"
+checksum = "19e7d0d2932ba0c629313c7298220ee6eae5b6301784cd2c7548387b65523309"
 dependencies = [
  "async-stream",
  "futures-util",
@@ -5018,9 +5021,9 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-common"
-version = "1.4.0-rc.10"
+version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2a5b7e4f265915ff78e5c44c5d1571eb556fc25bc383eb0fc70f67bc3632210"
+checksum = "ca6a384cea579cbf5bbaa7f9340767f23f73c06e3f47f0e7c60664a8736691ff"
 dependencies = [
  "axum 0.8.7",
  "http",
@@ -5154,3 +5157,9 @@ dependencies = [
  "quote",
  "syn 2.0.111",
 ]
+
+[[package]]
+name = "zmij"
+version = "1.0.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "317f17ff091ac4515f17cc7a190d2769a8c9a96d227de5d64b500b01cda8f2cd"

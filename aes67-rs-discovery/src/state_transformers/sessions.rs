@@ -1,5 +1,4 @@
 use crate::{Session, error::DiscoveryResult};
-use aes67_rs::config::Config;
 use std::{
     collections::{BTreeSet, HashMap, hash_map::Entry},
     time::Duration,
@@ -11,14 +10,14 @@ use worterbuch_client::{TypedPStateEvent, Worterbuch, topic};
 
 pub async fn start(
     subsys: &mut SubsystemHandle,
-    _config: Config,
+    instance_name: String,
     worterbuch_client: Worterbuch,
 ) -> DiscoveryResult<()> {
     info!("Starting sessions state transformer …");
 
     let (all_sessions, _) = worterbuch_client
         .psubscribe::<Session>(
-            topic!["discovery", "sap", "?", "?"],
+            topic![instance_name, "discovery", "sap", "?", "?"],
             true,
             false,
             Some(Duration::from_millis(100)),
@@ -30,6 +29,7 @@ pub async fn start(
     ProcessLopp {
         worterbuch_client,
         sessions_by_id: sessions_by_name,
+        instance_name,
     }
     .start(subsys, all_sessions)
     .await?;
@@ -40,6 +40,7 @@ pub async fn start(
 struct ProcessLopp {
     worterbuch_client: Worterbuch,
     sessions_by_id: HashMap<u64, BTreeSet<Session>>,
+    instance_name: String,
 }
 
 impl ProcessLopp {
@@ -95,7 +96,10 @@ impl ProcessLopp {
             .expect("cannot be empty, we just added something");
 
         self.worterbuch_client
-            .set_async(topic!("discovery", "sessions", id), &latest.description)
+            .set_async(
+                topic!(self.instance_name, "discovery", "sessions", id),
+                &latest.description,
+            )
             .await?;
 
         Ok(())
@@ -115,12 +119,15 @@ impl ProcessLopp {
             match sessions.iter().next() {
                 Some(latest) => {
                     self.worterbuch_client
-                        .set_async(topic!("discovery", "sessions", id), &latest.description)
+                        .set_async(
+                            topic!(self.instance_name, "discovery", "sessions", id),
+                            &latest.description,
+                        )
                         .await?;
                 }
                 None => {
                     self.worterbuch_client
-                        .delete_async(topic!("discovery", "sessions", id))
+                        .delete_async(topic!(self.instance_name, "discovery", "sessions", id))
                         .await?;
                     e.remove();
                 }

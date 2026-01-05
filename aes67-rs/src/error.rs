@@ -67,6 +67,8 @@ pub enum VscApiError {
     ClockError(#[from] ClockError),
     #[error("Config error: {0}")]
     ConfigError(#[from] ConfigError),
+    #[error("VSC is already running.")]
+    AlreadyRunning,
 }
 
 #[derive(Error, Debug, Diagnostic)]
@@ -342,6 +344,7 @@ impl GetErrorCode for VscApiError {
             VscApiError::ChannelError(e) => error!("{:?}", e),
             VscApiError::ClockError(e) => error!("{:?}", e),
             VscApiError::ConfigError(e) => error!("{:?}", e),
+            VscApiError::AlreadyRunning => error!("VSC is already running"),
         }
         // TODO
         3

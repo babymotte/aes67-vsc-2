@@ -56,7 +56,7 @@ fn init_vsc() -> VscApiResult<Arc<VirtualSoundCardApi>> {
     let clock = block_on(get_clock(
         vsc_name.clone(),
         config.ptp,
-        config.sample_rate,
+        config.audio.sample_rate,
         wb.clone(),
     ))?;
     let vsc = block_on(VirtualSoundCardApi::new(
@@ -71,7 +71,9 @@ fn init_vsc() -> VscApiResult<Arc<VirtualSoundCardApi>> {
 }
 
 fn try_init() -> VscInternalResult<Config> {
-    let config = Config::load()?;
+    // let config = Config::load()?;
+    //
+    let config = Config::default();
     // let runtime = runtime::Builder::new_current_thread()
     //     .enable_all()
     //     .build()?;

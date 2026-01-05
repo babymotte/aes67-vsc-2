@@ -15,27 +15,9 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{
-    error::ConfigResult, formats::FramesPerSecond, receiver::config::ReceiverConfig,
-    sender::config::SenderConfig,
-};
-use clap::Parser;
+use crate::formats::FramesPerSecond;
 use serde::{Deserialize, Serialize};
-use std::{
-    fs,
-    net::IpAddr,
-    path::{Path, PathBuf},
-    time::Duration,
-};
-use tracing::{info, instrument, warn};
-
-#[derive(Parser)]
-#[command(author, version, about, long_about)]
-pub struct Args {
-    /// Path to config file
-    #[arg(short, long, env = "AES67_VSC_2_CONFIG")]
-    config: Option<PathBuf>,
-}
+use std::{net::IpAddr, time::Duration};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -56,20 +38,6 @@ pub enum EndpointConfig {
 pub struct Credentials {
     pub user: String,
     pub token: String,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AppConfig {
-    pub name: String,
-}
-
-impl Default for AppConfig {
-    fn default() -> Self {
-        Self {
-            name: "aes67-vsc".to_owned(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -119,74 +87,24 @@ pub enum PtpMode {
 #[serde(rename_all = "camelCase")]
 pub struct AudioConfig {
     pub nic: String,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Config {
-    #[serde(default = "AppConfig::default")]
-    pub app: AppConfig,
     #[serde(default = "default_sample_rate")]
     pub sample_rate: FramesPerSecond,
-    #[serde(default)]
-    pub telemetry: Option<TelemetryConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Config {
     #[serde(default)]
     pub ptp: Option<PtpMode>,
     pub audio: AudioConfig,
-    #[serde(default)]
-    pub receivers: Vec<ReceiverConfig>,
-    #[serde(default)]
-    pub senders: Vec<SenderConfig>,
 }
 
-impl Config {
-    #[instrument]
-    pub fn load() -> ConfigResult<Config> {
-        let args = Args::parse();
-
-        info!("Loading config …");
-
-        let config = Config::load_from_file(args.config.as_deref())?;
-
-        Ok(config)
-    }
-
-    #[instrument]
-    fn load_from_file(path: Option<&Path>) -> ConfigResult<Config> {
-        match path {
-            Some(path) => {
-                let content = fs::read_to_string(path)?;
-                let config = serde_yaml::from_str(&content)?;
-                info!("Config loaded from {}", path.to_string_lossy());
-                Ok(config)
-            }
-            None => {
-                let path = if cfg!(debug_assertions) {
-                    let it = "./config-dev.yaml";
-                    warn!("No config file specified, using {it}");
-                    it
-                } else {
-                    let it = "/etc/aes67-vsc/config.yaml";
-                    warn!("No config file specified, using {it}");
-                    it
-                };
-                match fs::read_to_string(path) {
-                    Ok(it) => {
-                        let config = serde_yaml::from_str(&it)?;
-                        info!("Config loaded from {path}");
-                        Ok(config)
-                    }
-                    Err(_) => {
-                        warn!("Could not read config file {path}, using default config.");
-                        Ok(Config::default())
-                    }
-                }
-            }
+impl Default for Config {
+    fn default() -> Self {
+        Config {
+            ptp: None,
+            audio: AudioConfig::default(),
         }
-    }
-
-    pub fn instance_name(&self) -> &str {
-        &self.app.name
     }
 }
 

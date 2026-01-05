@@ -1,21 +1,21 @@
 use crate::{Session, error::DiscoveryResult};
-use aes67_rs::{config::Config, receiver::config::SessionId};
+use aes67_rs::receiver::config::SessionId;
 use std::{collections::HashMap, time::Duration};
 use tokio::{select, sync::mpsc};
 use tokio_graceful_shutdown::SubsystemHandle;
-use tracing::info;
+use tracing::{debug, info};
 use worterbuch_client::{TypedPStateEvent, Worterbuch, topic};
 
 pub async fn start(
     subsys: &mut SubsystemHandle,
-    config: Config,
+    instance_name: String,
     worterbuch_client: Worterbuch,
 ) -> DiscoveryResult<()> {
     info!("Starting available sessions state transformer …");
 
     let (used_sessions, _) = worterbuch_client
         .psubscribe(
-            topic![config.instance_name(), "rx", "?", "config", "session"],
+            topic![instance_name, "rx", "?", "config", "session"],
             true,
             false,
             None,
@@ -24,7 +24,7 @@ pub async fn start(
 
     let (all_sessions, _) = worterbuch_client
         .psubscribe(
-            topic!["discovery", "sessions", "?"],
+            topic![instance_name, "discovery", "sessions", "?"],
             true,
             false,
             Some(Duration::from_millis(100)),
@@ -95,13 +95,13 @@ impl ProcessLopp {
     }
 
     async fn session_added(&mut self, _key: String, session: String) -> DiscoveryResult<()> {
-        info!("Session added:\n{session}");
+        debug!("Session added:\n{session}");
         // TODO
         Ok(())
     }
 
     async fn session_removed(&mut self, _key: String, session: String) -> DiscoveryResult<()> {
-        info!("Session removed:\n{session}");
+        debug!("Session removed:\n{session}");
         // TODO
         Ok(())
     }

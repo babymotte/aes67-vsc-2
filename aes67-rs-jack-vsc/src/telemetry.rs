@@ -15,7 +15,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use aes67_rs::config::{Config, EndpointConfig};
+use aes67_rs::config::{EndpointConfig, TelemetryConfig};
 use miette::IntoDiagnostic;
 use opentelemetry::{global, trace::TracerProvider};
 use opentelemetry_otlp::WithExportConfig;
@@ -30,7 +30,7 @@ use tracing_subscriber::{
     EnvFilter, Layer, filter::filter_fn, fmt, layer::SubscriberExt, util::SubscriberInitExt,
 };
 
-pub async fn init(config: &Config) -> miette::Result<()> {
+pub async fn init(app_id: &str, config: Option<&TelemetryConfig>) -> miette::Result<()> {
     let subscriber = tracing_subscriber::registry().with(
         fmt::Layer::new()
             .with_ansi(supports_color::on(Stream::Stderr).is_some())
@@ -47,7 +47,7 @@ pub async fn init(config: &Config) -> miette::Result<()> {
         subscriber.with(console_layer)
     };
 
-    if let Some(tracing_config) = &config.telemetry {
+    if let Some(tracing_config) = config {
         global::set_text_map_propagator(TraceContextPropagator::new());
 
         let exporter = {
@@ -71,7 +71,7 @@ pub async fn init(config: &Config) -> miette::Result<()> {
             .with_batch_exporter(exporter)
             .with_resource(
                 Resource::builder()
-                    .with_service_name(config.app.name.clone())
+                    .with_service_name(app_id.to_owned())
                     .with_detectors(&[
                         Box::new(HostResourceDetector::default()),
                         Box::new(OsResourceDetector),
@@ -81,7 +81,7 @@ pub async fn init(config: &Config) -> miette::Result<()> {
             )
             .build();
 
-        let tracer = tracer_provider.tracer(config.instance_name().to_owned());
+        let tracer = tracer_provider.tracer(app_id.to_owned());
 
         global::set_tracer_provider(tracer_provider);
 

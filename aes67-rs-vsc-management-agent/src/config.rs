@@ -1,5 +1,5 @@
-use crate::error::WebUIResult;
-use aes67_rs::config::Config;
+use crate::error::ManagementAgentResult;
+use aes67_rs::config::TelemetryConfig;
 use dirs::config_local_dir;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -9,12 +9,15 @@ use tracing::error;
 pub const DEFAULT_PORT: u16 = 43567;
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct PersistentConfig {
+#[serde(rename_all = "camelCase")]
+pub struct AppConfig {
+    pub name: String,
     pub web_ui: WebUiConfig,
-    pub vsc: Config,
+    pub telemetry: Option<TelemetryConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WebUiConfig {
     pub port: u16,
 }
@@ -25,8 +28,8 @@ impl Default for WebUiConfig {
     }
 }
 
-impl PersistentConfig {
-    pub async fn load(id: &str) -> WebUIResult<Self> {
+impl AppConfig {
+    pub async fn load(id: &str) -> ManagementAgentResult<Self> {
         let path = config_path(id).await;
 
         match fs::read(path).await {
@@ -36,11 +39,11 @@ impl PersistentConfig {
             }
             Err(e) => {
                 eprintln!("Could not load config: {e}; using default config");
-                let mut default = PersistentConfig {
+                let default = AppConfig {
+                    name: id.to_owned(),
                     web_ui: Default::default(),
-                    vsc: Default::default(),
+                    telemetry: Default::default(),
                 };
-                default.vsc.app.name = id.to_owned();
                 default.store().await;
                 Ok(default)
             }
@@ -53,8 +56,8 @@ impl PersistentConfig {
         }
     }
 
-    async fn try_store(&self) -> WebUIResult<()> {
-        let path = config_path(self.vsc.instance_name()).await;
+    async fn try_store(&self) -> ManagementAgentResult<()> {
+        let path = config_path(&self.name).await;
         let contents = serde_yaml::to_string(&self)?;
         fs::write(path, contents).await?;
         Ok(())

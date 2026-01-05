@@ -9,21 +9,21 @@ mod sessions;
 
 pub async fn start(
     subsys: &mut SubsystemHandle,
-    config: Config,
+    id: String,
     worterbuch: Worterbuch,
 ) -> DiscoveryResult<()> {
-    let cfg = config.clone();
+    let instance_name = id.clone();
     let wb = worterbuch.clone();
     subsys.start(SubsystemBuilder::new(
         "sessions",
-        async |s: &mut SubsystemHandle| sessions::start(s, cfg, wb).await,
+        async |s: &mut SubsystemHandle| sessions::start(s, instance_name, wb).await,
     ));
 
-    let cfg = config.clone();
+    let instance_name = id.clone();
     let wb = worterbuch.clone();
     subsys.start(SubsystemBuilder::new(
         "available-sessions",
-        async |s: &mut SubsystemHandle| available_sessions::start(s, cfg, wb).await,
+        async |s: &mut SubsystemHandle| available_sessions::start(s, instance_name, wb).await,
     ));
 
     Ok(())

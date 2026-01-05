@@ -1,11 +1,3 @@
-### Receiver info
+### Refresh network interfaces
 
-GET http://127.0.0.1:32000/info
-
-### Receiver stop
-
-POST http://127.0.0.1:32000/stop
-
-### Playout stop
-
-POST http://127.0.0.1:32001/stop
+POST http://127.0.0.1:43567/api/v1/refresh/netinf

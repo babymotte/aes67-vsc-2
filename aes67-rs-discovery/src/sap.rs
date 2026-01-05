@@ -3,15 +3,18 @@ use sap_rs::{Event, Sap};
 use std::time::SystemTime;
 use tokio::select;
 use tokio_util::sync::CancellationToken;
-use tracing::debug;
+use tracing::{debug, info};
 use worterbuch_client::{Worterbuch, topic};
 
 use crate::{Session, error::DiscoveryResult};
 
 pub async fn start_sap_discovery(
+    instance_name: &str,
     worterbuch_client: Worterbuch,
     shutdown_token: CancellationToken,
 ) -> DiscoveryResult<()> {
+    info!("Starting SAP discovery …");
+
     let (_, mut events) = Sap::new().await?;
 
     // TODO fetch current discovery entries
@@ -21,7 +24,7 @@ pub async fn start_sap_discovery(
         select! {
             _ = shutdown_token.cancelled() => break,
             evt = events.recv() => match evt {
-                Some(msg) => process_event(msg, &worterbuch_client).await?,
+                Some(msg) => process_event(msg, instance_name, &worterbuch_client).await?,
                 None => break,
             }
         }
@@ -30,11 +33,17 @@ pub async fn start_sap_discovery(
     Ok(())
 }
 
-async fn process_event(msg: Event, worterbuch_client: &Worterbuch) -> DiscoveryResult<()> {
+async fn process_event(
+    msg: Event,
+    instance_name: &str,
+    worterbuch_client: &Worterbuch,
+) -> DiscoveryResult<()> {
     match msg {
         Event::SessionFound(sa) => {
             let key = topic!(
-                "discovery/sap",
+                instance_name,
+                "discovery",
+                "sap",
                 sa.originating_source.to_string(),
                 sa.msg_id_hash
             );
@@ -53,7 +62,9 @@ async fn process_event(msg: Event, worterbuch_client: &Worterbuch) -> DiscoveryR
         }
         Event::SessionLost(sa) => {
             let key = topic!(
-                "discovery/sap",
+                instance_name,
+                "discovery",
+                "sap",
                 sa.originating_source.to_string(),
                 sa.msg_id_hash
             );
