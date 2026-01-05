@@ -1,4 +1,3 @@
-use aes67_rs::config::Config;
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
 use worterbuch_client::Worterbuch;
 

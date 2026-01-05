@@ -88,7 +88,7 @@ async fn refresh(app_id: &str, known_interfaces: &mut Vec<InfWrapper>, wb: &Wort
 }
 
 fn state(netinf: &NetworkInterface) -> (bool, bool) {
-    let use_inf = !netinf.is_loopback() && !netinf.mac.is_none() && netinf.is_multicast();
+    let use_inf = !netinf.is_loopback() && netinf.mac.is_some() && netinf.is_multicast();
     let active = netinf.is_up() && netinf.is_running() && !netinf.ips.is_empty();
     (use_inf, active)
 }

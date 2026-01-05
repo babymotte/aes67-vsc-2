@@ -21,23 +21,14 @@ mod record;
 mod session_manager;
 mod telemetry;
 
-use crate::{play::start_playout, record::start_recording};
-use aes67_rs::{
-    nic::find_nic_with_name, receiver::config::RxDescriptor, sender::config::TxDescriptor,
-    time::get_clock, vsc::VirtualSoundCardApi,
-};
-use aes67_rs_discovery::sap::start_sap_discovery;
 use aes67_rs_jack_vsc::JackIoHandler;
-use aes67_rs_vsc_management_agent::{Aes67VscRestApi, config::AppConfig, init_management_agent};
-use miette::{IntoDiagnostic, miette};
-use serde_json::json;
+use aes67_rs_vsc_management_agent::{config::AppConfig, init_management_agent};
+use miette::miette;
 use std::time::Duration;
-use tokio::runtime::Handle;
 use tokio_graceful_shutdown::{
     SubsystemBuilder, SubsystemHandle, Toplevel, errors::SubsystemError,
 };
 use tracing::{error, info};
-use worterbuch::PersistenceMode;
 
 #[tokio::main]
 async fn main() -> miette::Result<()> {
@@ -78,7 +69,7 @@ async fn main() -> miette::Result<()> {
 async fn run(subsys: &mut SubsystemHandle, id: String) -> miette::Result<()> {
     info!("Starting {} …", id);
 
-    init_management_agent(&subsys, id, JackIoHandler::new()).await?;
+    init_management_agent(subsys, id, JackIoHandler::new()).await?;
 
     subsys.on_shutdown_requested().await;
 

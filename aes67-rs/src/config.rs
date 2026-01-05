@@ -93,20 +93,13 @@ pub struct AudioConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[derive(Default)]
 pub struct Config {
     #[serde(default)]
     pub ptp: Option<PtpMode>,
     pub audio: AudioConfig,
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Config {
-            ptp: None,
-            audio: AudioConfig::default(),
-        }
-    }
-}
 
 fn default_sample_rate() -> FramesPerSecond {
     48_000
