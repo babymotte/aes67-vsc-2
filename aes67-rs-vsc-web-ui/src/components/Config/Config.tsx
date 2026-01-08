@@ -1,4 +1,5 @@
 import { createSignal, Match, Suspense, Switch, useTransition } from "solid-js";
+import Network from "./Network";
 
 export default function Config() {
   const [tab, setTab] = createSignal(0);
@@ -24,7 +25,7 @@ export default function Config() {
         <Suspense fallback={<div class="loader">Loading...</div>}>
           <Switch>
             <Match when={tab() === 0}>
-              <h3>Hello</h3>
+              <Network />
             </Match>
             <Match when={tab() === 1}>
               <h3>World</h3>

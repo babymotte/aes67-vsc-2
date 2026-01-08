@@ -1,6 +1,7 @@
 use pnet::datalink::{self, NetworkInterface};
 use std::{mem, time::Duration};
 use tokio::{select, spawn, sync::mpsc, time::interval};
+use tracing::info;
 use worterbuch_client::{Worterbuch, topic};
 
 #[derive(Clone)]
@@ -65,9 +66,12 @@ async fn refresh(app_id: &str, known_interfaces: &mut Vec<InfWrapper>, wb: &Wort
 
     for interface in known_interfaces.iter() {
         if !interfaces.contains(interface) {
-            wb.delete::<bool>(topic!(app_id, "networkInterfaces", interface.0.name))
-                .await
-                .ok();
+            wb.pdelete_async(
+                topic!(app_id, "networkInterfaces", interface.0.name, "#"),
+                true,
+            )
+            .await
+            .ok();
         }
     }
 
@@ -75,8 +79,8 @@ async fn refresh(app_id: &str, known_interfaces: &mut Vec<InfWrapper>, wb: &Wort
         let (use_inf, active) = state(&interface.0);
 
         if use_inf {
-            wb.set(
-                topic!(app_id, "networkInterfaces", interface.0.name),
+            wb.set_async(
+                topic!(app_id, "networkInterfaces", interface.0.name, "active"),
                 active,
             )
             .await

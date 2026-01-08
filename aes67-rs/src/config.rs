@@ -18,6 +18,7 @@
 use crate::formats::FramesPerSecond;
 use serde::{Deserialize, Serialize};
 use std::{net::IpAddr, time::Duration};
+use worterbuch_client::{ConnectionResult, Worterbuch, topic};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -100,7 +101,30 @@ pub struct Config {
     pub audio: AudioConfig,
 }
 
-
 fn default_sample_rate() -> FramesPerSecond {
     48_000
+}
+
+impl Config {
+    pub async fn load(app_id: &str, wb: &Worterbuch) -> ConnectionResult<Self> {
+        let ptp = wb.get::<PtpMode>(topic!(app_id, "config", "ptp")).await?;
+
+        let audio_nic = wb
+            .get::<String>(topic!(app_id, "config", "audio", "nic"))
+            .await?
+            .unwrap_or_else(|| "eth0".to_string());
+
+        let audio_sample_rate = wb
+            .get::<FramesPerSecond>(topic!(app_id, "config", "audio", "sampleRate"))
+            .await?
+            .unwrap_or(default_sample_rate());
+
+        Ok(Config {
+            ptp,
+            audio: AudioConfig {
+                nic: audio_nic,
+                sample_rate: audio_sample_rate,
+            },
+        })
+    }
 }

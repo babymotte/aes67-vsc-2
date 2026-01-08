@@ -15,7 +15,10 @@ use aes67_rs::{
     vsc::VirtualSoundCardApi,
 };
 use aes67_rs_discovery::{sap::start_sap_discovery, state_transformers};
-use axum::{extract::State, routing::post};
+use axum::{
+    extract::State,
+    routing::{get, post},
+};
 use axum_server::Handle;
 use miette::Report;
 use miette::{IntoDiagnostic, Result};
@@ -165,12 +168,7 @@ impl<'a> VscApiActor<'a> {
             return Err(VscApiError::AlreadyRunning);
         }
 
-        let config = self
-            .wb
-            .get::<Config>(topic!(self.app_id, "config"))
-            .await
-            .unwrap_or_default()
-            .unwrap_or_default();
+        let config = Config::load(&self.app_id, &self.wb).await?;
 
         info!("Starting AES67-VSC …");
         info!("Using configuration: {:?}", config);
@@ -357,6 +355,10 @@ async fn run_rest_api(
     )
     .await?
     .route(
+        "/api/v1/backend/app-name",
+        get(app_name).with_state(persistent_config.name.clone()),
+    )
+    .route(
         "/api/v1/refresh/netinf",
         post(refresh_netinfs).with_state(netinf_watcher),
     );
@@ -411,6 +413,10 @@ async fn start_network_interface_watcher(
     wb: worterbuch_client::Worterbuch,
 ) -> netinf_watcher::Handle {
     netinf_watcher::start(app_id, Duration::from_secs(3), wb).await
+}
+
+async fn app_name<'a>(State(app_id): State<String>) -> String {
+    app_id.clone()
 }
 
 async fn refresh_netinfs(

@@ -78,6 +78,20 @@ export function subscribe<T extends Value>(key: string, cb: StateCallback<T>) {
   });
 }
 
+export async function get<T extends Value>(key: string) {
+  const wb = wbClient();
+  if (wb) {
+    return await wb.get<T>(key);
+  }
+}
+
+export async function set<T extends Value>(key: string, value: T) {
+  const wb = wbClient();
+  if (wb) {
+    return await wb.set<T>(key, value);
+  }
+}
+
 export function pSubscribe<T extends Value>(
   pattern: string,
   cb: (aggregated: Map<string, T>) => void
@@ -88,21 +102,25 @@ export function pSubscribe<T extends Value>(
     const wb = wbClient();
     if (wb) {
       setTid(
-        wb.pSubscribe(pattern, (state) => {
-          const newAgg = new Map(aggregated());
-          if (state.keyValuePairs) {
-            for (const kvp of state.keyValuePairs) {
-              newAgg.set(kvp.key, kvp.value as T);
+        wb.pSubscribe(
+          pattern,
+          (state) => {
+            const newAgg = new Map(aggregated());
+            if (state.keyValuePairs) {
+              for (const kvp of state.keyValuePairs) {
+                newAgg.set(kvp.key, kvp.value as T);
+              }
             }
-          }
-          if (state.deleted) {
-            for (const kvp of state.deleted) {
-              newAgg.delete(kvp.key);
+            if (state.deleted) {
+              for (const kvp of state.deleted) {
+                newAgg.delete(kvp.key);
+              }
             }
-          }
-          setAggregated(newAgg);
-          cb(newAgg);
-        })
+            setAggregated(newAgg);
+            cb(newAgg);
+          },
+          true
+        )
       );
     }
   });

@@ -1,7 +1,7 @@
 import { createSignal, Suspense, Switch, Match, useTransition } from "solid-js";
 import Receivers from "./components/Receivers";
 import Senders from "./components/Senders";
-import Config from "./components/Config";
+import Config from "./components/Config/Config";
 import "./App.css";
 import { VscState } from "./vscState";
 import { Worterbuch } from "./worterbuch";
