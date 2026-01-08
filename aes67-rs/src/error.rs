@@ -69,6 +69,8 @@ pub enum VscApiError {
     ConfigError(#[from] ConfigError),
     #[error("VSC is already running.")]
     AlreadyRunning,
+    #[error("VSC is not running.")]
+    NotRunning,
     #[error("Worterbuch error: {0}")]
     WorterbuchError(#[from] ConnectionError),
 }
@@ -347,6 +349,7 @@ impl GetErrorCode for VscApiError {
             VscApiError::ClockError(e) => error!("{:?}", e),
             VscApiError::ConfigError(e) => error!("{:?}", e),
             VscApiError::AlreadyRunning => error!("VSC is already running"),
+            VscApiError::NotRunning => error!("VSC is not running"),
             VscApiError::WorterbuchError(e) => error!("{:?}", e),
         }
         // TODO

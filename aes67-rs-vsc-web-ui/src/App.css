@@ -1,5 +1,6 @@
 html,
 body {
+  font-family: sans-serif;
   height: 100%;
   width: 100%;
   margin: 0 auto;
@@ -7,7 +8,7 @@ body {
   flex-direction: column;
   align-items: stretch;
   justify-content: flex-start;
-  color: #aaa;
+  color: #bbb;
 }
 
 #root {
@@ -37,9 +38,6 @@ body {
 }
 
 .tab {
-  /* padding: 25px; */
-  font-family: sans-serif;
-  color: #444;
   min-height: 400px;
 }
 
@@ -76,13 +74,13 @@ ul.main-menu li {
   font-family: sans-serif;
   font-weight: 300;
   cursor: pointer;
-  color: #aaa;
+  color: #666;
   font-size: larger;
 }
 
 ul.main-menu li.selected {
   border-bottom: 2px solid #337ab7;
-  color: #444;
+  color: #bbb;
 }
 
 .sub-menu {
@@ -115,12 +113,17 @@ ul.main-menu li.selected {
   font-weight: 300;
   cursor: pointer;
   border-bottom: 2px solid #337ab700;
-  color: #444;
+  color: #666;
 }
 
 .sub-menu li.selected {
   border-bottom: 2px solid #337ab7;
-  color: #aaa;
+  color: #bbb;
+}
+
+.sub-menu li.disabled {
+  cursor: not-allowed;
+  color: #333;
 }
 
 .loader {
@@ -144,4 +147,42 @@ ul.main-menu li.selected {
   flex-direction: column;
   align-items: center;
   justify-content: flex-start;
+}
+
+.running-indicator {
+  display: flex;
+  flex-direction: row;
+  gap: 0.5em;
+  padding: 0.2em 0.5em;
+  justify-content: space-between;
+}
+
+.indicator {
+  color: #af4c4c;
+}
+
+.indicator.active {
+  color: #4caf50;
+}
+
+.config-page {
+  display: grid;
+  columns: 2;
+  justify-content: stretch;
+  column-gap: 2em;
+  row-gap: 0.5em;
+}
+
+.config-page h3 {
+  grid-column: span 2;
+  font-size: 1.1em;
+  margin-bottom: 0.2em;
+}
+
+.config-page .key {
+  grid-column: 1;
+}
+
+.config-page .value {
+  grid-column: 2;
 }

@@ -1,8 +1,11 @@
 use std::io;
 
+use aes67_rs::error::VscApiError;
 use axum::{http::StatusCode, response::IntoResponse};
-use miette::Diagnostic;
+use miette::{Diagnostic, Report};
+use serde_json::error;
 use thiserror::Error;
+use tokio::sync::{mpsc, oneshot};
 use worterbuch::error::WorterbuchAppError;
 use worterbuch_client::ConnectionError;
 
@@ -20,6 +23,26 @@ pub enum ManagementAgentError {
     YamlError(#[from] serde_yaml::Error),
     #[error("SDP error: {0}")]
     SdpError(#[from] sdp::Error),
+    #[error("VSC failed to start: {0}")]
+    FailedToStart(Report),
+    #[error("VSC is already running")]
+    AlreadyRunning,
+    #[error("Internal communication error")]
+    ChannelError,
+    #[error("VSC api error: {0}")]
+    VscApiError(#[from] VscApiError),
+}
+
+impl From<oneshot::error::RecvError> for ManagementAgentError {
+    fn from(_: oneshot::error::RecvError) -> Self {
+        ManagementAgentError::ChannelError
+    }
+}
+
+impl<T> From<mpsc::error::SendError<T>> for ManagementAgentError {
+    fn from(_: mpsc::error::SendError<T>) -> Self {
+        ManagementAgentError::ChannelError
+    }
 }
 
 pub type ManagementAgentResult<T> = Result<T, ManagementAgentError>;
@@ -48,6 +71,16 @@ impl From<ManagementAgentError> for (StatusCode, String) {
                 (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
             }
             ManagementAgentError::SdpError(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+            ManagementAgentError::FailedToStart(e) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+            }
+            ManagementAgentError::AlreadyRunning => (StatusCode::BAD_REQUEST, e.to_string()),
+            ManagementAgentError::ChannelError => {
+                (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+            }
+            ManagementAgentError::VscApiError(e) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+            }
         }
     }
 }

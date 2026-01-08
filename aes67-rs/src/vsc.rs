@@ -29,13 +29,14 @@ use crate::{
     receiver::{api::ReceiverApi, config::ReceiverConfig, start_receiver},
     sender::api::SenderApi,
 };
+use futures_lite::future::block_on;
 use pnet::datalink::NetworkInterface;
 use std::collections::HashMap;
 use tokio::sync::{mpsc, oneshot};
 use tokio_graceful_shutdown::SubsystemHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
-use worterbuch_client::Worterbuch;
+use worterbuch_client::{Worterbuch, topic};
 
 type ApiMessageSender = mpsc::Sender<VscApiMessage>;
 
@@ -200,8 +201,14 @@ struct VirtualSoundCard {
     rx_counter: u32,
     monitoring: Monitoring,
     shutdown_token: CancellationToken,
-    #[cfg(any(feature = "tokio-metrics", feature = "statime"))]
     wb: Worterbuch,
+}
+
+impl Drop for VirtualSoundCard {
+    fn drop(&mut self) {
+        info!("Virtual sound card '{}' destroyed.", self.name);
+        block_on(self.wb.set(topic!(self.name, "running"), false)).ok();
+    }
 }
 
 impl VirtualSoundCard {
@@ -342,11 +349,5 @@ impl VirtualSoundCard {
         info!("Receiver '{id}' successfully destroyed.");
 
         Ok(())
-    }
-}
-
-impl Drop for VirtualSoundCard {
-    fn drop(&mut self) {
-        info!("Virtual sound card '{}' destroyed.", self.name);
     }
 }

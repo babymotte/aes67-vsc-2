@@ -1,10 +1,15 @@
 pub mod config;
 mod error;
 mod netinf_watcher;
+mod rest;
 
 use crate::{
     config::{AppConfig, DEFAULT_PORT},
     error::{ManagementAgentError, ManagementAgentResult},
+    rest::{
+        app_name, refresh_netinfs, vsc_rx_create, vsc_rx_delete, vsc_rx_update, vsc_start,
+        vsc_stop, vsc_tx_create, vsc_tx_delete, vsc_tx_update,
+    },
 };
 use aes67_rs::{
     app::{propagate_exit, spawn_child_app},
@@ -15,12 +20,8 @@ use aes67_rs::{
     vsc::VirtualSoundCardApi,
 };
 use aes67_rs_discovery::{sap::start_sap_discovery, state_transformers};
-use axum::{
-    extract::State,
-    routing::{get, post},
-};
+use axum::routing::{get, post};
 use axum_server::Handle;
-use miette::Report;
 use miette::{IntoDiagnostic, Result};
 use serde_json::json;
 use std::{io, net::SocketAddr, process::Stdio, time::Duration};
@@ -36,18 +37,16 @@ use worterbuch::{
 };
 use worterbuch_client::{KeyValuePair, Worterbuch, topic};
 
-pub enum ManagementAgentApi {
-    Config(ManagementAgentConfigApi),
-    Vsc(ManagementAgentVscApi),
-}
-
 enum VscApiMessage {
     StartVsc(oneshot::Sender<VscApiResult<()>>),
+    StopVsc(oneshot::Sender<VscApiResult<()>>),
+    Exit,
 }
 
-pub struct ManagementAgentConfigApi(mpsc::Sender<VscApiMessage>);
+#[derive(Clone)]
+pub struct ManagementAgentApi(mpsc::Sender<VscApiMessage>);
 
-impl ManagementAgentConfigApi {
+impl ManagementAgentApi {
     pub fn new(subsys: &SubsystemHandle, app_id: String, wb: Worterbuch) -> Self {
         let (api_tx, api_rx) = mpsc::channel(1);
 
@@ -62,61 +61,67 @@ impl ManagementAgentConfigApi {
         Self(api_tx)
     }
 
-    pub async fn start_vsc(self) -> Result<ManagementAgentApi, (Report, ManagementAgentApi)> {
+    pub async fn start_vsc(&self) -> ManagementAgentResult<()> {
+        info!("Starting VSC …");
         let (tx, rx) = oneshot::channel();
-        if let Err(e) = self
-            .0
-            .send(VscApiMessage::StartVsc(tx))
-            .await
-            .into_diagnostic()
-        {
-            return Err((e, ManagementAgentApi::Config(self)));
-        }
 
-        if let Err(e) = rx.await.into_diagnostic() {
-            return Err((e, ManagementAgentApi::Config(self)));
-        }
+        self.0.send(VscApiMessage::StartVsc(tx)).await?;
 
-        Ok(ManagementAgentApi::Vsc(ManagementAgentVscApi(self.0)))
+        rx.await??;
+
+        Ok(())
     }
-}
 
-pub struct ManagementAgentVscApi(mpsc::Sender<VscApiMessage>);
+    pub async fn stop_vsc(&self) -> ManagementAgentResult<()> {
+        info!("Stopping VSC …");
+        let (tx, rx) = oneshot::channel();
 
-impl ManagementAgentVscApi {
-    pub async fn create_sender(&self) -> Result<()> {
+        self.0.send(VscApiMessage::StopVsc(tx)).await?;
+
+        rx.await??;
+
+        Ok(())
+    }
+
+    pub async fn create_sender(&self) -> ManagementAgentResult<()> {
+        info!("Creating AES67 sender …");
         // TODO
         Ok(())
     }
 
-    pub async fn create_receiver(&self) -> Result<()> {
+    pub async fn create_receiver(&self) -> ManagementAgentResult<()> {
+        info!("Creating AES67 receiver …");
         // TODO
         Ok(())
     }
 
-    pub async fn update_sender(&self) -> Result<()> {
+    pub async fn update_sender(&self) -> ManagementAgentResult<()> {
+        info!("Updating AES67 sender …");
         // TODO
         Ok(())
     }
 
-    pub async fn update_receiver(&self) -> Result<()> {
+    pub async fn update_receiver(&self) -> ManagementAgentResult<()> {
+        info!("Updating AES67 receiver …");
         // TODO
         Ok(())
     }
 
-    pub async fn delete_sender(&self) -> Result<()> {
+    pub async fn delete_sender(&self) -> ManagementAgentResult<()> {
+        info!("Deleting AES67 sender …");
         // TODO
         Ok(())
     }
 
-    pub async fn delete_receiver(&self) -> Result<()> {
+    pub async fn delete_receiver(&self) -> ManagementAgentResult<()> {
+        info!("Deleting AES67 receiver …");
         // TODO
         Ok(())
     }
 
-    pub async fn stop_vsc(self) -> Result<ManagementAgentConfigApi> {
-        // TODO
-        Ok(ManagementAgentConfigApi(self.0))
+    async fn exit(&self) -> ManagementAgentResult<()> {
+        self.0.send(VscApiMessage::Exit).await?;
+        Ok(())
     }
 }
 
@@ -157,7 +162,13 @@ impl<'a> VscApiActor<'a> {
 
     async fn process_api_message(&mut self, msg: VscApiMessage) -> Result<()> {
         match msg {
-            VscApiMessage::StartVsc(tx) => tx.send(self.start_vsc().await).ok(),
+            VscApiMessage::StartVsc(tx) => {
+                let _ = tx.send(self.start_vsc().await);
+            }
+            VscApiMessage::StopVsc(tx) => {
+                let _ = tx.send(self.stop_vsc().await);
+            }
+            VscApiMessage::Exit => self.subsys.request_shutdown(),
         };
 
         Ok(())
@@ -188,6 +199,17 @@ impl<'a> VscApiActor<'a> {
         let vsc_api = VirtualSoundCardApi::new(name, shutdown_token, wb, clock, audio_nic).await?;
 
         self.vsc_api = Some(vsc_api);
+
+        Ok(())
+    }
+
+    async fn stop_vsc(&mut self) -> VscApiResult<()> {
+        match self.vsc_api.take() {
+            None => return Err(VscApiError::NotRunning),
+            Some(vsc_api) => {
+                vsc_api.close().await?;
+            }
+        }
 
         Ok(())
     }
@@ -259,7 +281,7 @@ pub async fn init_management_agent(
     // TODO get VSC config from worterbuch
     // TODO register I/O handler
 
-    let management_agent = Aes67VscRestApi::new(subsys, config, worterbuch).await?;
+    Aes67VscRestApi::new(subsys, config, worterbuch).await?;
 
     Ok(())
 }
@@ -273,7 +295,7 @@ impl Aes67VscRestApi {
         subsys: &SubsystemHandle,
         persistent_config: AppConfig,
         worterbuch: CloneableWbApi,
-    ) -> Result<ManagementAgentApi> {
+    ) -> Result<()> {
         let wb = worterbuch_client::local_client_wrapper(worterbuch.clone());
 
         let app_id = persistent_config.name.clone();
@@ -281,13 +303,27 @@ impl Aes67VscRestApi {
         let shutdown_token = subsys.create_cancellation_token();
 
         let wbc = wb.clone();
+
+        let autostart = wb
+            .get(topic!(app_id, "config", "autostart"))
+            .await?
+            .unwrap_or(false);
+
+        let api = ManagementAgentApi::new(subsys, app_id, wb);
+
+        if autostart {
+            if let Err(e) = api.start_vsc().await {
+                error!("Could not start AES67-VSC REST API: {}", e);
+            };
+        }
+
         propagate_exit(
             spawn_child_app(
                 #[cfg(feature = "tokio-metrics")]
                 persistent_config.vsc.app.name.clone(),
                 "aes67-rs-vsc-management-agent".to_owned(),
                 async |s: &mut SubsystemHandle| {
-                    run_rest_api(s, persistent_config, worterbuch, wbc).await
+                    run_rest_api(s, persistent_config, worterbuch, wbc, api).await
                 },
                 shutdown_token.clone(),
                 #[cfg(feature = "tokio-metrics")]
@@ -297,15 +333,7 @@ impl Aes67VscRestApi {
             shutdown_token,
         );
 
-        let api = ManagementAgentConfigApi::new(subsys, app_id, wb);
-
-        match api.start_vsc().await {
-            Err((e, api)) => {
-                error!("Could not start AES67-VSC REST API: {}", e);
-                Ok(api)
-            }
-            Ok(api) => Ok(api),
-        }
+        Ok(())
     }
 }
 
@@ -314,6 +342,7 @@ async fn run_rest_api(
     mut persistent_config: AppConfig,
     worterbuch: CloneableWbApi,
     wb: Worterbuch,
+    api: ManagementAgentApi,
 ) -> ManagementAgentResult<()> {
     info!("Starting AES67-VSC REST API …");
 
@@ -363,26 +392,36 @@ async fn run_rest_api(
         post(refresh_netinfs).with_state(netinf_watcher),
     );
 
-    info!("REST API is listening on {}", listener.local_addr()?);
+    let app = app
+        .route("/api/v1/vsc/start", post(vsc_start).with_state(api.clone()))
+        .route("/api/v1/vsc/stop", post(vsc_stop).with_state(api.clone()))
+        .route(
+            "/api/v1/vsc/tx/create",
+            post(vsc_tx_create).with_state(api.clone()),
+        )
+        .route(
+            "/api/v1/vsc/tx/update",
+            post(vsc_tx_update).with_state(api.clone()),
+        )
+        .route(
+            "/api/v1/vsc/tx/delete",
+            post(vsc_tx_delete).with_state(api.clone()),
+        )
+        .route(
+            "/api/v1/vsc/rx/create",
+            post(vsc_rx_create).with_state(api.clone()),
+        )
+        .route(
+            "/api/v1/vsc/rx/update",
+            post(vsc_rx_update).with_state(api.clone()),
+        )
+        .route(
+            "/api/v1/vsc/rx/delete",
+            post(vsc_rx_delete).with_state(api.clone()),
+        );
 
-    spawn(async move {
-        match process::Command::new("xdg-open")
-            .arg(format!("http://127.0.0.1:{port}"))
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .await
-        {
-            Ok(status) => match status.code() {
-                Some(0) => (),
-                Some(status) => {
-                    warn!("Could not open web UI, xdg-open returned with status {status}")
-                }
-                None => warn!("Attempt to open web UI returned with unknown status"),
-            },
-            Err(e) => error!("Could not open web UI: {e}"),
-        }
-    });
+    info!("REST API is listening on {}", listener.local_addr()?);
+    info!("Web UI is available at http://127.0.0.1:{port}",);
 
     let handle = Handle::new();
 
@@ -413,15 +452,4 @@ async fn start_network_interface_watcher(
     wb: worterbuch_client::Worterbuch,
 ) -> netinf_watcher::Handle {
     netinf_watcher::start(app_id, Duration::from_secs(3), wb).await
-}
-
-async fn app_name<'a>(State(app_id): State<String>) -> String {
-    app_id.clone()
-}
-
-async fn refresh_netinfs(
-    State(netinf_watcher): State<netinf_watcher::Handle>,
-) -> ManagementAgentResult<&'static str> {
-    netinf_watcher.refresh().await;
-    Ok("Network interfaces refresh triggered")
 }

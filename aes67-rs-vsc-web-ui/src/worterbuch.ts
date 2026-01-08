@@ -66,6 +66,8 @@ export function subscribe<T extends Value>(key: string, cb: StateCallback<T>) {
   createEffect(() => {
     const wb = wbClient();
     if (wb) {
+      console.log(`Subscribing to '${key}'`);
+
       setTid(wb.subscribe(key, cb));
     }
   });

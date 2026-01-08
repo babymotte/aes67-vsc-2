@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 aes67-rs = { version = "0.1.0", path = "../aes67-rs" }
 aes67-rs-discovery = { version = "0.1.0", path = "../aes67-rs-discovery" }
-axum = { version = "0.8.6", features = ["http2", "ws"] }
+axum = { version = "0.8.6", features = ["http2", "ws", "macros"] }
 axum-server = "0.7.2"
 directories = "6.0.0"
 dirs = "6.0.0"

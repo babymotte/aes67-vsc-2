@@ -5,6 +5,7 @@ import Config from "./components/Config/Config";
 import "./App.css";
 import { VscState } from "./vscState";
 import { Worterbuch } from "./worterbuch";
+import RunningIndicator from "./components/RunningIndicator";
 
 function AddSenderButton() {
   return <button onclick={() => console.log("Add sender ...")}>+</button>;
@@ -43,6 +44,8 @@ export default function App() {
             <AddReceiverButton />
           </Match>
         </Switch>
+        <div class="spacer"></div>
+        <RunningIndicator />
       </div>
       <div class="tab" classList={{ pending: pending() }}>
         <Suspense fallback={<div class="loader">Loading...</div>}>

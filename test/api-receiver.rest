@@ -1,3 +1,0 @@
-### Refresh network interfaces
-
-POST http://127.0.0.1:43567/api/v1/refresh/netinf

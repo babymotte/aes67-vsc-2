@@ -1,18 +1,20 @@
 import type { Accessor } from "solid-js";
 
 export default function Selection<
-  T = string | number | string[] | undefined
+  T extends string | number | string[] | undefined
 >(props: {
   id: string;
   options: Accessor<[T, string, boolean?][]>;
   onSelection?: (value: T) => void;
   value: Accessor<T>;
+  disabled?: Accessor<boolean>;
 }) {
-  var selected = null as T;
+  var selected = undefined as T;
 
   const clickHandler = (e: Event) => {
-    if (selected !== e.target?.value) {
-      selected = e.target?.value;
+    const newValue = (e.target as HTMLSelectElement)?.value as T;
+    if (selected !== newValue) {
+      selected = newValue;
       console.log(selected);
       if (props.onSelection) {
         props.onSelection(selected);
@@ -21,8 +23,9 @@ export default function Selection<
   };
 
   const changeHandler = (e: Event) => {
-    if (selected !== e.target?.value) {
-      selected = e.target?.value;
+    const newValue = (e.target as HTMLSelectElement)?.value as T;
+    if (selected !== newValue) {
+      selected = newValue;
       if (props.onSelection) {
         props.onSelection(selected);
       }
@@ -37,6 +40,7 @@ export default function Selection<
         on:click={clickHandler}
         on:change={changeHandler}
         value={props.value()}
+        disabled={props.disabled ? props.disabled() : false}
       >
         {props.options().map(([value, label, disabled]) => (
           <option value={value} disabled={disabled}>

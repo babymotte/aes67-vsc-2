@@ -4,5 +4,9 @@ pw-metadata -n settings 0 clock.force-quantum 96
 # RUSTFLAGS="--cfg tokio_unstable" cargo build --package aes67-rs-jack-vsc --features=tokio-console,tokio-metrics || exit $?
 cargo build --package aes67-rs-jack-vsc || exit $?
 sudo setcap 'cap_net_bind_service+eip cap_sys_nice+eip' ./target/debug/aes67-rs-jack-vsc || exit $?
-RUST_LOG="aes67_rs_ui=warn,aes67_rs_jack_vsc=warn,aes67_rs::monitoring=warn,statime=warn,info" ./target/debug/aes67-rs-jack-vsc
+
+for _ in {1..999}; do
+    RUST_LOG="aes67_rs_ui=warn,aes67_rs_jack_vsc=warn,aes67_rs::monitoring=warn,statime=warn,info" ./target/debug/aes67-rs-jack-vsc
+done
+
 # AES67_VSC_2_CONFIG="./config/receiver2.yaml" ./target/debug/aes-vsc-receiver
