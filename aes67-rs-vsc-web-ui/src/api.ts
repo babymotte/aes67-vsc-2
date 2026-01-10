@@ -33,3 +33,24 @@ export async function startVsc(): Promise<void> {
     throw new Error(`Failed to start VSC: ${response.statusText}`);
   }
 }
+
+export async function createSender(id: number): Promise<void> {
+  const url = "/api/v1/vsc/tx/create";
+  const response = await fetch(url, {
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to create sender: ${response.statusText}`);
+  }
+}
+export async function createReceiver(id: number): Promise<void> {
+  const url = "/api/v1/vsc/rx/create";
+  const response = await fetch(url, {
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to create receiver: ${response.statusText}`);
+  }
+}

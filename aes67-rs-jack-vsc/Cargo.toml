@@ -31,7 +31,7 @@ tracing = "0.1.41"
 tracing-opentelemetry = "0.32.0"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 worterbuch = "1.4.0"
-worterbuch-client = "1.4.0"
+worterbuch-client = "1.4.2"
 
 [features]
 tokio-console = ["console-subscriber"]

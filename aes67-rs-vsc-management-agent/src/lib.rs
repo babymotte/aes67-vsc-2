@@ -24,18 +24,18 @@ use axum::routing::{get, post};
 use axum_server::Handle;
 use miette::{IntoDiagnostic, Result};
 use serde_json::json;
-use std::{io, net::SocketAddr, process::Stdio, time::Duration};
+use std::{io, net::SocketAddr, time::Duration};
 use tokio::{
-    process, select, spawn,
+    select,
     sync::{mpsc, oneshot},
 };
 use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
-use tracing::{error, info, warn};
+use tracing::{error, info};
 use worterbuch::{
     PersistenceMode,
     server::{CloneableWbApi, axum::build_worterbuch_router},
 };
-use worterbuch_client::{KeyValuePair, Worterbuch, topic};
+use worterbuch_client::{ConnectionResult, KeyValuePair, Worterbuch, topic};
 
 enum VscApiMessage {
     StartVsc(oneshot::Sender<VscApiResult<()>>),
@@ -44,28 +44,34 @@ enum VscApiMessage {
 }
 
 #[derive(Clone)]
-pub struct ManagementAgentApi(mpsc::Sender<VscApiMessage>);
+pub struct ManagementAgentApi {
+    app_id: String,
+    api_tx: mpsc::Sender<VscApiMessage>,
+    wb: Worterbuch,
+}
 
 impl ManagementAgentApi {
     pub fn new(subsys: &SubsystemHandle, app_id: String, wb: Worterbuch) -> Self {
         let (api_tx, api_rx) = mpsc::channel(1);
 
+        let app_idc = app_id.clone();
+        let wbc = wb.clone();
         subsys.start(SubsystemBuilder::new(
             "api",
             async |s: &mut SubsystemHandle| {
-                let api_actor = VscApiActor::new(s, app_id, api_rx, wb);
+                let api_actor = VscApiActor::new(s, app_idc, api_rx, wbc);
                 api_actor.run().await
             },
         ));
 
-        Self(api_tx)
+        Self { app_id, api_tx, wb }
     }
 
     pub async fn start_vsc(&self) -> ManagementAgentResult<()> {
         info!("Starting VSC …");
         let (tx, rx) = oneshot::channel();
 
-        self.0.send(VscApiMessage::StartVsc(tx)).await?;
+        self.api_tx.send(VscApiMessage::StartVsc(tx)).await?;
 
         rx.await??;
 
@@ -76,7 +82,7 @@ impl ManagementAgentApi {
         info!("Stopping VSC …");
         let (tx, rx) = oneshot::channel();
 
-        self.0.send(VscApiMessage::StopVsc(tx)).await?;
+        self.api_tx.send(VscApiMessage::StopVsc(tx)).await?;
 
         rx.await??;
 
@@ -84,14 +90,18 @@ impl ManagementAgentApi {
     }
 
     pub async fn create_sender(&self) -> ManagementAgentResult<()> {
-        info!("Creating AES67 sender …");
-        // TODO
+        let id = get_next_tx_id(&self.app_id, &self.wb).await?;
+        self.wb
+            .set(topic!(self.app_id, "config", "tx", id, "running"), false)
+            .await?;
         Ok(())
     }
 
     pub async fn create_receiver(&self) -> ManagementAgentResult<()> {
-        info!("Creating AES67 receiver …");
-        // TODO
+        let id = get_next_rx_id(&self.app_id, &self.wb).await?;
+        self.wb
+            .set(topic!(self.app_id, "config", "rx", id, "running"), false)
+            .await?;
         Ok(())
     }
 
@@ -120,7 +130,7 @@ impl ManagementAgentApi {
     }
 
     async fn exit(&self) -> ManagementAgentResult<()> {
-        self.0.send(VscApiMessage::Exit).await?;
+        self.api_tx.send(VscApiMessage::Exit).await?;
         Ok(())
     }
 }
@@ -243,6 +253,7 @@ pub async fn init_management_agent(
     wb_config.ws_endpoint = None;
     wb_config.tcp_endpoint = None;
     wb_config.unix_endpoint = None;
+    wb_config.extended_monitoring = true;
     let worterbuch = worterbuch::spawn_worterbuch(subsys, wb_config).await?;
 
     let wb = worterbuch_client::local_client_wrapper(worterbuch.clone());
@@ -452,4 +463,24 @@ async fn start_network_interface_watcher(
     wb: worterbuch_client::Worterbuch,
 ) -> netinf_watcher::Handle {
     netinf_watcher::start(app_id, Duration::from_secs(3), wb).await
+}
+
+async fn get_next_tx_id(app_id: &str, wb: &Worterbuch) -> ConnectionResult<u64> {
+    get_next_id(app_id, wb, "tx").await
+}
+
+async fn get_next_rx_id(app_id: &str, wb: &Worterbuch) -> ConnectionResult<u64> {
+    get_next_id(app_id, wb, "rx").await
+}
+
+async fn get_next_id(app_id: &str, wb: &Worterbuch, txrx: &str) -> ConnectionResult<u64> {
+    let key: String = topic!(app_id, "config", txrx, "next-id");
+    let keyc = key.clone();
+
+    wb.locked(keyc, async || {
+        let next_id = wb.get(key.clone()).await?.unwrap_or(1);
+        wb.set(key, next_id + 1).await?;
+        Ok(next_id)
+    })
+    .await?
 }

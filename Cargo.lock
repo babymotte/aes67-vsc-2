@@ -188,6 +188,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "allocator-api2"
+version = "0.2.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
+
+[[package]]
 name = "android_system_properties"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1439,6 +1445,8 @@ version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
 dependencies = [
+ "allocator-api2",
+ "equivalent",
  "foldhash",
 ]
 
@@ -5016,12 +5024,13 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-client"
-version = "1.4.0"
+version = "1.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19e7d0d2932ba0c629313c7298220ee6eae5b6301784cd2c7548387b65523309"
+checksum = "bee20864423aa0c92bf70828b99e6f2a064c421d2edb1e44a014a0a43133ddcf"
 dependencies = [
  "async-stream",
  "futures-util",
+ "hashbrown 0.16.1",
  "mio",
  "serde",
  "serde_json",

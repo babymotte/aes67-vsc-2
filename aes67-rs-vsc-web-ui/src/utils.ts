@@ -1,10 +1,29 @@
-export function transceiverID(key: string): string {
-  const parts = key.split("/");
-  return parts[parts.length - 2];
+const txCollator = new Intl.Collator(undefined, {
+  numeric: true,
+  sensitivity: "base",
+});
+
+const rxCollator = new Intl.Collator(undefined, {
+  numeric: true,
+  sensitivity: "base",
+});
+
+export function transceiverLabel([key, name]: string[]): string {
+  if (name == null || name.trim() === "") {
+    return key.split("/")[4];
+  } else {
+    return name;
+  }
 }
 
-export function sortTransceivers(
+export function sortSenders(
   transceivers: [string, string][]
 ): [string, string][] {
-  return transceivers.sort((a, b) => a[0].localeCompare(b[0]));
+  return transceivers.sort((a, b) => txCollator.compare(a[0], b[0]));
+}
+
+export function sortReceivers(
+  transceivers: [string, string][]
+): [string, string][] {
+  return transceivers.sort((a, b) => rxCollator.compare(a[0], b[0]));
 }

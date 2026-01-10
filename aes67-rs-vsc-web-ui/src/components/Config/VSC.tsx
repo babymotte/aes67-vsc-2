@@ -17,14 +17,18 @@ function nicForPtptMode(pm: PtpMode): string | undefined {
 }
 
 export default function VSC() {
-  const an = appName();
-
   const startStopVSC = async (running: boolean) => {
-    set(`${an}/config/autostart`, !running);
+    set(`${appName()}/config/autostart`, !running);
     if (running) {
-      stopVsc().catch((err) => console.error("Failed to stop VSC:", err));
+      stopVsc().catch((err) =>
+        // TODO show error to user
+        console.error("Failed to stop VSC:", err)
+      );
     } else {
-      startVsc().catch((err) => console.error("Failed to start VSC:", err));
+      startVsc().catch((err) =>
+        // TODO show error to user
+        console.error("Failed to start VSC:", err)
+      );
     }
   };
 
@@ -35,13 +39,31 @@ export default function VSC() {
     ["internal", "Internal", false],
   ]);
 
-  pSubscribe<boolean>(`${an}/networkInterfaces/?/active`, (nics) => {
-    let opts: [string, string, boolean][] = [...nics].map(([key, active]) => {
-      const nic = key.split("/")[2];
-      return [nic, nic, !active];
+  createEffect(() => {
+    pSubscribe<boolean>(`${appName()}/networkInterfaces/?/active`, (nics) => {
+      let opts: [string, string, boolean][] = [...nics].map(([key, active]) => {
+        const nic = key.split("/")[2];
+        return [nic, nic, !active];
+      });
+      opts.sort((a, b) => a[1].localeCompare(b[1]));
+      setOptions(opts);
     });
-    opts.sort((a, b) => a[1].localeCompare(b[1]));
-    setOptions(opts);
+  });
+
+  createEffect(() => {
+    subscribe<string>(`${appName()}/config/audio/nic`, (nic) => {
+      if (nic.value) {
+        setAudioNic(nic.value);
+      }
+    });
+  });
+
+  createEffect(() => {
+    subscribe<PtpMode>(`${appName()}/config/ptp`, (nic) => {
+      if (nic.value) {
+        setPtpMode(nic.value);
+      }
+    });
   });
 
   const [audioNic, setAudioNic] = createSignal<string>("");
@@ -51,21 +73,9 @@ export default function VSC() {
   const [ptpNicSelectionDisabled, setPtpNicSelectionDisabled] =
     createSignal<boolean>(false);
 
-  subscribe<string>(`${an}/config/audio/nic`, (nic) => {
-    if (nic.value) {
-      setAudioNic(nic.value);
-    }
-  });
-
-  subscribe<PtpMode>(`${an}/config/ptp`, (nic) => {
-    if (nic.value) {
-      setPtpMode(nic.value);
-    }
-  });
-
   const onAudioSelection = async (nic: string) => {
     if (nic != null && nic.trim() != "") {
-      await set(`${an}/config/audio/nic`, nic);
+      await set(`${appName()}/config/audio/nic`, nic);
     }
   };
 
@@ -86,19 +96,19 @@ export default function VSC() {
     switch (mode) {
       case "system": {
         const pm = mode;
-        await set(`${an}/config/ptp`, pm);
+        await set(`${appName()}/config/ptp`, pm);
         setPtpMode(pm);
         break;
       }
       case "phc": {
         const pm = { phc: { nic: ptpNic() } };
-        await set(`${an}/config/ptp`, pm);
+        await set(`${appName()}/config/ptp`, pm);
         setPtpMode(pm);
         break;
       }
       case "internal": {
         const pm = { internal: { nic: ptpNic() } };
-        await set(`${an}/config/ptp`, pm);
+        await set(`${appName()}/config/ptp`, pm);
         setPtpMode(pm);
         break;
       }
@@ -108,18 +118,18 @@ export default function VSC() {
   const onPtpSelection = async (nic: string) => {
     const pm = ptpMode();
     if (typeof pm === "object" && "phc" in pm) {
-      await set(`${an}/config/ptp`, { phc: { nic } });
+      await set(`${appName()}/config/ptp`, { phc: { nic } });
       setPtpMode({ phc: { nic } });
     } else if (typeof pm === "object" && "internal" in pm) {
-      await set(`${an}/config/ptp`, { internal: { nic } });
+      await set(`${appName()}/config/ptp`, { internal: { nic } });
       setPtpMode({ internal: { nic } });
     }
     setPtpNic(nic);
   };
 
   createEffect(async () => {
-    setAudioNic((await get<string>(`${an}/config/audio/nic`)) || "");
-    setPtpMode((await get<PtpMode>(`${an}/config/ptp`)) || "system");
+    setAudioNic((await get<string>(`${appName()}/config/audio/nic`)) || "");
+    setPtpMode((await get<PtpMode>(`${appName()}/config/ptp`)) || "system");
     const nic = nicForPtptMode(ptpMode());
     if (nic) {
       setPtpNic(nic);

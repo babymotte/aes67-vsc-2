@@ -7,32 +7,38 @@ import {
   Switch,
   useTransition,
 } from "solid-js";
-import { pSubscribe } from "../worterbuch";
-import { appName } from "../vscState";
-import { sortTransceivers, transceiverID } from "../utils";
+import { pSubscribe } from "../../worterbuch";
+import { appName } from "../../vscState";
+import { sortSenders, transceiverLabel } from "../../utils";
 
 export default function Senders() {
   const [tab, setTab] = createSignal(0);
   const [pending, start] = useTransition();
   const [senders, setSenders] = createSignal<Map<string, string>>(new Map());
+  const [sortedSenders, setSortedSenders] = createSignal<[string, string][]>(
+    []
+  );
   const updateTab = (index: number) => () => start(() => setTab(index));
 
   createEffect(() => {
-    const an = appName();
-    pSubscribe(`${an}/tx/?/label`, setSenders);
+    pSubscribe(`${appName()}/config/tx/senders/?/name`, setSenders);
+  });
+
+  createEffect(() => {
+    setSortedSenders(sortSenders(Array.from(senders().entries())));
   });
 
   return (
     <div class="tab-content">
       <div class="sub-menu">
         <ul>
-          <For each={sortTransceivers(Array.from(senders().entries()))}>
+          <For each={sortedSenders()}>
             {(sender, index) => (
               <li
                 classList={{ selected: tab() === index() }}
                 onClick={updateTab(index())}
               >
-                {transceiverID(sender[0])} - {sender[1]}
+                {transceiverLabel(sender)}
               </li>
             )}
           </For>
@@ -41,10 +47,10 @@ export default function Senders() {
       <div class="main-view" classList={{ pending: pending() }}>
         <Suspense fallback={<div class="loader">Loading...</div>}>
           <Switch>
-            <For each={sortTransceivers(Array.from(senders().entries()))}>
+            <For each={sortedSenders()}>
               {(sender, index) => (
                 <Match when={tab() === index()}>
-                  <h3>{sender[1]}</h3>
+                  <h3>{transceiverLabel(sender)}</h3>
                 </Match>
               )}
             </For>

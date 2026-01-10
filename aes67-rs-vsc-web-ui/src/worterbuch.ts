@@ -99,6 +99,16 @@ export async function set<T extends Value>(key: string, value: T) {
   }
 }
 
+export async function locked<T>(
+  key: string,
+  action: () => T
+): Promise<T | undefined> {
+  const wb = wbClient();
+  if (wb) {
+    return await wb.locked(key, action);
+  }
+}
+
 export function pSubscribe<T extends Value>(
   pattern: string,
   cb: (aggregated: Map<string, T>) => void
