@@ -3,6 +3,7 @@ import { createEffect, createSignal } from "solid-js";
 import Selection from "../Selection";
 import { get, pSubscribe, set, subscribe } from "../../worterbuch";
 import { startVsc, stopVsc } from "../../api";
+import { IoPlay, IoStop } from "solid-icons/io";
 
 type PtpConfig = { nic: string };
 type PtpMode = "system" | { phc: PtpConfig } | { internal: PtpConfig };
@@ -162,7 +163,17 @@ export default function VSC() {
         id="start-stop-vsc"
         on:click={() => startStopVSC(running())}
       >
-        {running() ? "Stop" : "Start"}
+        {running() ? (
+          <span class="icon-label">
+            <IoStop />
+            Stop
+          </span>
+        ) : (
+          <span class="icon-label">
+            <IoPlay />
+            Start
+          </span>
+        )}
       </button>
 
       <h3>Audio over IP</h3>

@@ -1,6 +1,10 @@
 import { createWbSignal, transceiverID } from "../../utils";
-import { pDelete } from "../../worterbuch";
+import { pDelete, set, subscribe } from "../../worterbuch";
 import { appName } from "../../vscState";
+import { createEffect, createSignal } from "solid-js";
+import { IoPlay } from "solid-icons/io";
+import { IoStop } from "solid-icons/io";
+import { IoTrash } from "solid-icons/io";
 
 export default function Editor(props: { sender: [string, string] }) {
   const [name, setName] = createWbSignal<string>(
@@ -25,8 +29,50 @@ export default function Editor(props: { sender: [string, string] }) {
     setChannels(newChannels || 2);
   };
 
+  const [running, setRunning] = createSignal<boolean>(false);
+  createEffect(() => {
+    subscribe<boolean>(
+      `${appName()}/tx/${transceiverID(props.sender)}/running`,
+      (n) => {
+        if (n.value !== undefined) {
+          setRunning(n.value);
+        } else {
+          setRunning(false);
+        }
+      }
+    );
+  });
+
+  const start = () => {
+    console.log(`Starting sender ${transceiverID(props.sender)}...`);
+    set(
+      `${appName()}/config/tx/senders/${transceiverID(props.sender)}/autostart`,
+      true
+    );
+
+    // TODO implement start sender
+
+    set(`${appName()}/tx/${transceiverID(props.sender)}/running`, true);
+  };
+
+  const stop = () => {
+    console.log(`Stopping sender ${transceiverID(props.sender)}...`);
+    set(
+      `${appName()}/config/tx/senders/${transceiverID(props.sender)}/autostart`,
+      false
+    );
+
+    // TODO implement stop sender
+
+    set(`${appName()}/tx/${transceiverID(props.sender)}/running`, false);
+  };
+
   const startStop = () => {
-    // TODO implement start/stop sender
+    if (running()) {
+      stop();
+    } else {
+      start();
+    }
   };
 
   const deleteSender = () => {
@@ -37,7 +83,7 @@ export default function Editor(props: { sender: [string, string] }) {
 
   return (
     <div class="config-page">
-      <h2>Sender Config</h2>
+      <h2>Sender Configuration</h2>
 
       <h3>General</h3>
       <label class="key" for="name">
@@ -57,10 +103,23 @@ export default function Editor(props: { sender: [string, string] }) {
 
       <div class="separator">---------------------------</div>
       <button id="startStop" on:click={startStop}>
-        Start
+        {running() ? (
+          <span class="icon-label">
+            <IoStop />
+            Stop
+          </span>
+        ) : (
+          <span class="icon-label">
+            <IoPlay />
+            Start
+          </span>
+        )}
       </button>
-      <button id="delete" on:click={deleteSender}>
-        Delete
+      <button id="delete" on:click={deleteSender} disabled={running()}>
+        <span class="icon-label">
+          <IoTrash />
+          Delete
+        </span>
       </button>
     </div>
   );

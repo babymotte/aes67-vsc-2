@@ -11,6 +11,7 @@
   "dependencies": {
     "@solidjs/router": "^0.15.4",
     "axios": "^1.12.2",
+    "solid-icons": "^1.1.0",
     "solid-js": "^1.9.9",
     "worterbuch-js": "^1.0.2"
   },

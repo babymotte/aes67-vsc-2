@@ -197,3 +197,11 @@ ul.main-menu li.selected {
 .config-page .separator {
   grid-column: span 2;
 }
+
+.icon-label {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5em;
+}

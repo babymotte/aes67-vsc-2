@@ -21,7 +21,8 @@ function AddSenderButton() {
         });
         if (id != null) {
           set(`${an}/config/tx/senders/${id}/name`, null);
-          set(`${an}/config/tx/senders/${id}/running`, false);
+          set(`${an}/config/tx/senders/${id}/channels`, 2);
+          set(`${an}/config/tx/senders/${id}/autostart`, false);
         }
       }}
     >
@@ -43,7 +44,8 @@ function AddReceiverButton() {
         });
         if (id != null) {
           set(`${an}/config/rx/receivers/${id}/name`, null);
-          set(`${an}/config/rx/receivers/${id}/running`, false);
+          set(`${an}/config/rx/receivers/${id}/channels`, 2);
+          set(`${an}/config/rx/receivers/${id}/autostart`, false);
         }
       }}
     >
