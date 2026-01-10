@@ -3,9 +3,9 @@ import Receivers from "./components/Receivers";
 import Senders from "./components/Senders";
 import Config from "./components/Config/Config";
 import "./App.css";
-import { VscState } from "./vscState";
-import { Worterbuch } from "./worterbuch";
-import RunningIndicator from "./components/RunningIndicator";
+import { running, VscState } from "./vscState";
+import { connected, Worterbuch } from "./worterbuch";
+import Indicator from "./components/Indicator";
 
 function AddSenderButton() {
   return <button onclick={() => console.log("Add sender ...")}>+</button>;
@@ -45,7 +45,10 @@ export default function App() {
           </Match>
         </Switch>
         <div class="spacer"></div>
-        <RunningIndicator />
+        <div>
+          <Indicator onLabel="Backend " offLabel="Backend " on={connected} />
+          <Indicator onLabel="VSC " offLabel="VSC " on={running} />
+        </div>
       </div>
       <div class="tab" classList={{ pending: pending() }}>
         <Suspense fallback={<div class="loader">Loading...</div>}>

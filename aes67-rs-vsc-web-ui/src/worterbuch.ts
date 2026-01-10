@@ -9,6 +9,7 @@ import {
 } from "worterbuch-js";
 
 const [wbClient, setWbClient] = createSignal<Worterbuch | null>(null);
+const [connected, setConnected] = createSignal<boolean>(false);
 
 const closeWb = (wb: Worterbuch | null) => {
   if (wb) {
@@ -16,6 +17,8 @@ const closeWb = (wb: Worterbuch | null) => {
     wb.close();
   }
 };
+
+export { connected };
 
 const swapWbClient = (wb: Worterbuch | null) => {
   setWbClient((w) => {
@@ -31,15 +34,17 @@ export function Worterbuch() {
   }/ws`;
 
   const brokenConnection = (msg: string) => {
+    setConnected(false);
     console.error(msg);
     swapWbClient(null);
-    console.error("Trying to reconnect in 5 seconds …");
-    setTimeout(connectWb, 5000);
+    console.error("Trying to reconnect in 0.5 seconds …");
+    setTimeout(connectWb, 500);
   };
 
   const connectWb = () => {
     connect(wsAddress)
       .then((wb) => {
+        setConnected(true);
         wb.onclose = () => {
           brokenConnection("Worterbuch connection closed");
         };
