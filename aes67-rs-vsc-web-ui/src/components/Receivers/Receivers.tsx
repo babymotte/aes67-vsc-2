@@ -10,6 +10,7 @@ import {
 import { pSubscribe } from "../../worterbuch";
 import { appName } from "../../vscState";
 import { sortReceivers, transceiverLabel } from "../../utils";
+import Editor from "./Editor";
 
 export default function Receivers() {
   const [tab, setTab] = createSignal(0);
@@ -52,7 +53,7 @@ export default function Receivers() {
             <For each={sortedReceivers()}>
               {(receiver, index) => (
                 <Match when={tab() === index()}>
-                  <h3>{transceiverLabel(receiver)}</h3>
+                  <Editor receiver={receiver} />
                 </Match>
               )}
             </For>

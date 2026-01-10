@@ -168,10 +168,16 @@ ul.main-menu li.selected {
 
 .config-page {
   display: grid;
-  columns: 2;
+  grid-template-columns: 1fr 1fr;
   justify-content: stretch;
   column-gap: 2em;
   row-gap: 0.5em;
+}
+
+.config-page h2 {
+  text-align: center;
+  grid-column: span 2;
+  font-size: 1.25em;
 }
 
 .config-page h3 {
@@ -186,4 +192,8 @@ ul.main-menu li.selected {
 
 .config-page .value {
   grid-column: 2;
+}
+
+.config-page .separator {
+  grid-column: span 2;
 }

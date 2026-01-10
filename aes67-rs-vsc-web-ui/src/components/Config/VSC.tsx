@@ -151,9 +151,11 @@ export default function VSC() {
 
   return (
     <div class="config-page">
-      <h3>VSC Configuration</h3>
+      <h2>VSC Configuration</h2>
+
+      <h3>General</h3>
       <label class="key" for="start-stop-vsc">
-        VSC:
+        Run:
       </label>
       <button
         class="value"

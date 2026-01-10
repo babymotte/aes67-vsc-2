@@ -109,6 +109,13 @@ export async function locked<T>(
   }
 }
 
+export function pDelete(pattern: string) {
+  const wb = wbClient();
+  if (wb) {
+    wb.pDelete(pattern);
+  }
+}
+
 export function pSubscribe<T extends Value>(
   pattern: string,
   cb: (aggregated: Map<string, T>) => void
