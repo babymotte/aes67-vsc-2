@@ -3,7 +3,7 @@ import Receivers from "./components/Receivers";
 import Senders from "./components/Senders";
 import Config from "./components/Config/Config";
 import "./App.css";
-import { running, VscState } from "./vscState";
+import { running } from "./vscState";
 import { connected, Worterbuch } from "./worterbuch";
 import Indicator from "./components/Indicator";
 
@@ -23,7 +23,6 @@ export default function App() {
   return (
     <>
       <Worterbuch />
-      <VscState />
       <div class="header">
         <ul class="main-menu">
           <li classList={{ selected: tab() === 0 }} onClick={updateTab(0)}>

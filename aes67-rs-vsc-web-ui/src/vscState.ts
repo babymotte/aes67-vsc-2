@@ -1,27 +1,33 @@
 import { createEffect, createSignal } from "solid-js";
-import axios from "axios";
-import { subscribe } from "./worterbuch";
+import { connected, subscribe } from "./worterbuch";
+import { fetchAppName } from "./api";
 
 const [appName, setAppName] = createSignal<string | null>(null);
 const [running, setRunning] = createSignal<boolean>(false);
 
-export function VscState() {
-  axios.get("/api/v1/backend/app-name").then((response) => {
-    setAppName(response.data);
-  });
-
-  createEffect(() => {
-    const an = appName();
-    if (an) {
-      console.log("App name changed:", an);
-      subscribe<boolean>(`${an}/running`, (val) => {
-        console.log("VSC running:", val.value);
-        setRunning(val.value || false);
+createEffect(() => {
+  if (connected()) {
+    fetchAppName()
+      .then((name) => {
+        setAppName(name);
+      })
+      .catch((error) => {
+        console.error("Error fetching app name:", error);
       });
-    }
-  });
+  } else {
+    setAppName(null);
+  }
+});
 
-  return null;
-}
+createEffect(() => {
+  const an = appName();
+  if (an) {
+    console.log("App name changed:", an);
+    subscribe<boolean>(`${an}/running`, (val) => {
+      console.log("VSC running:", val.value);
+      setRunning(val.value || false);
+    });
+  }
+});
 
 export { appName, running };

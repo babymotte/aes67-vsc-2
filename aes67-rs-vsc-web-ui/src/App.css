@@ -159,6 +159,7 @@ ul.main-menu li.selected {
 
 .indicator {
   color: #af4c4c;
+  font-size: smaller;
 }
 
 .indicator.active {

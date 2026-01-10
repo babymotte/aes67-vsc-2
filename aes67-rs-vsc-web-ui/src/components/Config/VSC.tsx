@@ -2,6 +2,7 @@ import { appName, running } from "../../vscState";
 import { createEffect, createSignal } from "solid-js";
 import Selection from "../Selection";
 import { get, pSubscribe, set, subscribe } from "../../worterbuch";
+import { startVsc, stopVsc } from "../../api";
 
 type PtpConfig = { nic: string };
 type PtpMode = "system" | { phc: PtpConfig } | { internal: PtpConfig };
@@ -19,11 +20,12 @@ export default function VSC() {
   const an = appName();
 
   const startStopVSC = async (running: boolean) => {
-    const url = running ? "/api/v1/vsc/stop" : "/api/v1/vsc/start";
     set(`${an}/config/autostart`, !running);
-    await fetch(url, {
-      method: "POST",
-    });
+    if (running) {
+      stopVsc().catch((err) => console.error("Failed to stop VSC:", err));
+    } else {
+      startVsc().catch((err) => console.error("Failed to start VSC:", err));
+    }
   };
 
   const [options, setOptions] = createSignal<[string, string, boolean][]>([]);

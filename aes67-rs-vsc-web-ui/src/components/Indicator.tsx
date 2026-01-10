@@ -9,7 +9,7 @@ export default function Indicator(props: {
     <div class="running-indicator" classList={{ running: props.on() }}>
       <span>{props.on() ? props.onLabel : props.offLabel}</span>
       <span class="indicator" classList={{ active: props.on() }}>
-        ●
+        {props.on() ? "🟢" : "🔴"}
       </span>
     </div>
   );
