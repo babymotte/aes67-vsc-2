@@ -7,57 +7,49 @@ import {
   invalidSampleFormat,
   transceiverID,
 } from "../../utils";
-import { pDelete, set, subscribe } from "../../worterbuch";
+import { pDelete, set } from "../../worterbuch";
 import { appName } from "../../vscState";
 import { createEffect, createSignal } from "solid-js";
 import { IoPlay } from "solid-icons/io";
 import { IoStop } from "solid-icons/io";
 import { IoTrash } from "solid-icons/io";
+import { createSender, deleteSender } from "../../api";
 
 export default function Editor(props: { sender: [string, string] }) {
   const [name, setName] = createWbSignal<string, string>(
-    `${appName()}/config/tx/senders/${transceiverID(props.sender)}/name`,
+    `/config/tx/senders/${transceiverID(props.sender)}/name`,
     props.sender[1]
   );
 
   const [channels, setChannels] = createWbSignal<string, number>(
-    `${appName()}/config/tx/senders/${transceiverID(props.sender)}/channels`,
+    `/config/tx/senders/${transceiverID(props.sender)}/channels`,
     "0",
     [(s) => parseInt(s, 10) || 0, (n) => n.toString()]
   );
 
   const [sampleFormat, setSampleFormat] = createWbSignal<string, string>(
-    `${appName()}/config/tx/senders/${transceiverID(
-      props.sender
-    )}/sampleFormat`,
+    `/config/tx/senders/${transceiverID(props.sender)}/sampleFormat`,
     "L24"
   );
 
   const [packetTime, setPacketTime] = createWbSignal<string, number>(
-    `${appName()}/config/tx/senders/${transceiverID(props.sender)}/packetTime`,
+    `/config/tx/senders/${transceiverID(props.sender)}/packetTime`,
     "1",
     [(s) => parseFloat(s) || 1, (n) => n.toString()]
   );
 
   const [destinationIP, setDestinationIP] = createWbSignal<string, string>(
-    `${appName()}/config/tx/senders/${transceiverID(
-      props.sender
-    )}/destinationIP`,
+    `/config/tx/senders/${transceiverID(props.sender)}/destinationIP`,
     ""
   );
 
   const [destinationPort, setDestinationPort] = createWbSignal<string, number>(
-    `${appName()}/config/tx/senders/${transceiverID(
-      props.sender
-    )}/destinationPort`,
+    `/config/tx/senders/${transceiverID(props.sender)}/destinationPort`,
     "0",
     [(s) => parseInt(s, 10) || 0, (n) => n.toString()]
   );
 
-  const [vscRunning] = createWbSignal<boolean, boolean>(
-    `${appName()}/running`,
-    false
-  );
+  const [vscRunning] = createWbSignal<boolean, boolean>(`/running`, false);
 
   const [configInvalid, setConfigInvalid] = createSignal<boolean>(false);
   createEffect(() => {
@@ -106,19 +98,10 @@ export default function Editor(props: { sender: [string, string] }) {
     setDestinationPort(newDestination);
   };
 
-  const [running, setRunning] = createSignal<boolean>(false);
-  createEffect(() => {
-    subscribe<boolean>(
-      `${appName()}/tx/${transceiverID(props.sender)}/running`,
-      (n) => {
-        if (n.value !== undefined) {
-          setRunning(n.value);
-        } else {
-          setRunning(false);
-        }
-      }
-    );
-  });
+  const [running] = createWbSignal<boolean, boolean>(
+    `/tx/${transceiverID(props.sender)}/running`,
+    false
+  );
 
   const start = () => {
     console.log(`Starting sender ${transceiverID(props.sender)}...`);
@@ -127,9 +110,10 @@ export default function Editor(props: { sender: [string, string] }) {
       true
     );
 
-    // TODO implement start sender
-
-    set(`${appName()}/tx/${transceiverID(props.sender)}/running`, true);
+    createSender(parseInt(transceiverID(props.sender), 10)).catch((err) =>
+      // TODO show error to user
+      console.error(`Failed to start sender:`, err)
+    );
   };
 
   const stop = () => {
@@ -139,9 +123,10 @@ export default function Editor(props: { sender: [string, string] }) {
       false
     );
 
-    // TODO implement stop sender
-
-    set(`${appName()}/tx/${transceiverID(props.sender)}/running`, false);
+    deleteSender(parseInt(transceiverID(props.sender), 10)).catch((err) =>
+      // TODO show error to user
+      console.error("Failed to stop sender:", err)
+    );
   };
 
   const startStop = () => {
@@ -152,7 +137,7 @@ export default function Editor(props: { sender: [string, string] }) {
     }
   };
 
-  const deleteSender = () => {
+  const deleteSenderConfig = () => {
     // TODO show confirmation dialog
     // TODO invoke delete API and only remove config if successful
     pDelete(`${appName()}/config/tx/senders/${transceiverID(props.sender)}/#`);
@@ -262,7 +247,7 @@ export default function Editor(props: { sender: [string, string] }) {
           </span>
         )}
       </button>
-      <button id="delete" on:click={deleteSender} disabled={running()}>
+      <button id="delete" on:click={deleteSenderConfig} disabled={running()}>
         <span class="icon-label">
           <IoTrash />
           Delete

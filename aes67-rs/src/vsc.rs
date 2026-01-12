@@ -35,21 +35,27 @@ use std::collections::HashMap;
 use tokio::sync::{mpsc, oneshot};
 use tokio_graceful_shutdown::SubsystemHandle;
 use tokio_util::sync::CancellationToken;
-use tracing::info;
+use tracing::{info, warn};
 use worterbuch_client::{Worterbuch, topic};
 
 type ApiMessageSender = mpsc::Sender<VscApiMessage>;
 
 enum VscApiMessage {
     CreateSender(
-        String,
-        Box<SenderConfig>,
+        SenderConfig,
+        oneshot::Sender<SenderInternalResult<(SenderApi, u32)>>,
+    ),
+    UpdateSender(
+        SenderConfig,
         oneshot::Sender<SenderInternalResult<(SenderApi, u32)>>,
     ),
     DestroySenderById(u32, oneshot::Sender<SenderInternalResult<()>>),
     CreateReceiver(
-        String,
-        Box<ReceiverConfig>,
+        ReceiverConfig,
+        oneshot::Sender<ReceiverInternalResult<(ReceiverApi, Monitoring, u32)>>,
+    ),
+    UpdateReceiver(
+        ReceiverConfig,
         oneshot::Sender<ReceiverInternalResult<(ReceiverApi, Monitoring, u32)>>,
     ),
     DestroyReceiverById(u32, oneshot::Sender<ReceiverInternalResult<()>>),
@@ -137,11 +143,16 @@ impl VirtualSoundCardApi {
     pub async fn create_sender(&self, config: SenderConfig) -> VscApiResult<(SenderApi, u32)> {
         let (tx, rx) = oneshot::channel();
         self.api_tx
-            .send(VscApiMessage::CreateSender(
-                config.id.to_owned(),
-                Box::new(config),
-                tx,
-            ))
+            .send(VscApiMessage::CreateSender(config, tx))
+            .await
+            .ok();
+        Ok(rx.await.map_err(SenderInternalError::from)??)
+    }
+
+    pub async fn update_sender(&self, config: SenderConfig) -> VscApiResult<(SenderApi, u32)> {
+        let (tx, rx) = oneshot::channel();
+        self.api_tx
+            .send(VscApiMessage::UpdateSender(config, tx))
             .await
             .ok();
         Ok(rx.await.map_err(SenderInternalError::from)??)
@@ -162,11 +173,19 @@ impl VirtualSoundCardApi {
     ) -> VscApiResult<(ReceiverApi, Monitoring, u32)> {
         let (tx, rx) = oneshot::channel();
         self.api_tx
-            .send(VscApiMessage::CreateReceiver(
-                config.id().to_owned(),
-                Box::new(config),
-                tx,
-            ))
+            .send(VscApiMessage::CreateReceiver(config, tx))
+            .await
+            .ok();
+        Ok(rx.await.map_err(ReceiverInternalError::from)??)
+    }
+
+    pub async fn update_receiver(
+        &self,
+        config: ReceiverConfig,
+    ) -> VscApiResult<(ReceiverApi, Monitoring, u32)> {
+        let (tx, rx) = oneshot::channel();
+        self.api_tx
+            .send(VscApiMessage::UpdateReceiver(config, tx))
             .await
             .ok();
         Ok(rx.await.map_err(ReceiverInternalError::from)??)
@@ -197,8 +216,6 @@ struct VirtualSoundCard {
     rxs: HashMap<u32, ReceiverApi>,
     // tx_names: HashMap<u32, String>,
     // rx_names: HashMap<u32, String>,
-    tx_counter: u32,
-    rx_counter: u32,
     monitoring: Monitoring,
     shutdown_token: CancellationToken,
     wb: Worterbuch,
@@ -232,8 +249,6 @@ impl VirtualSoundCard {
             rxs: HashMap::new(),
             // tx_names: HashMap::new(),
             // rx_names: HashMap::new(),
-            tx_counter: 0,
-            rx_counter: 0,
             monitoring,
             shutdown_token,
             #[cfg(any(feature = "tokio-metrics", feature = "statime"))]
@@ -250,14 +265,20 @@ impl VirtualSoundCard {
 
         while let Some(msg) = self.api_rx.recv().await {
             match msg {
-                VscApiMessage::CreateSender(id, config, tx) => {
-                    tx.send(self.create_sender(id, *config).await).ok();
+                VscApiMessage::CreateSender(config, tx) => {
+                    tx.send(self.create_sender(config).await).ok();
+                }
+                VscApiMessage::UpdateSender(config, tx) => {
+                    tx.send(self.update_sender(config).await).ok();
                 }
                 VscApiMessage::DestroySenderById(id, tx) => {
                     tx.send(self.destroy_sender(id).await).ok();
                 }
-                VscApiMessage::CreateReceiver(id, config, tx) => {
-                    tx.send(self.create_receiver(id, *config).await).ok();
+                VscApiMessage::CreateReceiver(config, tx) => {
+                    tx.send(self.create_receiver(config).await).ok();
+                }
+                VscApiMessage::UpdateReceiver(config, tx) => {
+                    tx.send(self.update_receiver(config).await).ok();
                 }
                 VscApiMessage::DestroyReceiverById(id, tx) => {
                     tx.send(self.destroy_receiver(id).await).ok();
@@ -274,11 +295,10 @@ impl VirtualSoundCard {
 
     async fn create_sender(
         &mut self,
-        label: String,
         config: SenderConfig,
     ) -> SenderInternalResult<(SenderApi, u32)> {
-        self.tx_counter += 1;
-        let id = self.tx_counter;
+        let id = config.id;
+        let label = config.label.clone();
         let qualified_id = format!("{}/tx/{}", self.name, id);
         info!("Creating sender '{label}' ({qualified_id}) …");
 
@@ -302,9 +322,23 @@ impl VirtualSoundCard {
         Ok((sender_api, id))
     }
 
+    async fn update_sender(
+        &mut self,
+        config: SenderConfig,
+    ) -> SenderInternalResult<(SenderApi, u32)> {
+        // TODO
+        todo!()
+    }
+
     async fn destroy_sender(&mut self, id: u32) -> SenderInternalResult<()> {
         info!("Destroying sender '{id}' …");
-        // TODO
+
+        let Some(api) = self.txs.remove(&id) else {
+            return Err(SenderInternalError::NoSuchSender(id));
+        };
+
+        api.stop().await;
+
         info!("Sender '{id}' successfully destroyed.");
 
         Ok(())
@@ -312,11 +346,10 @@ impl VirtualSoundCard {
 
     async fn create_receiver(
         &mut self,
-        label: String,
         config: ReceiverConfig,
     ) -> ReceiverInternalResult<(ReceiverApi, Monitoring, u32)> {
-        self.rx_counter += 1;
-        let id: u32 = self.rx_counter;
+        let id = config.id;
+        let label = config.label.clone();
         let qualified_id = format!("{}/rx/{}", self.name, id);
         info!("Creating receiver '{label}' ({qualified_id}) …");
 
@@ -343,9 +376,23 @@ impl VirtualSoundCard {
         Ok((receiver_api, monitoring, id))
     }
 
+    async fn update_receiver(
+        &mut self,
+        config: ReceiverConfig,
+    ) -> ReceiverInternalResult<(ReceiverApi, Monitoring, u32)> {
+        // TODO
+        todo!()
+    }
+
     async fn destroy_receiver(&mut self, id: u32) -> ReceiverInternalResult<()> {
         info!("Destroying receiver '{id}' …");
-        // TODO
+
+        let Some(api) = self.rxs.remove(&id) else {
+            return Err(ReceiverInternalError::NoSuchReceiver(id));
+        };
+
+        api.stop().await;
+
         info!("Receiver '{id}' successfully destroyed.");
 
         Ok(())

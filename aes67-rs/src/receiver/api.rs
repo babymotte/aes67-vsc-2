@@ -16,7 +16,7 @@
  */
 
 use crate::{buffer::ReceiverBufferConsumer, error::ReceiverInternalResult, formats::Frames};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 use tracing::instrument;
 
@@ -32,7 +32,7 @@ pub enum DataState {
 
 #[derive(Debug)]
 pub enum ReceiverApiMessage {
-    Stop,
+    Stop(oneshot::Sender<()>),
 }
 
 #[derive(Clone)]
@@ -48,7 +48,9 @@ impl ReceiverApi {
 
     #[instrument(skip(self))]
     pub async fn stop(&self) {
-        self.api_tx.send(ReceiverApiMessage::Stop).await.ok();
+        let (tx, rx) = oneshot::channel();
+        self.api_tx.send(ReceiverApiMessage::Stop(tx)).await.ok();
+        rx.await.ok();
     }
 
     pub async fn receive<'a>(

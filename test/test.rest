@@ -1,15 +1,47 @@
 ### Get app name
-
 GET http://127.0.0.1:43567/api/v1/backend/app-name
 
 ### Refresh network interfaces
-
 POST http://127.0.0.1:43567/api/v1/refresh/netinf
 
 ### Start VSC
-
 POST http://127.0.0.1:43567/api/v1/vsc/start
 
 ### Stop VSC
-
 POST http://127.0.0.1:43567/api/v1/vsc/stop
+
+### Create sender
+POST http://127.0.0.1:43567/api/v1/vsc/tx/create
+Content-Type: application/json
+
+{"id": 1}
+
+### Update sender
+POST http://127.0.0.1:43567/api/v1/vsc/tx/update
+Content-Type: application/json
+
+{"id": 1}
+
+### Delete sender
+POST http://127.0.0.1:43567/api/v1/vsc/tx/delete
+Content-Type: application/json
+
+{"id": 1}
+
+### Create receiver
+POST http://127.0.0.1:43567/api/v1/vsc/rx/create
+Content-Type: application/json
+
+{"id": 1}
+
+### Update receiver
+POST http://127.0.0.1:43567/api/v1/vsc/rx/update
+Content-Type: application/json
+
+{"id": 1}
+
+### Delete receiver
+POST http://127.0.0.1:43567/api/v1/vsc/rx/delete
+Content-Type: application/json
+
+{"id": 1}

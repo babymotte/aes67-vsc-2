@@ -52,7 +52,7 @@ export default function Receivers(props: {
     index: Accessor<number>;
   }) {
     const [running] = createWbSignal(
-      `${appName()}/rx/${transceiverID(props.receiver)}/running`,
+      `/rx/${transceiverID(props.receiver)}/running`,
       false
     );
     return (

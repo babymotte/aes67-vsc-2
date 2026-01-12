@@ -46,7 +46,8 @@ lazy_static! {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReceiverConfig {
-    pub id: Option<String>,
+    pub id: u32,
+    pub label: String,
     pub session: SdpWrapper,
     pub link_offset: MilliSeconds,
     #[serde(default)]
@@ -54,10 +55,6 @@ pub struct ReceiverConfig {
 }
 
 impl ReceiverConfig {
-    pub fn id(&self) -> &str {
-        self.id.as_ref().unwrap_or(&self.session.session_name)
-    }
-
     pub fn buffer_time(&self) -> MilliSeconds {
         (self.link_offset * 20.0).max(20.0)
     }
@@ -95,7 +92,7 @@ pub struct RxDescriptor {
 impl TryFrom<&ReceiverConfig> for RxDescriptor {
     type Error = ConfigError;
     fn try_from(rx_config: &ReceiverConfig) -> ConfigResult<Self> {
-        let id = rx_config.id().to_owned();
+        let id = rx_config.label.clone();
         let descriptor = RxDescriptor::new(id, &rx_config.session, rx_config.link_offset)?;
         Ok(descriptor)
     }

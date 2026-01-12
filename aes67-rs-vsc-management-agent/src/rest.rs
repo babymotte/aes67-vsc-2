@@ -1,5 +1,9 @@
-use crate::{ManagementAgentApi, error::ManagementAgentResult, netinf_watcher};
-use axum::extract::State;
+use crate::{
+    ManagementAgentApi,
+    error::{LogError, ManagementAgentResult},
+    netinf_watcher,
+};
+use axum::{Json, extract::State};
 
 pub(crate) async fn app_name<'a>(State(app_id): State<String>) -> String {
     app_id.clone()
@@ -24,44 +28,67 @@ pub(crate) async fn vsc_stop(State(api): State<ManagementAgentApi>) -> Managemen
     Ok(())
 }
 
+#[derive(serde::Deserialize)]
+pub(crate) struct TransceiverSpec {
+    id: u32,
+}
+
 pub(crate) async fn vsc_tx_create(
     State(api): State<ManagementAgentApi>,
+    Json(spec): Json<TransceiverSpec>,
 ) -> ManagementAgentResult<()> {
-    api.create_sender().await?;
+    api.create_sender(spec.id)
+        .await
+        .log_error("Failed to create sender")?;
     Ok(())
 }
 
 pub(crate) async fn vsc_tx_update(
     State(api): State<ManagementAgentApi>,
+    Json(spec): Json<TransceiverSpec>,
 ) -> ManagementAgentResult<()> {
-    api.update_sender().await?;
+    api.update_sender(spec.id)
+        .await
+        .log_error("Failed to update sender")?;
     Ok(())
 }
 
 pub(crate) async fn vsc_tx_delete(
     State(api): State<ManagementAgentApi>,
+    Json(spec): Json<TransceiverSpec>,
 ) -> ManagementAgentResult<()> {
-    api.delete_sender().await?;
+    api.delete_sender(spec.id)
+        .await
+        .log_error("Failed to delete sender")?;
     Ok(())
 }
 
 pub(crate) async fn vsc_rx_create(
     State(api): State<ManagementAgentApi>,
+    Json(spec): Json<TransceiverSpec>,
 ) -> ManagementAgentResult<()> {
-    api.create_receiver().await?;
+    api.create_receiver(spec.id)
+        .await
+        .log_error("Failed to create receiver")?;
     Ok(())
 }
 
 pub(crate) async fn vsc_rx_update(
     State(api): State<ManagementAgentApi>,
+    Json(spec): Json<TransceiverSpec>,
 ) -> ManagementAgentResult<()> {
-    api.update_receiver().await?;
+    api.update_receiver(spec.id)
+        .await
+        .log_error("Failed to update receiver")?;
     Ok(())
 }
 
 pub(crate) async fn vsc_rx_delete(
     State(api): State<ManagementAgentApi>,
+    Json(spec): Json<TransceiverSpec>,
 ) -> ManagementAgentResult<()> {
-    api.delete_receiver().await?;
+    api.delete_receiver(spec.id)
+        .await
+        .log_error("Failed to delete receiver")?;
     Ok(())
 }

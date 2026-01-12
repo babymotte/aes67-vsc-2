@@ -151,7 +151,11 @@ impl<'a> Receiver<'a> {
         api_msg: ReceiverApiMessage,
     ) -> ReceiverInternalResult<()> {
         match api_msg {
-            ReceiverApiMessage::Stop => self.subsys.request_shutdown(),
+            ReceiverApiMessage::Stop(tx) => {
+                self.subsys.request_local_shutdown();
+                self.subsys.wait_for_children().await;
+                tx.send(()).ok();
+            }
         }
         Ok(())
     }

@@ -66,6 +66,7 @@ struct SenderData {
     stats: SenderStats,
     label: String,
     address: AudioBufferPointer,
+    running: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,6 +76,7 @@ struct ReceiverData {
     stats: ReceiverStats,
     label: String,
     address: AudioBufferPointer,
+    running: bool,
 }
 
 pub async fn observability(
@@ -229,6 +231,7 @@ impl<'a> ObservabilityActor<'a> {
             stats: SenderStats::default(),
             label,
             address,
+            running: true,
         };
         self.senders.insert(name.clone(), data.clone());
         self.publish_sender(&name, data).await;
@@ -259,6 +262,7 @@ impl<'a> ObservabilityActor<'a> {
             stats: ReceiverStats::default(),
             label,
             address,
+            running: true,
         };
         self.receivers.insert(qualified_id.clone(), data.clone());
         self.publish_receiver(&qualified_id, data).await;
@@ -450,7 +454,10 @@ impl<'a> ObservabilityActor<'a> {
     }
 
     async fn unpublish_sender(&mut self, qualified_id: &str) {
-        self.wb.delete_async(topic!(qualified_id)).await.ok();
+        self.wb
+            .pdelete_async(topic!(qualified_id, "#"), true)
+            .await
+            .ok();
     }
 
     async fn publish_receiver(&self, qualified_id: &str, data: ReceiverData) {
@@ -470,6 +477,9 @@ impl<'a> ObservabilityActor<'a> {
     }
 
     async fn unpublish_receiver(&self, qualified_id: &str) {
-        self.wb.delete_async(topic!(qualified_id)).await.ok();
+        self.wb
+            .pdelete_async(topic!(qualified_id, "#"), true)
+            .await
+            .ok();
     }
 }

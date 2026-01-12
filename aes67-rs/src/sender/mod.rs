@@ -137,7 +137,11 @@ impl<'a> Sender<'a> {
 
     async fn handle_api_message(&mut self, api_msg: SenderApiMessage) -> SenderInternalResult<()> {
         match api_msg {
-            SenderApiMessage::Stop => self.subsys.request_shutdown(),
+            SenderApiMessage::Stop(tx) => {
+                self.subsys.request_local_shutdown();
+                self.subsys.wait_for_children().await;
+                tx.send(()).ok();
+            }
         }
         Ok(())
     }

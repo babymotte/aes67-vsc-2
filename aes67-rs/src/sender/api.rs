@@ -19,11 +19,12 @@ use crate::{
     buffer::{AudioBufferPointer, SenderBufferProducer},
     formats::Frames,
 };
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
+use tracing::instrument;
 
 #[derive(Debug)]
 pub enum SenderApiMessage {
-    Stop,
+    Stop(oneshot::Sender<()>),
 }
 
 #[derive(Debug, Clone)]
@@ -35,6 +36,13 @@ pub struct SenderApi {
 impl SenderApi {
     pub fn new(api_tx: mpsc::Sender<SenderApiMessage>, tx: SenderBufferProducer) -> Self {
         Self { api_tx, tx }
+    }
+
+    #[instrument(skip(self))]
+    pub async fn stop(&self) {
+        let (tx, rx) = oneshot::channel();
+        self.api_tx.send(SenderApiMessage::Stop(tx)).await.ok();
+        rx.await.ok();
     }
 
     pub async fn send(&mut self, channel_buffers: &[AudioBufferPointer], ingress_time: Frames) {

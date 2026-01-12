@@ -6,53 +6,43 @@ import {
   invalidSampleFormat,
   transceiverID,
 } from "../../utils";
-import { pDelete, set, subscribe } from "../../worterbuch";
+import { pDelete, set } from "../../worterbuch";
 import { appName } from "../../vscState";
 import { createEffect, createSignal } from "solid-js";
 import { IoPlay } from "solid-icons/io";
 import { IoStop } from "solid-icons/io";
 import { IoTrash } from "solid-icons/io";
+import { createReceiver, deleteReceiver } from "../../api";
 
 export default function Editor(props: { receiver: [string, string] }) {
   const [name, setName] = createWbSignal<string, string>(
-    `${appName()}/config/rx/receivers/${transceiverID(props.receiver)}/name`,
+    `/config/rx/receivers/${transceiverID(props.receiver)}/name`,
     props.receiver[1]
   );
 
   const [channels, setChannels] = createWbSignal<string, number>(
-    `${appName()}/config/rx/receivers/${transceiverID(
-      props.receiver
-    )}/channels`,
+    `/config/rx/receivers/${transceiverID(props.receiver)}/channels`,
     "0",
     [(s) => parseInt(s, 10) || 0, (n) => n.toString()]
   );
 
   const [sampleFormat, setSampleFormat] = createWbSignal<string, string>(
-    `${appName()}/config/rx/receivers/${transceiverID(
-      props.receiver
-    )}/sampleFormat`,
+    `/config/rx/receivers/${transceiverID(props.receiver)}/sampleFormat`,
     "L24"
   );
 
   const [destinationIP, setDestinationIP] = createWbSignal<string, string>(
-    `${appName()}/config/rx/receivers/${transceiverID(
-      props.receiver
-    )}/destinationIP`,
+    `/config/rx/receivers/${transceiverID(props.receiver)}/destinationIP`,
     ""
   );
 
   const [destinationPort, setDestinationPort] = createWbSignal<string, number>(
-    `${appName()}/config/rx/receivers/${transceiverID(
-      props.receiver
-    )}/destinationPort`,
+    `/config/rx/receivers/${transceiverID(props.receiver)}/destinationPort`,
     "0",
     [(s) => parseInt(s, 10) || 0, (n) => n.toString()]
   );
 
-  const [vscRunning] = createWbSignal<boolean, boolean>(
-    `${appName()}/running`,
-    false
-  );
+  const [vscRunning] = createWbSignal<boolean, boolean>(`/running`, false);
 
   const [configInvalid, setConfigInvalid] = createSignal<boolean>(false);
   createEffect(() => {
@@ -94,19 +84,10 @@ export default function Editor(props: { receiver: [string, string] }) {
     setDestinationPort(newDestination);
   };
 
-  const [running, setRunning] = createSignal<boolean>(false);
-  createEffect(() => {
-    subscribe<boolean>(
-      `${appName()}/rx/${transceiverID(props.receiver)}/running`,
-      (n) => {
-        if (n.value !== undefined) {
-          setRunning(n.value);
-        } else {
-          setRunning(false);
-        }
-      }
-    );
-  });
+  const [running] = createWbSignal<boolean, boolean>(
+    `/rx/${transceiverID(props.receiver)}/running`,
+    false
+  );
 
   const start = () => {
     console.log(`Starting receiver ${transceiverID(props.receiver)}...`);
@@ -117,9 +98,10 @@ export default function Editor(props: { receiver: [string, string] }) {
       true
     );
 
-    // TODO implement start receiver
-
-    set(`${appName()}/rx/${transceiverID(props.receiver)}/running`, true);
+    createReceiver(parseInt(transceiverID(props.receiver), 10)).catch((err) =>
+      // TODO show error to user
+      console.error("Failed to start receiver:", err)
+    );
   };
 
   const stop = () => {
@@ -131,9 +113,10 @@ export default function Editor(props: { receiver: [string, string] }) {
       false
     );
 
-    // TODO implement stop receiver
-
-    set(`${appName()}/rx/${transceiverID(props.receiver)}/running`, false);
+    deleteReceiver(parseInt(transceiverID(props.receiver), 10)).catch((err) =>
+      // TODO show error to user
+      console.error("Failed to stop receiver:", err)
+    );
   };
 
   const startStop = () => {
@@ -144,9 +127,8 @@ export default function Editor(props: { receiver: [string, string] }) {
     }
   };
 
-  const deleteReceiver = () => {
+  const deleteReceiverConfig = () => {
     // TODO show confirmation dialog
-    // TODO invoke delete API and only remove config if successful
     pDelete(
       `${appName()}/config/rx/receivers/${transceiverID(props.receiver)}/#`
     );
@@ -240,7 +222,7 @@ export default function Editor(props: { receiver: [string, string] }) {
           </span>
         )}
       </button>
-      <button id="delete" on:click={deleteReceiver} disabled={running()}>
+      <button id="delete" on:click={deleteReceiverConfig} disabled={running()}>
         <span class="icon-label">
           <IoTrash />
           Delete

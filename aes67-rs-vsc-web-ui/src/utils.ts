@@ -1,6 +1,7 @@
 import { createEffect, createSignal, type Accessor } from "solid-js";
 import { set, subscribe } from "./worterbuch";
 import type { Value } from "worterbuch-js";
+import { appName } from "./vscState";
 
 const txCollator = new Intl.Collator(undefined, {
   numeric: true,
@@ -45,7 +46,7 @@ export function createWbSignal<T, V extends Value>(
 
   createEffect(() => {
     subscribe<V>(
-      path,
+      `${appName()}${path}`,
       (n) => {
         if (n.value) {
           const v = n.value;
@@ -62,7 +63,7 @@ export function createWbSignal<T, V extends Value>(
     value,
     (newValue) =>
       set(
-        path,
+        `${appName()}${path}`,
         conversion ? conversion[0](newValue) : (newValue as unknown as V)
       ),
   ] as const;

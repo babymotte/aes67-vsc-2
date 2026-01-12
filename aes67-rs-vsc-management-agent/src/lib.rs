@@ -15,7 +15,10 @@ use aes67_rs::{
     app::{propagate_exit, spawn_child_app},
     config::Config,
     error::{VscApiError, VscApiResult},
+    formats::{AudioFormat, FrameFormat},
     nic::find_nic_with_name,
+    receiver::config::ReceiverConfig,
+    sender::config::SenderConfig,
     time::get_clock,
     vsc::VirtualSoundCardApi,
 };
@@ -23,6 +26,7 @@ use aes67_rs_discovery::{sap::start_sap_discovery, state_transformers};
 use axum::routing::{get, post};
 use axum_server::Handle;
 use miette::{IntoDiagnostic, Result};
+use serde::de::DeserializeOwned;
 use serde_json::json;
 use std::{io, net::SocketAddr, time::Duration};
 use tokio::{
@@ -35,11 +39,17 @@ use worterbuch::{
     PersistenceMode,
     server::{CloneableWbApi, axum::build_worterbuch_router},
 };
-use worterbuch_client::{ConnectionResult, KeyValuePair, Worterbuch, topic};
+use worterbuch_client::{ConnectionResult, Key, KeyValuePair, Worterbuch, topic};
 
 enum VscApiMessage {
     StartVsc(oneshot::Sender<VscApiResult<()>>),
     StopVsc(oneshot::Sender<VscApiResult<()>>),
+    CreateSender(u32, oneshot::Sender<VscApiResult<()>>),
+    CreateReceiver(u32, oneshot::Sender<VscApiResult<()>>),
+    UpdateSender(u32, oneshot::Sender<VscApiResult<()>>),
+    UpdateReceiver(u32, oneshot::Sender<VscApiResult<()>>),
+    DeleteSender(u32, oneshot::Sender<VscApiResult<()>>),
+    DeleteReceiver(u32, oneshot::Sender<VscApiResult<()>>),
     Exit,
 }
 
@@ -89,43 +99,69 @@ impl ManagementAgentApi {
         Ok(())
     }
 
-    pub async fn create_sender(&self) -> ManagementAgentResult<()> {
-        let id = get_next_tx_id(&self.app_id, &self.wb).await?;
-        self.wb
-            .set(topic!(self.app_id, "config", "tx", id, "running"), false)
+    pub async fn create_sender(&self, id: u32) -> ManagementAgentResult<()> {
+        let (tx, rx) = oneshot::channel();
+        self.api_tx
+            .send(VscApiMessage::CreateSender(id, tx))
             .await?;
+
+        rx.await??;
+
         Ok(())
     }
 
-    pub async fn create_receiver(&self) -> ManagementAgentResult<()> {
-        let id = get_next_rx_id(&self.app_id, &self.wb).await?;
-        self.wb
-            .set(topic!(self.app_id, "config", "rx", id, "running"), false)
+    pub async fn create_receiver(&self, id: u32) -> ManagementAgentResult<()> {
+        let (tx, rx) = oneshot::channel();
+        self.api_tx
+            .send(VscApiMessage::CreateReceiver(id, tx))
             .await?;
+
+        rx.await??;
+
         Ok(())
     }
 
-    pub async fn update_sender(&self) -> ManagementAgentResult<()> {
-        info!("Updating AES67 sender …");
-        // TODO
+    pub async fn update_sender(&self, id: u32) -> ManagementAgentResult<()> {
+        let (tx, rx) = oneshot::channel();
+        self.api_tx
+            .send(VscApiMessage::UpdateSender(id, tx))
+            .await?;
+
+        rx.await??;
+
         Ok(())
     }
 
-    pub async fn update_receiver(&self) -> ManagementAgentResult<()> {
-        info!("Updating AES67 receiver …");
-        // TODO
+    pub async fn update_receiver(&self, id: u32) -> ManagementAgentResult<()> {
+        let (tx, rx) = oneshot::channel();
+        self.api_tx
+            .send(VscApiMessage::UpdateReceiver(id, tx))
+            .await?;
+
+        rx.await??;
+
         Ok(())
     }
 
-    pub async fn delete_sender(&self) -> ManagementAgentResult<()> {
-        info!("Deleting AES67 sender …");
-        // TODO
+    pub async fn delete_sender(&self, id: u32) -> ManagementAgentResult<()> {
+        let (tx, rx) = oneshot::channel();
+        self.api_tx
+            .send(VscApiMessage::DeleteSender(id, tx))
+            .await?;
+
+        rx.await??;
+
         Ok(())
     }
 
-    pub async fn delete_receiver(&self) -> ManagementAgentResult<()> {
-        info!("Deleting AES67 receiver …");
-        // TODO
+    pub async fn delete_receiver(&self, id: u32) -> ManagementAgentResult<()> {
+        let (tx, rx) = oneshot::channel();
+        self.api_tx
+            .send(VscApiMessage::DeleteReceiver(id, tx))
+            .await?;
+
+        rx.await??;
+
         Ok(())
     }
 
@@ -178,6 +214,25 @@ impl<'a> VscApiActor<'a> {
             VscApiMessage::StopVsc(tx) => {
                 let _ = tx.send(self.stop_vsc().await);
             }
+            VscApiMessage::CreateSender(id, tx) => {
+                let _ = tx.send(self.create_sender(id).await);
+            }
+            VscApiMessage::CreateReceiver(id, tx) => {
+                let _ = tx.send(self.create_receiver(id).await);
+            }
+            VscApiMessage::UpdateSender(id, tx) => {
+                let _ = tx.send(self.update_sender(id).await);
+            }
+            VscApiMessage::UpdateReceiver(id, tx) => {
+                let _ = tx.send(self.update_receiver(id).await);
+            }
+            VscApiMessage::DeleteSender(id, tx) => {
+                let _ = tx.send(self.delete_sender(id).await);
+            }
+            VscApiMessage::DeleteReceiver(id, tx) => {
+                let _ = tx.send(self.delete_receiver(id).await);
+            }
+
             VscApiMessage::Exit => self.subsys.request_shutdown(),
         };
 
@@ -222,6 +277,166 @@ impl<'a> VscApiActor<'a> {
         }
 
         Ok(())
+    }
+
+    async fn create_sender(&mut self, id: u32) -> VscApiResult<()> {
+        match &self.vsc_api {
+            None => return Err(VscApiError::NotRunning),
+            Some(vsc_api) => {
+                let config = self.fetch_sender_config(id).await?;
+                vsc_api.create_sender(config).await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn create_receiver(&mut self, id: u32) -> VscApiResult<()> {
+        match &self.vsc_api {
+            None => return Err(VscApiError::NotRunning),
+            Some(vsc_api) => {
+                let config = self.fetch_receiver_config(id).await?;
+                vsc_api.create_receiver(config).await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn update_sender(&mut self, id: u32) -> VscApiResult<()> {
+        match &self.vsc_api {
+            None => return Err(VscApiError::NotRunning),
+            Some(vsc_api) => {
+                let config = self.fetch_sender_config(id).await?;
+                vsc_api.update_sender(config).await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn update_receiver(&mut self, id: u32) -> VscApiResult<()> {
+        match &self.vsc_api {
+            None => return Err(VscApiError::NotRunning),
+            Some(vsc_api) => {
+                let config = self.fetch_receiver_config(id).await?;
+                vsc_api.update_receiver(config).await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn delete_sender(&mut self, id: u32) -> VscApiResult<()> {
+        match &self.vsc_api {
+            None => return Err(VscApiError::NotRunning),
+            Some(vsc_api) => {
+                vsc_api.destroy_sender(id).await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn delete_receiver(&mut self, id: u32) -> VscApiResult<()> {
+        match &self.vsc_api {
+            None => return Err(VscApiError::NotRunning),
+            Some(vsc_api) => {
+                vsc_api.destroy_receiver(id).await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn fetch_sender_config(&self, id: u32) -> VscApiResult<SenderConfig> {
+        let label = self
+            .config_param(
+                topic!(self.app_id, "config", "tx", "senders", id, "name"),
+                "sender name not configured",
+            )
+            .await
+            .unwrap_or_else(|_| id.to_string());
+
+        let channels = self
+            .config_param(
+                topic!(self.app_id, "config", "tx", "senders", id, "channels"),
+                "sender channels not configured",
+            )
+            .await?;
+        let sample_rate = self
+            .config_param(
+                topic!(self.app_id, "config", "audio", "sampleRate"),
+                "audio sample rate not configured",
+            )
+            .await?;
+        let sample_format = self
+            .config_param(
+                topic!(self.app_id, "config", "tx", "senders", id, "sampleFormat"),
+                "sender sample format not configured",
+            )
+            .await?;
+
+        let frame_format = FrameFormat {
+            channels,
+            sample_format,
+        };
+        let audio_format = AudioFormat {
+            sample_rate,
+            frame_format,
+        };
+        let target_ip = self
+            .config_param::<String>(
+                topic!(self.app_id, "config", "tx", "senders", id, "destinationIP"),
+                "sender destination IP not configured",
+            )
+            .await?
+            .parse()?;
+        let target_port = self
+            .config_param(
+                topic!(
+                    self.app_id,
+                    "config",
+                    "tx",
+                    "senders",
+                    id,
+                    "destinationPort"
+                ),
+                "sender destination port not configured",
+            )
+            .await?;
+        let target = SocketAddr::new(target_ip, target_port);
+        // TODO how do we manage payload type correctly?
+        let payload_type = 97;
+        // TODO fetch channel labels from worterbuch
+        let channel_labels = None;
+
+        Ok(SenderConfig {
+            id,
+            label,
+            audio_format,
+            target,
+            payload_type,
+            channel_labels,
+        })
+    }
+
+    async fn fetch_receiver_config(&self, id: u32) -> VscApiResult<ReceiverConfig> {
+        // TODO implement
+        Err(VscApiError::NotImplemented)
+    }
+
+    async fn config_param<T: DeserializeOwned>(
+        &self,
+        key: Key,
+        msg: &'static str,
+    ) -> VscApiResult<T> {
+        let value = self
+            .wb
+            .get(key)
+            .await?
+            .ok_or(VscApiError::SenderConfigIncomplete(msg))?;
+        Ok(value)
     }
 }
 

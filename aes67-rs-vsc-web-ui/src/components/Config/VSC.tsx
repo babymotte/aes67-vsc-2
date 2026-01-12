@@ -4,6 +4,7 @@ import Selection from "../Selection";
 import { get, pSubscribe, set, subscribe } from "../../worterbuch";
 import { startVsc, stopVsc } from "../../api";
 import { IoPlay, IoStop } from "solid-icons/io";
+import { createWbSignal } from "../../utils";
 
 type PtpConfig = { nic: string };
 type PtpMode = "system" | { phc: PtpConfig } | { internal: PtpConfig };
@@ -150,6 +151,17 @@ export default function VSC() {
     }
   });
 
+  const [sampleRate, setSampleRate] = createWbSignal<string, number>(
+    `/config/audio/sampleRate`,
+    "48000",
+    [(s) => parseInt(s), (v) => v.toString()]
+  );
+  const [sampleRateOptions] = createSignal<[string, string, boolean][]>([
+    ["44100", "44.1 kHz", false],
+    ["48000", "48 kHz", false],
+    ["96000", "96 kHz", false],
+  ]);
+
   return (
     <div class="config-page">
       <h2>VSC Configuration</h2>
@@ -177,8 +189,19 @@ export default function VSC() {
       </button>
 
       <h3>Audio over IP</h3>
+      <label class="key" for="sample-rate">
+        Sample Rate:
+      </label>
+      <Selection
+        disabled={running}
+        id="sample-rate"
+        options={sampleRateOptions}
+        onSelection={setSampleRate}
+        value={sampleRate}
+      />
+
       <label class="key" for="audio-nic">
-        Network Interface:
+        Multicast Interface:
       </label>
       <Selection
         disabled={running}

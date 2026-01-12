@@ -46,6 +46,8 @@ pub const AES_VSC_ERROR_INVALID_PTP_CONFIG: u8 = 0x0D;
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct Aes67VscReceiverConfig<'a> {
+    /// Unique receiver ID
+    id: u32,
     /// Name of the receiver. Technically this does not have to be unique but stats are reported by receiver name,
     /// so giving the same name to multiple receivers at the same time will make those hard to interpret.
     name: Option<char_p::Ref<'a>>,

@@ -3,7 +3,6 @@ use std::io;
 use aes67_rs::error::VscApiError;
 use axum::{http::StatusCode, response::IntoResponse};
 use miette::{Diagnostic, Report};
-use serde_json::error;
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 use worterbuch::error::WorterbuchAppError;
@@ -82,5 +81,24 @@ impl From<ManagementAgentError> for (StatusCode, String) {
                 (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
             }
         }
+    }
+}
+
+pub trait LogError<T, E> {
+    fn log_error(self, context: &str) -> Result<T, E>;
+}
+
+impl<T, E> LogError<T, E> for Result<T, E>
+where
+    E: std::fmt::Display,
+{
+    fn log_error(self, context: &str) -> Result<T, E> {
+        match &self {
+            Ok(_) => {}
+            Err(e) => {
+                tracing::error!("{}: {}", context, e);
+            }
+        }
+        self
     }
 }

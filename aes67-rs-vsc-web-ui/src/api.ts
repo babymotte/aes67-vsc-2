@@ -38,19 +38,88 @@ export async function createSender(id: number): Promise<void> {
   const url = "/api/v1/vsc/tx/create";
   const response = await fetch(url, {
     method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ id }),
   });
 
   if (!response.ok) {
     throw new Error(`Failed to create sender: ${response.statusText}`);
   }
 }
+
 export async function createReceiver(id: number): Promise<void> {
   const url = "/api/v1/vsc/rx/create";
   const response = await fetch(url, {
     method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ id }),
   });
 
   if (!response.ok) {
     throw new Error(`Failed to create receiver: ${response.statusText}`);
+  }
+}
+
+export async function updateSender(id: number): Promise<void> {
+  const url = "/api/v1/vsc/tx/update";
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ id }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to update sender: ${response.statusText}`);
+  }
+}
+
+export async function updateReceiver(id: number): Promise<void> {
+  const url = "/api/v1/vsc/rx/update";
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ id }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to update receiver: ${response.statusText}`);
+  }
+}
+
+export async function deleteSender(id: number): Promise<void> {
+  const url = "/api/v1/vsc/tx/delete";
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ id }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to delete sender: ${response.statusText}`);
+  }
+}
+
+export async function deleteReceiver(id: number): Promise<void> {
+  const url = "/api/v1/vsc/rx/delete";
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ id }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to delete receiver: ${response.statusText}`);
   }
 }

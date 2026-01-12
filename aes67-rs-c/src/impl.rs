@@ -90,7 +90,11 @@ fn try_init() -> VscInternalResult<Config> {
 impl<'a> TryFrom<&Aes67VscReceiverConfig<'a>> for ReceiverConfig {
     type Error = ConfigError;
     fn try_from(value: &Aes67VscReceiverConfig<'a>) -> ConfigResult<Self> {
-        let id = value.name.map(|it| it.to_string());
+        let id = value.id;
+        let label = value
+            .name
+            .map(|it| it.to_string())
+            .unwrap_or_else(|| id.to_string());
         let session = SdpWrapper(
             SessionDescription::unmarshal(&mut Cursor::new(value.sdp.to_str()))
                 .map_err(|e| ConfigError::InvalidSdp(e.to_string()))?,
@@ -100,6 +104,7 @@ impl<'a> TryFrom<&Aes67VscReceiverConfig<'a>> for ReceiverConfig {
 
         Ok(ReceiverConfig {
             id,
+            label,
             session,
             link_offset,
             delay_calculation_interval,

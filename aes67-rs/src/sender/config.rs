@@ -22,7 +22,8 @@ use std::net::SocketAddr;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SenderConfig {
-    pub id: String,
+    pub id: u32,
+    pub label: String,
     pub audio_format: AudioFormat,
     pub target: SocketAddr,
     pub payload_type: u8,
@@ -31,7 +32,8 @@ pub struct SenderConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TxDescriptor {
-    pub id: String,
+    pub id: u32,
+    pub label: String,
     pub audio_format: AudioFormat,
     pub payload_type: u8,
     pub channel_labels: Vec<Option<String>>,
@@ -46,7 +48,8 @@ impl TryFrom<&SenderConfig> for TxDescriptor {
             .map(|it| it.map(|it| it.to_owned()))
             .collect::<Vec<Option<String>>>();
         Ok(Self {
-            id: value.id.clone(),
+            id: value.id,
+            label: value.label.clone(),
             audio_format: value.audio_format,
             payload_type: value.payload_type,
             channel_labels: labels,

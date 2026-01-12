@@ -73,6 +73,15 @@ pub enum VscApiError {
     NotRunning,
     #[error("Worterbuch error: {0}")]
     WorterbuchError(#[from] ConnectionError),
+    #[error("Sender configuration is incomplete: {0}")]
+    SenderConfigIncomplete(&'static str),
+    #[error("Receiver configuration is incomplete: {0}")]
+    ReceiverConfigIncomplete(&'static str),
+    #[error("Invalid IP address: {0}")]
+    AddrParseError(#[from] AddrParseError),
+
+    #[error("Not implemented yet.")]
+    NotImplemented,
 }
 
 #[derive(Error, Debug, Diagnostic)]
@@ -129,6 +138,8 @@ pub enum SenderInternalError {
     ShutdownTriggered,
     #[error("Error in sender: {0}")]
     ChildAppError(#[from] ChildAppError),
+    #[error("Sender with ID {0} does not exist.")]
+    NoSuchSender(u32),
 }
 
 #[derive(Error, Debug, Diagnostic)]
@@ -145,6 +156,8 @@ pub enum ReceiverInternalError {
     WatchError(#[from] watch::error::RecvError),
     #[error("Error in receiver: {0}")]
     ChildAppError(#[from] ChildAppError),
+    #[error("Receiver with ID {0} does not exist.")]
+    NoSuchReceiver(u32),
 }
 
 #[derive(Error, Debug, Diagnostic)]
@@ -351,6 +364,10 @@ impl GetErrorCode for VscApiError {
             VscApiError::AlreadyRunning => error!("VSC is already running"),
             VscApiError::NotRunning => error!("VSC is not running"),
             VscApiError::WorterbuchError(e) => error!("{:?}", e),
+            VscApiError::SenderConfigIncomplete(_) => error!("{:?}", self),
+            VscApiError::ReceiverConfigIncomplete(_) => error!("{:?}", self),
+            VscApiError::AddrParseError(e) => error!("{:?}", e),
+            VscApiError::NotImplemented => error!("{:?}", self),
         }
         // TODO
         3

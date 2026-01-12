@@ -38,11 +38,11 @@ pub async fn start_recording(
 ) -> miette::Result<()> {
     // TODO evaluate client status
     let (client, status) =
-        Client::new(&descriptor.id, ClientOptions::default()).into_diagnostic()?;
+        Client::new(&descriptor.label, ClientOptions::default()).into_diagnostic()?;
 
     info!(
         "JACK client '{}' created with status {:?}",
-        descriptor.id, status
+        descriptor.label, status
     );
 
     let mut ports = vec![];
@@ -61,7 +61,7 @@ pub async fn start_recording(
     let send_buffer = vec![0.0; send_buffer_len].into();
 
     let (tx, notifications) = mpsc::channel(1024);
-    let client_id = descriptor.id.clone();
+    let client_id = descriptor.label.clone();
     let notification_handler = SessionManagerNotificationHandler { client_id, tx };
     let process_handler_state = State {
         app_id: app_id.clone(),
