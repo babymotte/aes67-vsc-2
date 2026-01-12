@@ -1,0 +1,16 @@
+.running-indicator {
+  display: flex;
+  flex-direction: row;
+  gap: 1em;
+  padding: 0.2em 0.5em;
+  justify-content: space-between;
+}
+
+.indicator {
+  color: #af4c4c;
+  font-size: smaller;
+}
+
+.indicator.active {
+  color: #4caf50;
+}

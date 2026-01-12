@@ -149,23 +149,6 @@ ul.main-menu li.selected {
   justify-content: flex-start;
 }
 
-.running-indicator {
-  display: flex;
-  flex-direction: row;
-  gap: 0.5em;
-  padding: 0.2em 0.5em;
-  justify-content: space-between;
-}
-
-.indicator {
-  color: #af4c4c;
-  font-size: smaller;
-}
-
-.indicator.active {
-  color: #4caf50;
-}
-
 .config-page {
   display: grid;
   grid-template-columns: 1fr 1fr;

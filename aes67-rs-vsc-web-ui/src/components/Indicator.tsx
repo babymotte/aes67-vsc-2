@@ -1,4 +1,5 @@
 import type { Accessor } from "solid-js";
+import "./Indicator.css";
 
 export default function Indicator(props: {
   onLabel: string;

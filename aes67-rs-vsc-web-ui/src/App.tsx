@@ -5,7 +5,7 @@ import {
   createSignal,
   type Accessor,
   type Setter,
-  createEffect,
+  For,
 } from "solid-js";
 import Receivers from "./components/Receivers/Receivers";
 import Senders from "./components/Senders/Senders";
@@ -109,24 +109,26 @@ function SessionList(props: { tabSignal: [Accessor<number>, Setter<number>] }) {
 
   return (
     <div class="dropdown-menu" classList={{ open: senderListOpen() }}>
-      {sessions().map((session) => (
-        <div
-          class="menuitem"
-          onclick={() =>
-            addReceiver(
-              props.tabSignal[1],
-              session.name,
-              session.channels,
-              false,
-              session.sampleFormat,
-              session.destinationIp,
-              session.destinationPort
-            )
-          }
-        >
-          {session.name}
-        </div>
-      ))}
+      <For each={sessions()}>
+        {(session) => (
+          <div
+            class="menuitem"
+            onclick={() => {
+              addReceiver(
+                props.tabSignal[1],
+                session.name,
+                session.channels,
+                false,
+                session.sampleFormat,
+                session.destinationIp,
+                session.destinationPort
+              );
+            }}
+          >
+            {session.name}
+          </div>
+        )}
+      </For>
     </div>
   );
 }

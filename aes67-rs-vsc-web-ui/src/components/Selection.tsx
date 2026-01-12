@@ -1,4 +1,4 @@
-import type { Accessor } from "solid-js";
+import { For, type Accessor } from "solid-js";
 
 export default function Selection<
   T extends string | number | string[] | undefined
@@ -42,11 +42,13 @@ export default function Selection<
         value={props.value()}
         disabled={props.disabled ? props.disabled() : false}
       >
-        {props.options().map(([value, label, disabled]) => (
-          <option value={value} disabled={disabled}>
-            {label}
-          </option>
-        ))}
+        <For each={props.options()}>
+          {([value, label, disabled]) => (
+            <option value={value} disabled={disabled}>
+              {label}
+            </option>
+          )}
+        </For>
       </select>
     </>
   );

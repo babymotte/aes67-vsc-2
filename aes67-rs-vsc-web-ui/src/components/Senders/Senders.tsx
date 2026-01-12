@@ -11,8 +11,14 @@ import {
 } from "solid-js";
 import { pSubscribe } from "../../worterbuch";
 import { appName } from "../../vscState";
-import { sortSenders, transceiverLabel } from "../../utils";
+import {
+  createWbSignal,
+  sortSenders,
+  transceiverID,
+  transceiverLabel,
+} from "../../utils";
 import Editor from "./Editor";
+import Indicator from "../Indicator";
 
 export default function Senders(props: {
   tabSignal: [Accessor<number>, Setter<number>];
@@ -39,19 +45,34 @@ export default function Senders(props: {
     }
   });
 
+  function SenderTab(props: {
+    sender: [string, string];
+    index: Accessor<number>;
+  }) {
+    const [running] = createWbSignal(
+      `${appName()}/tx/${transceiverID(props.sender)}/running`,
+      false
+    );
+    return (
+      <li
+        classList={{ selected: tab() === props.index() }}
+        onClick={updateTab(props.index())}
+      >
+        <Indicator
+          onLabel={transceiverLabel(props.sender)}
+          offLabel={transceiverLabel(props.sender)}
+          on={running}
+        />
+      </li>
+    );
+  }
+
   return (
     <div class="tab-content">
       <div class="sub-menu">
         <ul>
           <For each={sortedSenders()}>
-            {(sender, index) => (
-              <li
-                classList={{ selected: tab() === index() }}
-                onClick={updateTab(index())}
-              >
-                {transceiverLabel(sender)}
-              </li>
-            )}
+            {(sender, index) => <SenderTab sender={sender} index={index} />}
           </For>
         </ul>
       </div>
