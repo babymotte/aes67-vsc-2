@@ -1,8 +1,28 @@
 use pnet::datalink::{self, NetworkInterface};
 use std::{mem, time::Duration};
 use tokio::{select, spawn, sync::mpsc, time::interval};
-use tracing::info;
 use worterbuch_client::{Worterbuch, topic};
+
+// Linux ethtool constants for hardware timestamping queries
+const ETHTOOL_GET_TS_INFO: u32 = 0x00000041;
+const SIOCETHTOOL: u64 = 0x8946;
+
+#[repr(C)]
+struct EthtoolTsInfo {
+    cmd: u32,
+    so_timestamping: u32,
+    phc_index: i32,
+    tx_types: u32,
+    tx_reserved: [u32; 3],
+    rx_filters: u32,
+    rx_reserved: [u32; 3],
+}
+
+#[repr(C)]
+struct Ifreq {
+    ifr_name: [u8; 16],
+    ifr_data: *mut EthtoolTsInfo,
+}
 
 #[derive(Clone)]
 pub struct Handle(mpsc::Sender<Option<()>>);
@@ -85,6 +105,15 @@ async fn refresh(app_id: &str, known_interfaces: &mut Vec<InfWrapper>, wb: &Wort
             )
             .await
             .ok();
+
+            let ptp_enabled = has_ptpv2_phc(&interface.0).unwrap_or(false);
+
+            wb.set_async(
+                topic!(app_id, "networkInterfaces", interface.0.name, "ptp"),
+                ptp_enabled,
+            )
+            .await
+            .ok();
         }
     }
 
@@ -95,4 +124,70 @@ fn state(netinf: &NetworkInterface) -> (bool, bool) {
     let use_inf = !netinf.is_loopback() && netinf.mac.is_some() && netinf.is_multicast();
     let active = netinf.is_up() && netinf.is_running() && !netinf.ips.is_empty();
     (use_inf, active)
+}
+
+/// Checks if a network interface has a PTPv2 compatible PHC (Precision Hardware Clock).
+///
+/// Returns `Ok(true)` if the interface has a valid PHC, `Ok(false)` if it doesn't,
+/// or an error if the check fails.
+///
+/// # Arguments
+/// * `interface` - The network interface to check
+///
+/// # Returns
+/// * `Ok(true)` - Interface has a PTPv2 compatible PHC (phc_index >= 0)
+/// * `Ok(false)` - Interface does not have a PHC (phc_index < 0)
+/// * `Err` - Failed to query the interface
+pub fn has_ptpv2_phc(interface: &NetworkInterface) -> std::io::Result<bool> {
+    use std::os::unix::io::RawFd;
+
+    // Create a UDP socket for ioctl operations
+    let sock = unsafe { libc::socket(libc::AF_INET, libc::SOCK_DGRAM, 0) };
+    if sock < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+
+    // Ensure socket is closed when function exits
+    let _guard = scopeguard::guard(sock, |fd| unsafe {
+        libc::close(fd);
+    });
+
+    // Prepare the interface name (max 15 chars + null terminator)
+    let mut ifr_name = [0u8; 16];
+    let name_bytes = interface.name.as_bytes();
+    let copy_len = name_bytes.len().min(15);
+    ifr_name[..copy_len].copy_from_slice(&name_bytes[..copy_len]);
+
+    // Prepare ethtool timestamp info structure
+    let mut ts_info = EthtoolTsInfo {
+        cmd: ETHTOOL_GET_TS_INFO,
+        so_timestamping: 0,
+        phc_index: -1,
+        tx_types: 0,
+        tx_reserved: [0; 3],
+        rx_filters: 0,
+        rx_reserved: [0; 3],
+    };
+
+    // Prepare ifreq structure
+    let mut ifr = Ifreq {
+        ifr_name,
+        ifr_data: &mut ts_info as *mut EthtoolTsInfo,
+    };
+
+    // Perform the ioctl call
+    let result = unsafe {
+        libc::ioctl(
+            sock as RawFd,
+            SIOCETHTOOL as libc::c_ulong,
+            &mut ifr as *mut Ifreq,
+        )
+    };
+
+    if result < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+
+    // A phc_index >= 0 indicates a valid PHC device
+    Ok(ts_info.phc_index >= 0)
 }
