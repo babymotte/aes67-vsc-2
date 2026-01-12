@@ -4,6 +4,7 @@ import "./index.css";
 import { Route, Router } from "@solidjs/router";
 import App from "./App";
 import { Worterbuch } from "./worterbuch";
+import { VscState } from "./vscState";
 
 const wrapper = document.getElementById("root");
 
@@ -15,6 +16,7 @@ render(
   () => (
     <>
       <Worterbuch />
+      <VscState />
       <Router>
         <Route path="/rx" component={() => <App tab={1} />} />
         <Route path="/config" component={() => <App tab={2} />} />

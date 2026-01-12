@@ -6,14 +6,18 @@ import {
   Suspense,
   Switch,
   useTransition,
+  type Accessor,
+  type Setter,
 } from "solid-js";
 import { pSubscribe } from "../../worterbuch";
 import { appName } from "../../vscState";
 import { sortReceivers, transceiverLabel } from "../../utils";
 import Editor from "./Editor";
 
-export default function Receivers() {
-  const [tab, setTab] = createSignal(0);
+export default function Receivers(props: {
+  tabSignal: [Accessor<number>, Setter<number>];
+}) {
+  const [tab, setTab] = props.tabSignal;
   const [pending, start] = useTransition();
   const [receivers, setReceivers] = createSignal<Map<string, string>>(
     new Map()
@@ -29,6 +33,12 @@ export default function Receivers() {
 
   createEffect(() => {
     setSortedReceivers(sortReceivers(Array.from(receivers().entries())));
+  });
+
+  createEffect(() => {
+    if (tab() >= sortedReceivers().length) {
+      setTimeout(() => setTab(sortedReceivers().length - 1), 100);
+    }
   });
 
   return (

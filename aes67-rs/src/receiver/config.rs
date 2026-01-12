@@ -17,7 +17,10 @@
 
 use crate::{
     error::{ConfigError, ConfigResult},
-    formats::{self, AudioFormat, FrameFormat, Frames, MilliSeconds, Seconds},
+    formats::{
+        self, AudioFormat, FrameFormat, Frames, FramesPerSecond, MilliSeconds, SampleFormat,
+        Seconds,
+    },
     time::MICROS_PER_MILLI_F,
 };
 use aes67_rs_sdp::SdpWrapper;
@@ -263,5 +266,145 @@ impl RxDescriptor {
 
     pub fn frames_to_duration_float(&self, frames: f64) -> Duration {
         formats::frames_to_duration_float(frames, self.audio_format.sample_rate)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionInfo {
+    pub id: SessionId,
+    pub name: String,
+    pub destination_ip: IpAddr,
+    pub destination_port: u16,
+    pub channels: usize,
+    pub sample_format: SampleFormat,
+    pub sample_rate: FramesPerSecond,
+    pub packet_time: MilliSeconds,
+}
+
+impl TryFrom<&SessionDescription> for SessionInfo {
+    type Error = ConfigError;
+
+    fn try_from(sd: &SessionDescription) -> Result<Self, Self::Error> {
+        let media = if let Some(it) = sd.media_descriptions.first() {
+            it
+        } else {
+            return Err(ConfigError::InvalidSdp(
+                "no media description found".to_owned(),
+            ));
+        };
+
+        let fmt = if let Some(format) = media.media_name.formats.first() {
+            format
+        } else {
+            return Err(ConfigError::InvalidSdp("no media format found".to_owned()));
+        };
+
+        // TODO make sure the right rtpmap is picked in case there is more than one
+        let rtpmap = if let Some(Some(it)) = media.attribute("rtpmap") {
+            it
+        } else {
+            return Err(ConfigError::InvalidSdp("no rtpmap found".to_owned()));
+        };
+
+        let (payload_type, sample_format, sample_rate, channels) =
+            if let Some(caps) = RTPMAP_REGEX.captures(rtpmap) {
+                (
+                    caps[1].to_owned(),
+                    caps[2].parse()?,
+                    caps[3].parse().expect("regex guarantees this is a number"),
+                    caps[4].parse().expect("regex guarantees this is a number"),
+                )
+            } else {
+                return Err(ConfigError::InvalidSdp("malformed rtpmap".to_owned()));
+            };
+
+        let no_labels = || {
+            let mut v = vec![];
+            for _ in 0..channels {
+                v.push(None);
+            }
+            v
+        };
+
+        let channel_labels = if let Some(i) = &sd.session_information {
+            if let Some(caps) = CHANNELS_REGEX.captures(i) {
+                caps[2].split(", ").map(|it| Some(it.to_owned())).collect()
+            } else {
+                no_labels()
+            }
+        } else {
+            no_labels()
+        };
+
+        if &payload_type != fmt {
+            return Err(ConfigError::InvalidSdp(
+                "rtpmap and media description payload types do not match".to_owned(),
+            ));
+        }
+
+        let packet_time = if let Some(ptime) = media
+            .attribute("ptime")
+            .and_then(|it| it)
+            .and_then(|p| p.parse().ok())
+        {
+            ptime
+        } else {
+            return Err(ConfigError::InvalidSdp("no ptime".to_owned()));
+        };
+
+        let name = sd.session_name.clone();
+        let session_id = sd.origin.session_id;
+        let session_version = sd.origin.session_version;
+
+        let frame_format = FrameFormat {
+            channels,
+            sample_format,
+        };
+        let audio_format = AudioFormat {
+            frame_format,
+            sample_rate,
+        };
+        let session_id = SessionId {
+            id: session_id,
+            version: session_version,
+        };
+
+        let global_c = sd.connection_information.as_ref();
+        let destination_address = media
+            .connection_information
+            .as_ref()
+            .or(global_c)
+            .ok_or_else(|| {
+                ConfigError::InvalidSdp(format!("no connection information for media {media:?}"))
+            })?
+            .address
+            .as_ref()
+            .ok_or_else(|| ConfigError::InvalidSdp("no address for media".to_owned()))?
+            .address
+            .to_owned();
+        let mut split = destination_address.split('/');
+        let ip = split.next();
+        let prefix = split.next();
+        let destination_ip: IpAddr = if let (Some(ip), Some(_prefix)) = (ip, prefix) {
+            ip.parse()?
+        } else {
+            return Err(ConfigError::InvalidSdp(format!(
+                "invalid ip address: {destination_address}"
+            )));
+        };
+
+        let destination_port = media.media_name.port.value.to_owned() as u16;
+
+        Ok(SessionInfo {
+            id: session_id,
+            name,
+            channels,
+            destination_ip,
+            destination_port,
+            packet_time,
+            sample_format: audio_format.frame_format.sample_format,
+            sample_rate: audio_format.sample_rate,
+        })
     }
 }

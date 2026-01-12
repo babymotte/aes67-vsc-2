@@ -196,6 +196,8 @@ ul.main-menu li.selected {
 
 .config-page .separator {
   grid-column: span 2;
+  border-top: 1px solid #444;
+  margin: 0.5em 0;
 }
 
 .icon-label {
@@ -204,4 +206,39 @@ ul.main-menu li.selected {
   align-items: center;
   justify-content: center;
   gap: 0.5em;
+}
+
+input.invalid,
+input.invalid:focus,
+input.invalid:focus-visible,
+input.invalid:focus-within,
+input.invalid:hover,
+input.invalid:active {
+  color: #ff4c4c;
+  border: 2px solid #ff4c4c;
+  border-radius: 4px;
+}
+
+.dropdown-menu {
+  display: none;
+  position: absolute;
+  box-shadow: 0px 8px 16px 0px rgba(0, 0, 0, 0.2);
+  z-index: 1;
+  background-color: #242424;
+  flex-direction: column;
+}
+
+.dropdown-menu.open {
+  text-decoration: none;
+  display: flex;
+}
+
+.menuitem {
+  padding: 12px 16px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.menuitem:hover {
+  background-color: #333;
 }

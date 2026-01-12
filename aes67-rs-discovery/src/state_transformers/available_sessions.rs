@@ -33,7 +33,7 @@ pub async fn start(
 
     let sessions_by_name = HashMap::new();
 
-    ProcessLopp {
+    ProcessLoop {
         worterbuch_client,
         sessions_by_name,
     }
@@ -43,12 +43,12 @@ pub async fn start(
     Ok(())
 }
 
-struct ProcessLopp {
+struct ProcessLoop {
     worterbuch_client: Worterbuch,
     sessions_by_name: HashMap<String, Session>,
 }
 
-impl ProcessLopp {
+impl ProcessLoop {
     async fn start(
         mut self,
         subsys: &mut SubsystemHandle,

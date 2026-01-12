@@ -1,11 +1,12 @@
 use crate::{Session, error::DiscoveryResult};
+use aes67_rs::receiver::config::SessionInfo;
 use std::{
     collections::{BTreeSet, HashMap, hash_map::Entry},
     time::Duration,
 };
 use tokio::{select, sync::mpsc};
 use tokio_graceful_shutdown::SubsystemHandle;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 use worterbuch_client::{TypedPStateEvent, Worterbuch, topic};
 
 pub async fn start(
@@ -26,7 +27,7 @@ pub async fn start(
 
     let sessions_by_name = HashMap::new();
 
-    ProcessLopp {
+    ProcessLoop {
         worterbuch_client,
         sessions_by_id: sessions_by_name,
         instance_name,
@@ -37,13 +38,13 @@ pub async fn start(
     Ok(())
 }
 
-struct ProcessLopp {
+struct ProcessLoop {
     worterbuch_client: Worterbuch,
     sessions_by_id: HashMap<u64, BTreeSet<Session>>,
     instance_name: String,
 }
 
-impl ProcessLopp {
+impl ProcessLoop {
     async fn start(
         mut self,
         subsys: &mut SubsystemHandle,
@@ -101,6 +102,27 @@ impl ProcessLopp {
                 &latest.description,
             )
             .await?;
+        self.worterbuch_client
+            .set_async(
+                topic!(self.instance_name, "discovery", "sessions", id, "name"),
+                &latest.description.session_name,
+            )
+            .await?;
+
+        match SessionInfo::try_from(&latest.description.0) {
+            Ok(session) => {
+                self.worterbuch_client
+                    .set_async(
+                        topic!(self.instance_name, "discovery", "sessions", id, "config"),
+                        session,
+                    )
+                    .await?;
+            }
+            Err(err) => warn!(
+                "Failed to convert SessionDescription to SessionInfo: {}",
+                err
+            ),
+        }
 
         Ok(())
     }
@@ -124,10 +146,47 @@ impl ProcessLopp {
                             &latest.description,
                         )
                         .await?;
+
+                    self.worterbuch_client
+                        .set_async(
+                            topic!(self.instance_name, "discovery", "sessions", id, "name"),
+                            &latest.description.session_name,
+                        )
+                        .await?;
+
+                    match SessionInfo::try_from(&latest.description.0) {
+                        Ok(session) => {
+                            self.worterbuch_client
+                                .set_async(
+                                    topic!(
+                                        self.instance_name,
+                                        "discovery",
+                                        "sessions",
+                                        id,
+                                        "config"
+                                    ),
+                                    session,
+                                )
+                                .await?;
+                        }
+                        Err(err) => warn!(
+                            "Failed to convert SessionDescription to SessionInfo: {}",
+                            err
+                        ),
+                    }
                 }
                 None => {
                     self.worterbuch_client
                         .delete_async(topic!(self.instance_name, "discovery", "sessions", id))
+                        .await?;
+                    self.worterbuch_client
+                        .delete_async(topic!(
+                            self.instance_name,
+                            "discovery",
+                            "sessions",
+                            id,
+                            "name"
+                        ))
                         .await?;
                     e.remove();
                 }

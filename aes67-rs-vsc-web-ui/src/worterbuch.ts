@@ -66,14 +66,16 @@ export function Worterbuch() {
   return null;
 }
 
-export function subscribe<T extends Value>(key: string, cb: StateCallback<T>) {
+export function subscribe<T extends Value>(
+  key: string,
+  cb: StateCallback<T>,
+  unique = true
+) {
   const [tid, setTid] = createSignal<TransactionID | null>(null);
   createEffect(() => {
     const wb = wbClient();
     if (wb) {
-      console.log(`Subscribing to '${key}'`);
-
-      setTid(wb.subscribe(key, cb));
+      setTid(wb.subscribe(key, cb, unique));
     }
   });
   onCleanup(() => {
