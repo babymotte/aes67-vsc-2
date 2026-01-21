@@ -15,7 +15,7 @@ use aes67_rs::{
     app::{propagate_exit, spawn_child_app},
     config::Config,
     error::{VscApiError, VscApiResult},
-    formats::{AudioFormat, FrameFormat},
+    formats::{AudioFormat, FrameFormat, Seconds},
     nic::find_nic_with_name,
     receiver::config::ReceiverConfig,
     sender::config::SenderConfig,
@@ -422,8 +422,91 @@ impl<'a> VscApiActor<'a> {
     }
 
     async fn fetch_receiver_config(&self, id: u32) -> VscApiResult<ReceiverConfig> {
-        // TODO implement
-        Err(VscApiError::NotImplemented)
+        let label = self
+            .config_param(
+                topic!(self.app_id, "config", "rx", "receivers", id, "name"),
+                "receiver name not configured",
+            )
+            .await
+            .unwrap_or_else(|_| id.to_string());
+
+        let channels = self
+            .config_param(
+                topic!(self.app_id, "config", "rx", "receivers", id, "channels"),
+                "receiver channels not configured",
+            )
+            .await?;
+        let sample_rate = self
+            .config_param(
+                topic!(self.app_id, "config", "audio", "sampleRate"),
+                "audio sample rate not configured",
+            )
+            .await?;
+        let sample_format = self
+            .config_param(
+                topic!(self.app_id, "config", "rx", "receivers", id, "sampleFormat"),
+                "receiver sample format not configured",
+            )
+            .await?;
+
+        let frame_format = FrameFormat {
+            channels,
+            sample_format,
+        };
+        let audio_format = AudioFormat {
+            sample_rate,
+            frame_format,
+        };
+        let source_ip = self
+            .config_param::<String>(
+                topic!(self.app_id, "config", "rx", "receivers", id, "sourceIP"),
+                "receiver source IP not configured",
+            )
+            .await?
+            .parse()?;
+        let source_port = self
+            .config_param(
+                topic!(self.app_id, "config", "rx", "receivers", id, "sourcePort"),
+                "receiver source port not configured",
+            )
+            .await?;
+        let source = SocketAddr::new(source_ip, source_port);
+        // TODO how do we manage payload type correctly?
+        let payload_type = 97;
+        // TODO fetch channel labels from worterbuch
+        let channel_labels = None;
+
+        let delay_calculation_interval = self
+            .wb
+            .get::<Seconds>(topic!(self.app_id, "config", "delayCalculationInterval"))
+            .await?;
+
+        let link_offset = self
+            .config_param(
+                topic!(self.app_id, "config", "rx", "receivers", id, "linkOffset"),
+                "receiver link offset not configured",
+            )
+            .await?;
+
+        let rtp_offset = self
+            .config_param(
+                topic!(self.app_id, "config", "rx", "receivers", id, "rtpOffset"),
+                "receiver rtp offset not configured",
+            )
+            .await?;
+
+        let config = ReceiverConfig {
+            id,
+            audio_format,
+            channel_labels,
+            delay_calculation_interval,
+            label,
+            link_offset,
+            payload_type,
+            rtp_offset,
+            source,
+        };
+        Ok(config)
     }
 
     async fn config_param<T: DeserializeOwned>(

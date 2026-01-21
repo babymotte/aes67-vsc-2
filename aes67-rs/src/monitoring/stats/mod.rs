@@ -137,12 +137,12 @@ impl<'a> StatsActor<'a> {
         match s {
             ReceiverState::Created {
                 id,
-                descriptor,
+                config,
                 label: _,
                 address,
             } => {
                 self.rx_stats(id.to_owned())
-                    .process(RxStats::Started(descriptor.to_owned(), address.to_owned()))
+                    .process(RxStats::Started(config.to_owned(), address.to_owned()))
                     .await;
             }
             ReceiverState::Renamed { id: _, label: _ } => (),

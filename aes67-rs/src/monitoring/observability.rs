@@ -23,7 +23,7 @@ use crate::{
         SenderHealthReport, SenderState, SenderStatsReport, StateEvent, StatsReport,
         VscHealthReport, VscState, VscStatsReport,
     },
-    receiver::config::RxDescriptor,
+    receiver::config::ReceiverConfig,
     sender::config::TxDescriptor,
     utils::publish_individual,
 };
@@ -72,7 +72,7 @@ struct SenderData {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ReceiverData {
-    config: RxDescriptor,
+    config: ReceiverConfig,
     stats: ReceiverStats,
     label: String,
     address: AudioBufferPointer,
@@ -185,13 +185,10 @@ impl<'a> ObservabilityActor<'a> {
         match e {
             ReceiverState::Created {
                 id: name,
-                descriptor,
+                config,
                 label,
                 address,
-            } => {
-                self.receiver_created(name, label, descriptor, address)
-                    .await
-            }
+            } => self.receiver_created(name, label, config, address).await,
             ReceiverState::Renamed { id, label } => self.receiver_renamed(id, label).await,
             ReceiverState::Destroyed { id: name } => self.receiver_destroyed(name).await,
         }
@@ -254,11 +251,11 @@ impl<'a> ObservabilityActor<'a> {
         &mut self,
         qualified_id: String,
         label: String,
-        descriptor: RxDescriptor,
+        config: ReceiverConfig,
         address: AudioBufferPointer,
     ) {
         let data = ReceiverData {
-            config: descriptor.clone(),
+            config: config.clone(),
             stats: ReceiverStats::default(),
             label,
             address,
@@ -464,7 +461,7 @@ impl<'a> ObservabilityActor<'a> {
         publish_individual(&self.wb, topic!(qualified_id), data).await;
     }
 
-    async fn publish_receiver_config(&self, qualified_id: &str, config: RxDescriptor) {
+    async fn publish_receiver_config(&self, qualified_id: &str, config: ReceiverConfig) {
         publish_individual(&self.wb, topic!(qualified_id, "config"), config).await;
     }
 

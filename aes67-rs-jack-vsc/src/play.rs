@@ -4,7 +4,7 @@ use crate::{
 };
 use aes67_rs::{
     monitoring::Monitoring,
-    receiver::{api::ReceiverApi, config::RxDescriptor},
+    receiver::{api::ReceiverApi, config::ReceiverConfig},
     time::{Clock, MILLIS_PER_SEC_F},
 };
 use jack::{
@@ -21,7 +21,7 @@ struct State {
     ports: Vec<Port<AudioOut>>,
     receiver: ReceiverApi,
     clock: JackClock,
-    descriptor: RxDescriptor,
+    config: ReceiverConfig,
     muted: bool,
     monitoring: Monitoring,
     shutdown_token: CancellationToken,
@@ -34,24 +34,33 @@ pub async fn start_playout(
     app_id: String,
     subsys: &mut SubsystemHandle,
     receiver: ReceiverApi,
-    descriptor: RxDescriptor,
+    config: ReceiverConfig,
     clock: Clock,
     monitoring: Monitoring,
     async_runtime: Handle,
 ) -> miette::Result<()> {
     // TODO evaluate client status
     let (client, status) =
-        Client::new(&descriptor.id, ClientOptions::default()).into_diagnostic()?;
+        Client::new(&config.label, ClientOptions::default()).into_diagnostic()?;
 
     info!(
         "JACK client '{}' created with status {:?}",
-        descriptor.id, status
+        config.id, status
     );
 
     let mut ports = vec![];
 
-    for (i, l) in descriptor.channel_labels.iter().enumerate() {
-        let label = l.to_owned().unwrap_or(format!("out{}", i + 1));
+    for l in config
+        .channel_labels
+        .clone()
+        .unwrap_or_else(|| {
+            (0..config.audio_format.frame_format.channels)
+                .map(|i| format!("{}", i + 1))
+                .collect()
+        })
+        .iter()
+    {
+        let label = l.to_owned();
         ports.push(
             client
                 .register_port(&label, AudioOut::default())
@@ -60,13 +69,13 @@ pub async fn start_playout(
     }
 
     let (tx, notifications) = mpsc::channel(1024);
-    let client_id = descriptor.id.clone();
+    let client_id = config.label.clone();
     let notification_handler = SessionManagerNotificationHandler { client_id, tx };
     let process_handler_state = State {
         ports,
         receiver,
         clock: JackClock::new(clock),
-        descriptor,
+        config,
         muted: false,
         monitoring,
         shutdown_token: subsys.create_cancellation_token(),
@@ -107,7 +116,7 @@ fn process(state: &mut State, _: &Client, ps: &ProcessScope) -> Control {
     };
 
     // TODO read current link offset from dynamic config
-    let link_offset_frames = state.descriptor.frames_in_link_offset() as u64;
+    let link_offset_frames = state.config.frames_in_link_offset() as u64;
     let ingress_time = playout_time - link_offset_frames;
 
     let buffers = state.ports.iter_mut().map(|p| Some(p.as_mut_slice(ps)));

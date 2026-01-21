@@ -25,7 +25,7 @@ use crate::{
     error::{ChildAppError, ChildAppResult},
     formats::{Frames, MilliSeconds},
     monitoring::{health::health, observability::observability, stats::stats},
-    receiver::config::RxDescriptor,
+    receiver::config::ReceiverConfig,
     sender::config::TxDescriptor,
 };
 use rtp_rs::Seq;
@@ -88,7 +88,7 @@ pub enum SenderState {
 pub enum ReceiverState {
     Created {
         id: String,
-        descriptor: RxDescriptor,
+        config: ReceiverConfig,
         label: String,
         address: AudioBufferPointer,
     },
@@ -178,7 +178,7 @@ pub enum TxStats {
 
 #[derive(Debug, Clone)]
 pub enum RxStats {
-    Started(RxDescriptor, AudioBufferPointer),
+    Started(ReceiverConfig, AudioBufferPointer),
     BufferUnderrun,
     InconsistentTimestamp,
     PacketReceived {

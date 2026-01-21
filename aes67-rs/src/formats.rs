@@ -17,7 +17,7 @@
 
 use crate::{
     error::ConfigError,
-    receiver::config::RxDescriptor,
+    receiver::config::ReceiverConfig,
     time::{MICROS_PER_SEC, MILLIS_PER_SEC_F},
 };
 use serde::{Deserialize, Serialize};
@@ -80,8 +80,8 @@ impl AudioFormat {
     }
 }
 
-impl From<&RxDescriptor> for AudioFormat {
-    fn from(value: &RxDescriptor) -> Self {
+impl From<&ReceiverConfig> for AudioFormat {
+    fn from(value: &ReceiverConfig) -> Self {
         Self {
             sample_rate: value.audio_format.sample_rate,
             frame_format: value.into(),
@@ -96,8 +96,8 @@ pub struct FrameFormat {
     pub sample_format: SampleFormat,
 }
 
-impl From<&RxDescriptor> for FrameFormat {
-    fn from(value: &RxDescriptor) -> Self {
+impl From<&ReceiverConfig> for FrameFormat {
+    fn from(value: &ReceiverConfig) -> Self {
         Self {
             channels: value.audio_format.frame_format.channels,
             sample_format: value.audio_format.frame_format.sample_format,

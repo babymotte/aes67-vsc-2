@@ -1,10 +1,12 @@
 import {
   createWbSignal,
   invalidChannels,
-  invalidDestinationIP,
-  invalidDestinationPort,
+  invalidDestinationIP as invalidSourceIP,
+  invalidDestinationPort as invalidSourcePort,
   invalidSampleFormat,
   transceiverID,
+  invalidLinkOffset,
+  invalidRtpOffset,
 } from "../../utils";
 import { pDelete, set } from "../../worterbuch";
 import { appName } from "../../vscState";
@@ -17,29 +19,41 @@ import { createReceiver, deleteReceiver } from "../../api";
 export default function Editor(props: { receiver: [string, string] }) {
   const [name, setName] = createWbSignal<string, string>(
     `/config/rx/receivers/${transceiverID(props.receiver)}/name`,
-    props.receiver[1]
+    props.receiver[1],
   );
 
   const [channels, setChannels] = createWbSignal<string, number>(
     `/config/rx/receivers/${transceiverID(props.receiver)}/channels`,
     "0",
-    [(s) => parseInt(s, 10) || 0, (n) => n.toString()]
+    [(s) => parseInt(s, 10) || 0, (n) => n.toString()],
   );
 
   const [sampleFormat, setSampleFormat] = createWbSignal<string, string>(
     `/config/rx/receivers/${transceiverID(props.receiver)}/sampleFormat`,
-    "L24"
+    "L24",
   );
 
-  const [destinationIP, setDestinationIP] = createWbSignal<string, string>(
-    `/config/rx/receivers/${transceiverID(props.receiver)}/destinationIP`,
-    ""
+  const [sourceIP, setSourceIP] = createWbSignal<string, string>(
+    `/config/rx/receivers/${transceiverID(props.receiver)}/sourceIP`,
+    "",
   );
 
-  const [destinationPort, setDestinationPort] = createWbSignal<string, number>(
-    `/config/rx/receivers/${transceiverID(props.receiver)}/destinationPort`,
+  const [sourcePort, setSourcePort] = createWbSignal<string, number>(
+    `/config/rx/receivers/${transceiverID(props.receiver)}/sourcePort`,
     "0",
-    [(s) => parseInt(s, 10) || 0, (n) => n.toString()]
+    [(s) => parseInt(s, 10) || 0, (n) => n.toString()],
+  );
+
+  const [linkOffset, setLinkOffset] = createWbSignal<string, number>(
+    `/config/rx/receivers/${transceiverID(props.receiver)}/linkOffset`,
+    "4",
+    [(s) => parseInt(s, 10) || 0, (n) => n.toString()],
+  );
+
+  const [rtpOffset, setRtpOffset] = createWbSignal<string, number>(
+    `/config/rx/receivers/${transceiverID(props.receiver)}/rtpOffset`,
+    "0",
+    [(s) => parseInt(s, 10) || 0, (n) => n.toString()],
   );
 
   const [vscRunning] = createWbSignal<boolean, boolean>(`/running`, false);
@@ -49,8 +63,8 @@ export default function Editor(props: { receiver: [string, string] }) {
     const invalid =
       invalidChannels(channels()) ||
       invalidSampleFormat(sampleFormat()) ||
-      invalidDestinationIP(destinationIP()) ||
-      invalidDestinationPort(destinationPort());
+      invalidSourceIP(sourceIP()) ||
+      invalidSourcePort(sourcePort());
     setConfigInvalid(invalid);
   });
 
@@ -72,35 +86,47 @@ export default function Editor(props: { receiver: [string, string] }) {
     setSampleFormat(newSampleFormat || "L24");
   };
 
-  const updateDestinationIP = (e: Event) => {
+  const updateSourceIP = (e: Event) => {
     const input = e.target as HTMLInputElement;
-    const newDestination = input.value;
-    setDestinationIP(newDestination);
+    const newSource = input.value;
+    setSourceIP(newSource);
   };
 
-  const updateDestinationPort = (e: Event) => {
+  const updateSourcePort = (e: Event) => {
     const input = e.target as HTMLInputElement;
-    const newDestination = input.value;
-    setDestinationPort(newDestination);
+    const newSource = input.value;
+    setSourcePort(newSource);
+  };
+
+  const updateLinkOffset = (e: Event) => {
+    const input = e.target as HTMLInputElement;
+    const newSource = input.value;
+    setLinkOffset(newSource);
+  };
+
+  const updateRtpOffset = (e: Event) => {
+    const input = e.target as HTMLInputElement;
+    const newSource = input.value;
+    setRtpOffset(newSource);
   };
 
   const [running] = createWbSignal<boolean, boolean>(
     `/rx/${transceiverID(props.receiver)}/running`,
-    false
+    false,
   );
 
   const start = () => {
     console.log(`Starting receiver ${transceiverID(props.receiver)}...`);
     set(
       `${appName()}/config/rx/receivers/${transceiverID(
-        props.receiver
+        props.receiver,
       )}/autostart`,
-      true
+      true,
     );
 
     createReceiver(parseInt(transceiverID(props.receiver), 10)).catch((err) =>
       // TODO show error to user
-      console.error("Failed to start receiver:", err)
+      console.error("Failed to start receiver:", err),
     );
   };
 
@@ -108,14 +134,14 @@ export default function Editor(props: { receiver: [string, string] }) {
     console.log(`Stopping receiver ${transceiverID(props.receiver)}...`);
     set(
       `${appName()}/config/rx/receivers/${transceiverID(
-        props.receiver
+        props.receiver,
       )}/autostart`,
-      false
+      false,
     );
 
     deleteReceiver(parseInt(transceiverID(props.receiver), 10)).catch((err) =>
       // TODO show error to user
-      console.error("Failed to stop receiver:", err)
+      console.error("Failed to stop receiver:", err),
     );
   };
 
@@ -130,7 +156,7 @@ export default function Editor(props: { receiver: [string, string] }) {
   const deleteReceiverConfig = () => {
     // TODO show confirmation dialog
     pDelete(
-      `${appName()}/config/rx/receivers/${transceiverID(props.receiver)}/#`
+      `${appName()}/config/rx/receivers/${transceiverID(props.receiver)}/#`,
     );
   };
 
@@ -178,29 +204,55 @@ export default function Editor(props: { receiver: [string, string] }) {
         <option value="L24">24 Bit</option>
       </select>
 
-      <label class="key" for="destinationIP">
-        Destination IP:
+      <label class="key" for="sourceIP">
+        Source IP:
       </label>
       <input
-        classList={{ invalid: invalidDestinationIP(destinationIP()) }}
-        id="destinationIP"
+        classList={{ invalid: invalidSourceIP(sourceIP()) }}
+        id="sourceIP"
         type="text"
         inputmode="numeric"
-        value={destinationIP()}
-        onChange={updateDestinationIP}
+        value={sourceIP()}
+        onChange={updateSourceIP}
         disabled={running()}
       />
 
-      <label class="key" for="destinationPort">
-        Destination Port:
+      <label class="key" for="sourcePort">
+        Source Port:
       </label>
       <input
-        classList={{ invalid: invalidDestinationPort(destinationPort()) }}
-        id="destinationPort"
+        classList={{ invalid: invalidSourcePort(sourcePort()) }}
+        id="sourcePort"
         type="text"
         inputmode="numeric"
-        value={destinationPort()}
-        onChange={updateDestinationPort}
+        value={sourcePort()}
+        onChange={updateSourcePort}
+        disabled={running()}
+      />
+
+      <label class="key" for="linkOffset">
+        Link Offset:
+      </label>
+      <input
+        classList={{ invalid: invalidLinkOffset(linkOffset()) }}
+        id="linkOffset"
+        type="text"
+        inputmode="numeric"
+        value={linkOffset()}
+        onChange={updateLinkOffset}
+        disabled={running()}
+      />
+
+      <label class="key" for="rtpOffset">
+        RTP Offset:
+      </label>
+      <input
+        classList={{ invalid: invalidRtpOffset(rtpOffset()) }}
+        id="rtpOffset"
+        type="text"
+        inputmode="numeric"
+        value={rtpOffset()}
+        onChange={updateRtpOffset}
         disabled={running()}
       />
 

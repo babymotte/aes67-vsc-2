@@ -26,13 +26,13 @@ export function transceiverID([key]: string[]): string {
 }
 
 export function sortSenders(
-  transceivers: [string, string][]
+  transceivers: [string, string][],
 ): [string, string][] {
   return transceivers.sort((a, b) => txCollator.compare(a[0], b[0]));
 }
 
 export function sortReceivers(
-  transceivers: [string, string][]
+  transceivers: [string, string][],
 ): [string, string][] {
   return transceivers.sort((a, b) => rxCollator.compare(a[0], b[0]));
 }
@@ -40,7 +40,7 @@ export function sortReceivers(
 export function createWbSignal<T, V extends Value>(
   path: string,
   defaultValue: T,
-  conversion?: [(to: T) => V, (from: V) => T]
+  conversion?: [(to: T) => V, (from: V) => T],
 ): [Accessor<T>, (newValue: T) => void] {
   const [value, setValue] = createSignal<T>(defaultValue);
 
@@ -55,7 +55,7 @@ export function createWbSignal<T, V extends Value>(
           setValue((_) => defaultValue);
         }
       },
-      false
+      false,
     );
   });
 
@@ -64,20 +64,30 @@ export function createWbSignal<T, V extends Value>(
     (newValue) =>
       set(
         `${appName()}${path}`,
-        conversion ? conversion[0](newValue) : (newValue as unknown as V)
+        conversion ? conversion[0](newValue) : (newValue as unknown as V),
       ),
   ] as const;
 }
 
 export function invalidDestinationIP(value: string): boolean {
   return !/^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])$/.test(
-    value
+    value,
   );
 }
 
 export function invalidDestinationPort(value: string): boolean {
   let port = parseInt(value, 10);
   return port < 1024 || port > 65535;
+}
+
+export function invalidLinkOffset(value: string): boolean {
+  let offset = parseInt(value, 10);
+  return offset < 0 || offset > 65536;
+}
+
+export function invalidRtpOffset(value: string): boolean {
+  let offset = parseInt(value, 10);
+  return offset < 0 || offset > 65536;
 }
 
 export function invalidChannels(value: string): boolean {

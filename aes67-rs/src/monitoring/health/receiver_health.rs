@@ -15,9 +15,9 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::receiver::config::RxDescriptor;
+use crate::receiver::config::ReceiverConfig;
 
 pub struct ReceiverHealth {
     id: String,
-    desc: Option<RxDescriptor>,
+    desc: Option<ReceiverConfig>,
 }

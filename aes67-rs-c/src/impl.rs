@@ -100,15 +100,16 @@ impl<'a> TryFrom<&Aes67VscReceiverConfig<'a>> for ReceiverConfig {
                 .map_err(|e| ConfigError::InvalidSdp(e.to_string()))?,
         );
         let link_offset = value.link_offset;
-        let delay_calculation_interval = None;
+        let delay_calculation_interval: Option<()> = None;
 
-        Ok(ReceiverConfig {
-            id,
-            label,
-            session,
-            link_offset,
-            delay_calculation_interval,
-        })
+        todo!()
+        // Ok(ReceiverConfig {
+        //     id,
+        //     label,
+        //     session,
+        //     link_offset,
+        //     delay_calculation_interval,
+        // })
     }
 }
 

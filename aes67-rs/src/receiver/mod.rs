@@ -29,7 +29,7 @@ use crate::{
     monitoring::{Monitoring, ReceiverState, RxStats},
     receiver::{
         api::{ReceiverApi, ReceiverApiMessage},
-        config::{ReceiverConfig, RxDescriptor},
+        config::ReceiverConfig,
     },
     socket::create_rx_socket,
     time::{Clock, MediaClock},
@@ -59,9 +59,8 @@ pub(crate) async fn start_receiver(
 ) -> ReceiverInternalResult<ReceiverApi> {
     let receiver_id = id.clone();
     let (api_tx, api_rx) = mpsc::channel(1024);
-    let desc = RxDescriptor::try_from(&config)?;
-    let (tx, rx) = receiver_buffer_channel(desc.clone(), monitoring.clone());
-    let socket = create_rx_socket(&config.session, iface)?;
+    let (tx, rx) = receiver_buffer_channel(config.clone(), monitoring.clone());
+    let socket = create_rx_socket(&config, iface)?;
 
     let subsystem_name = id.clone();
     let subsystem = async move |s: &mut SubsystemHandle| {
@@ -69,7 +68,7 @@ pub(crate) async fn start_receiver(
             id,
             label,
             subsys: s,
-            desc,
+            config,
             clock,
             api_rx,
             last_sequence_number: None,
@@ -102,7 +101,7 @@ struct Receiver<'a> {
     id: String,
     label: String,
     subsys: &'a mut SubsystemHandle,
-    desc: RxDescriptor,
+    config: ReceiverConfig,
     clock: Clock,
     api_rx: mpsc::Receiver<ReceiverApiMessage>,
     last_timestamp: Option<u32>,
@@ -166,7 +165,7 @@ impl<'a> Receiver<'a> {
         addr: SocketAddr,
         media_time_at_reception: u64,
     ) -> ReceiverInternalResult<()> {
-        if addr.ip() != self.desc.origin_ip {
+        if addr.ip() != self.config.source.ip() {
             self.report_packet_from_wrong_sender(addr);
             return Ok(());
         }
@@ -185,7 +184,7 @@ impl<'a> Receiver<'a> {
         let mut ts_wrapped = false;
         let mut seq_wrapped = false;
 
-        let frames_in_packet = self.desc.frames_in_buffer(rtp.payload().len());
+        let frames_in_packet = self.config.frames_in_buffer(rtp.payload().len());
 
         if let (Some(last_ts), Some(last_seq)) = (self.last_timestamp, self.last_sequence_number) {
             let expected_seq = last_seq.next();
@@ -252,7 +251,7 @@ impl<'a> Receiver<'a> {
 
     fn unwrapped_timestamp(&self, rtp: &RtpReader) -> Option<u64> {
         self.timestamp_offset
-            .map(|ts_offset| ts_offset + rtp.timestamp() as u64 - self.desc.rtp_offset as u64)
+            .map(|ts_offset| ts_offset + rtp.timestamp() as u64 - self.config.rtp_offset as u64)
     }
 
     #[instrument(skip(self))]
@@ -300,7 +299,7 @@ mod monitoring {
                 .receiver_state(ReceiverState::Created {
                     id: self.id.clone(),
                     label: self.label.clone(),
-                    descriptor: self.desc.clone(),
+                    config: self.config.clone(),
                     address: buffer,
                 })
                 .await;

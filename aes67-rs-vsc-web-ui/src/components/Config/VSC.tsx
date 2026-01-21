@@ -63,22 +63,52 @@ export default function VSC() {
     }
   };
 
-  const [nics, setNics] = createSignal<string[]>([]);
+  const [availableNics, setAvailableNics] = createSignal<string[]>([]);
   createEffect(() =>
-    subscribeLs(`${appName()}/networkInterfaces`, (ch) =>
-      setNics(ch.sort((a, b) => collator.compare(a, b)))
-    )
+    subscribeLs(`${appName()}/networkInterfaces`, (ch) => {
+      console.log("available:", ch);
+      setAvailableNics(ch);
+    })
   );
+  const [anics, setANics] = createSignal<string[]>([]);
+  const [pnics, setPNics] = createSignal<string[]>([]);
+  createEffect(() => {
+    const ifaces = availableNics();
+    const anic = audioNic();
+    const newNics = [...ifaces];
+    if (anic && !newNics.includes(anic)) {
+      console.log("adding known anic", anic);
+      newNics.push(anic);
+    }
+    console.log("anics:", ifaces, "=>", newNics);
+    setANics(newNics.sort((a, b) => collator.compare(a, b)));
+  });
+  createEffect(() => console.log("anics", anics()));
+  createEffect(() => {
+    const ifaces = availableNics();
+    const pnic = ptpNic();
+    const newNics = [...ifaces];
+    if (pnic && !newNics.includes(pnic)) {
+      console.log("adding known pnic", pnic);
+      newNics.push(pnic);
+    }
+    console.log("pnics:", ifaces, "=>", newNics);
+    setPNics(newNics.sort((a, b) => collator.compare(a, b)));
+  });
+  createEffect(() => console.log("pnics", pnics()));
 
-  const [audioNic, setAudioNic] = createWbSignal<string | null, string | null>(
-    `/config/audio/nic`,
-    null
-  );
+  const [audioNic, setAudioNic] = createWbSignal<
+    string | undefined,
+    string | null
+  >(`/config/audio/nic`, undefined);
+  createEffect(() => {
+    console.log("audioNic", audioNic());
+  });
   const [ptpMode, setPtpMode] = createWbSignal<PtpMode, PtpMode>(
     `/config/ptp`,
     "system"
   );
-  const [ptpNic, setPtpNic] = createSignal<string | null>(null);
+  const [ptpNic, setPtpNic] = createSignal<string | undefined>(undefined);
   const [ptpNicSelectionDisabled, setPtpNicSelectionDisabled] =
     createSignal<boolean>(false);
 
@@ -116,12 +146,12 @@ export default function VSC() {
         break;
       }
       case "phc": {
-        const pm = { phc: { nic: ptpNic() } };
+        const pm = { phc: { nic: ptpNic() || null } };
         setPtpMode(pm);
         break;
       }
       case "internal": {
-        const pm = { internal: { nic: ptpNic() } };
+        const pm = { internal: { nic: ptpNic() || null } };
         setPtpMode(pm);
         break;
       }
@@ -200,9 +230,11 @@ export default function VSC() {
         disabled={running()}
         id="audio-nic"
         on:change={updateAudioNic}
-        value={audioNic() || undefined}
+        value={audioNic()}
       >
-        <For each={nics()}>{(nic) => <NetworkInterfaceOption nic={nic} />}</For>
+        <For each={anics()}>
+          {(nic) => <NetworkInterfaceOption nic={nic} />}
+        </For>
       </select>
 
       <h3>PTP</h3>
@@ -229,7 +261,9 @@ export default function VSC() {
         on:change={updatePtpNic}
         value={ptpNic() || undefined}
       >
-        <For each={nics()}>{(nic) => <NetworkInterfaceOption nic={nic} />}</For>
+        <For each={pnics()}>
+          {(nic) => <NetworkInterfaceOption nic={nic} />}
+        </For>
       </select>
     </div>
   );

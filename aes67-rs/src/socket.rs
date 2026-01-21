@@ -17,14 +17,11 @@
 
 use crate::{
     config::SocketConfig,
-    error::{ConfigError, ConfigResult, ReceiverInternalResult, SenderInternalResult},
+    error::{ConfigResult, ReceiverInternalResult, SenderInternalResult},
+    receiver::config::ReceiverConfig,
 };
 use miette::{IntoDiagnostic, Result};
 use pnet::datalink::NetworkInterface;
-use sdp::{
-    SessionDescription,
-    description::common::{Address, ConnectionInformation},
-};
 use socket2::{
     Domain, InterfaceIndexOrAddress, Protocol as SockProto, SockAddr, Socket, TcpKeepalive, Type,
 };
@@ -70,106 +67,24 @@ pub fn init_tcp_socket(bind_addr: IpAddr, port: u16, config: SocketConfig) -> Re
 
 #[instrument]
 pub fn create_rx_socket(
-    sdp: &SessionDescription,
+    config: &ReceiverConfig,
     iface: NetworkInterface,
 ) -> ReceiverInternalResult<UdpSocket> {
-    Ok(try_create_rx_socket(sdp, iface)?)
+    Ok(try_create_rx_socket(config, iface)?)
 }
 
 fn try_create_rx_socket(
-    sdp: &SessionDescription,
+    config: &ReceiverConfig,
     iface: NetworkInterface,
 ) -> ConfigResult<UdpSocket> {
-    let global_c = sdp.connection_information.as_ref();
-
-    if sdp.media_descriptions.len() > 1 {
-        return Err(ConfigError::InvalidSdp(
-            "redundant streams aren't supported yet".to_owned(),
-        ));
-    }
-
-    let media = if let Some(media) = sdp.media_descriptions.first() {
-        media
-    } else {
-        return Err(ConfigError::InvalidSdp(
-            "media description is missing".to_owned(),
-        ));
-    };
-
-    if media.media_name.media != "audio" {
-        return Err(ConfigError::InvalidSdp(format!(
-            "unsupported media type: {}",
-            media.media_name.media
-        )));
-    }
-
-    if !(media.media_name.protos.contains(&"RTP".to_owned())
-        && media.media_name.protos.contains(&"AVP".to_owned()))
-    {
-        return Err(ConfigError::InvalidSdp(format!(
-            "unsupported media protocols: {:?}; only RTP/AVP is supported",
-            media.media_name.protos
-        )));
-    }
-
-    let c = media.connection_information.as_ref().or(global_c);
-
-    let c = if let Some(c) = c {
-        c
-    } else {
-        return Err(ConfigError::InvalidSdp(
-            "connection data is missing".to_owned(),
-        ));
-    };
-
-    let ConnectionInformation {
-        network_type,
-        address_type,
-        address,
-    } = c;
-
-    let address = if let Some(address) = address {
-        address
-    } else {
-        return Err(ConfigError::InvalidSdp(
-            "connection-address is missing".to_owned(),
-        ));
-    };
-
-    if address_type != "IP4" && address_type != "IP6" {
-        return Err(ConfigError::InvalidSdp(format!(
-            "unsupported addrtype: {address_type}"
-        )));
-    }
-
-    if network_type != "IN" {
-        return Err(ConfigError::InvalidSdp(format!(
-            "unsupported nettype: {network_type}"
-        )));
-    }
-
-    let Address { address, .. } = address;
-
     // TODO for unicast addresses check if the IP exists on this machine and reject otherwise
     // TODO for IPv4 check if the TTL allows packets to reach this machine and reject otherwise
 
-    let mut split = address.split('/');
-    let ip = split.next();
-    let prefix = split.next();
-    let ip_addr: IpAddr = if let (Some(ip), Some(_prefix)) = (ip, prefix) {
-        ip.parse()?
-    } else {
-        return Err(ConfigError::InvalidSdp(format!(
-            "invalid ip address: {address}"
-        )));
+    let socket = match &config.source {
+        SocketAddr::V4(addr) => create_ipv4_rx_socket(*addr.ip(), iface, addr.port())?,
+        SocketAddr::V6(addr) => create_ipv6_rx_socket(*addr.ip(), iface, addr.port())?,
     };
 
-    let port = media.media_name.port.value.to_owned() as u16;
-
-    let socket = match ip_addr {
-        IpAddr::V4(ipv4_addr) => create_ipv4_rx_socket(ipv4_addr, iface, port)?,
-        IpAddr::V6(ipv6_addr) => create_ipv6_rx_socket(ipv6_addr, iface, port)?,
-    };
     socket.set_nonblocking(true)?;
 
     Ok(UdpSocket::from_std(socket.into())?)

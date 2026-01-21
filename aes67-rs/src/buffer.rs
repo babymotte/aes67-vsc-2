@@ -19,7 +19,7 @@ use crate::{
     error::{ReceiverInternalResult, SenderInternalError, SenderInternalResult},
     formats::{BufferFormat, Frames, SampleReader, SampleWriter, frames_to_duration},
     monitoring::Monitoring,
-    receiver::{api::DataState, config::RxDescriptor},
+    receiver::{api::DataState, config::ReceiverConfig},
     sender::config::TxDescriptor,
 };
 use serde::{Deserialize, Serialize};
@@ -80,11 +80,11 @@ impl AudioBufferPointer {
     /// is complete and it is now safe to read from the buffer.
     pub unsafe fn audio_buffer<'a, 'b>(
         &'a mut self,
-        desc: &'b RxDescriptor,
+        config: &'b ReceiverConfig,
     ) -> AudioBuffer<'a, 'b> {
         unsafe {
             let buf = self.buffer_mut();
-            AudioBuffer { buf, desc }
+            AudioBuffer { buf, config }
         }
     }
 
@@ -99,16 +99,16 @@ impl AudioBufferPointer {
 
 pub struct AudioBuffer<'a, 'b> {
     buf: &'a mut [u8],
-    desc: &'b RxDescriptor,
+    config: &'b ReceiverConfig,
 }
 
 impl<'a, 'b> AudioBuffer<'a, 'b> {
-    pub fn new(buf: &'a mut [u8], desc: &'b RxDescriptor) -> Self {
-        Self { buf, desc }
+    pub fn new(buf: &'a mut [u8], config: &'b ReceiverConfig) -> Self {
+        Self { buf, config }
     }
 
     pub fn insert(&mut self, payload: &[u8], playout_time: u64) {
-        let bpf = self.desc.bytes_per_frame();
+        let bpf = self.config.bytes_per_frame();
         let frames_in_buffer = (self.buf.len() / bpf) as u64;
         let frame_index = playout_time % frames_in_buffer;
         let byte_index = frame_index as usize * bpf;
@@ -132,31 +132,31 @@ impl<'a, 'b> AudioBuffer<'a, 'b> {
 
 pub struct FloatingPointAudioBuffer {
     buf: Box<[f32]>,
-    desc: RxDescriptor,
+    config: ReceiverConfig,
 }
 
 impl FloatingPointAudioBuffer {
-    pub fn new(buf: Box<[f32]>, desc: RxDescriptor) -> Self {
+    pub fn new(buf: Box<[f32]>, config: ReceiverConfig) -> Self {
         if !buf
             .len()
-            .is_multiple_of(desc.audio_format.frame_format.channels)
+            .is_multiple_of(config.audio_format.frame_format.channels)
         {
             panic!("buffer length must be a multiple of the number of channels")
         }
-        Self { buf, desc }
+        Self { buf, config }
     }
 
     pub fn frames(&self) -> usize {
-        self.buf.len() / self.desc.audio_format.frame_format.channels
+        self.buf.len() / self.config.audio_format.frame_format.channels
     }
 
     pub fn insert(&mut self, payload: &[u8], playout_time: u64) {
-        let sample_format = &self.desc.audio_format.frame_format.sample_format;
+        let sample_format = &self.config.audio_format.frame_format.sample_format;
         let buffer_len = self.buf.len();
-        let channels = self.desc.audio_format.frame_format.channels;
+        let channels = self.config.audio_format.frame_format.channels;
 
         let bytes_per_input_sample: usize = self
-            .desc
+            .config
             .audio_format
             .frame_format
             .sample_format
@@ -170,13 +170,13 @@ impl FloatingPointAudioBuffer {
     }
 
     pub fn insert_deinterlaced(&mut self, payload: &[u8], playout_time: u64) {
-        let sample_format = &self.desc.audio_format.frame_format.sample_format;
-        let channels = self.desc.audio_format.frame_format.channels;
+        let sample_format = &self.config.audio_format.frame_format.sample_format;
+        let channels = self.config.audio_format.frame_format.channels;
         let chunk_size = self.buf.len() / channels;
         let channel_partitions = self.buf.chunks_mut(chunk_size);
 
         let bytes_per_input_sample: usize = self
-            .desc
+            .config
             .audio_format
             .frame_format
             .sample_format
@@ -197,7 +197,7 @@ impl FloatingPointAudioBuffer {
 
     pub fn read(&self, output_buffer: &mut [f32], playout_time: u64) -> DataState {
         let buffer_len = self.buf.len();
-        let channels = self.desc.audio_format.frame_format.channels;
+        let channels = self.config.audio_format.frame_format.channels;
 
         let start_index = ((playout_time * channels as u64) % buffer_len as u64) as usize;
         let end_index: usize = start_index + output_buffer.len();
@@ -218,7 +218,7 @@ impl FloatingPointAudioBuffer {
         playout_time: u64,
         channel: usize,
     ) -> DataState {
-        let channels = self.desc.audio_format.frame_format.channels;
+        let channels = self.config.audio_format.frame_format.channels;
         let chunk_size = self.buf.len() / channels;
         let mut channel_partitions = self.buf.chunks(chunk_size);
 
@@ -241,22 +241,22 @@ impl FloatingPointAudioBuffer {
 }
 
 pub fn receiver_buffer_channel(
-    descriptor: RxDescriptor,
+    config: ReceiverConfig,
     monitoring: Monitoring,
 ) -> (ReceiverBufferProducer, ReceiverBufferConsumer) {
-    let buffer_len = descriptor.duration_to_frames(Duration::from_secs(1)) as usize;
+    let buffer_len = config.duration_to_frames(Duration::from_secs(1)) as usize;
     let (tx, rx) = watch::channel(0);
     let buffer = vec![0f32; buffer_len].into_boxed_slice();
     let buffer_pointer = AudioBufferPointer::from_slice(&buffer);
     (
         ReceiverBufferProducer {
             buffer,
-            descriptor: descriptor.clone(),
+            config: config.clone(),
             tx,
         },
         ReceiverBufferConsumer {
             buffer_pointer,
-            descriptor,
+            config,
             rx,
             monitoring,
         },
@@ -266,14 +266,14 @@ pub fn receiver_buffer_channel(
 #[derive(Debug, Clone)]
 pub struct ReceiverBufferProducer {
     buffer: Box<[f32]>,
-    descriptor: RxDescriptor,
+    config: ReceiverConfig,
     tx: watch::Sender<Frames>,
 }
 
 #[derive(Debug, Clone)]
 pub struct ReceiverBufferConsumer {
     buffer_pointer: AudioBufferPointer,
-    descriptor: RxDescriptor,
+    config: ReceiverConfig,
     rx: watch::Receiver<Frames>,
     monitoring: Monitoring,
 }
@@ -283,13 +283,13 @@ impl ReceiverBufferProducer {
     /// one for each channel, so that audio data can be retrieved individually per channel.
     pub async fn write(&mut self, payload: &[u8], ingress_time: Frames) {
         let buf = &mut self.buffer[..];
-        let sample_format = &self.descriptor.audio_format.frame_format.sample_format;
-        let channels = self.descriptor.audio_format.frame_format.channels;
+        let sample_format = &self.config.audio_format.frame_format.sample_format;
+        let channels = self.config.audio_format.frame_format.channels;
         let chunk_size = buf.len() / channels;
         let channel_partitions = buf.chunks_mut(chunk_size);
 
         let bytes_per_input_sample: usize = self
-            .descriptor
+            .config
             .audio_format
             .frame_format
             .sample_format
@@ -308,7 +308,7 @@ impl ReceiverBufferProducer {
         }
 
         self.tx
-            .send(ingress_time + self.descriptor.frames_in_buffer(payload.len()) - 1)
+            .send(ingress_time + self.config.frames_in_buffer(payload.len()) - 1)
             .ok();
     }
 }
@@ -341,7 +341,7 @@ impl ReceiverBufferConsumer {
                     last_requested_frame - latest_received_frame,
                     frames_to_duration(
                         last_requested_frame - latest_received_frame,
-                        self.descriptor.audio_format.sample_rate
+                        self.config.audio_format.sample_rate
                     )
                     .as_micros()
                 );
@@ -360,7 +360,7 @@ impl ReceiverBufferConsumer {
             }
 
             let oldest_frame_in_buffer =
-                latest_received_frame - self.descriptor.frames_in_buffer(buf.len()) + 1;
+                latest_received_frame - self.config.frames_in_buffer(buf.len()) + 1;
             if oldest_frame_in_buffer > ingress_time {
                 warn!(
                     "The requested data is not in the receiver buffer anymore (requested frames: [{}; {}]; oldest frame in buffer: {}; {} frames late)!",
@@ -372,7 +372,7 @@ impl ReceiverBufferConsumer {
                 return Ok(false);
             }
 
-            let channels = self.descriptor.audio_format.frame_format.channels;
+            let channels = self.config.audio_format.frame_format.channels;
             let chunk_size = buf.len() / channels;
             let mut channel_partitions = buf.chunks(chunk_size);
 

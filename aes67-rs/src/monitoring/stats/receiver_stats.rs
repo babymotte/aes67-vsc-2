@@ -18,7 +18,7 @@
 use crate::{
     formats::Frames,
     monitoring::{ReceiverStatsReport, Report, RxStats, StatsReport},
-    receiver::config::RxDescriptor,
+    receiver::config::ReceiverConfig,
     time::{MICROS_PER_MILLI_F, MICROS_PER_SEC, MILLIS_PER_SEC_F},
     utils::{AverageCalculationBuffer, U16_WRAP},
 };
@@ -30,7 +30,7 @@ use tracing::{debug, warn};
 pub struct ReceiverStats {
     id: String,
     tx: mpsc::Sender<Report>,
-    desc: Option<RxDescriptor>,
+    desc: Option<ReceiverConfig>,
     delay_buffer: AverageCalculationBuffer<i64>,
     measured_link_offset: AverageCalculationBuffer<Frames>,
     timestamp_offset: Option<u64>,
@@ -311,7 +311,9 @@ impl ReceiverStats {
         };
         warn!(
             "{}: Received packet from wrong sender: {} (expected {})",
-            self.id, ip, desc.origin_ip
+            self.id,
+            ip,
+            desc.source.ip()
         );
         // TODO collect stats + publish
     }
