@@ -1,12 +1,12 @@
 import {
   createWbSignal,
   invalidChannels,
-  invalidDestinationIP as invalidSourceIP,
-  invalidDestinationPort as invalidSourcePort,
   invalidSampleFormat,
   transceiverID,
   invalidLinkOffset,
   invalidRtpOffset,
+  invalidIP,
+  invalidPort,
 } from "../../utils";
 import { pDelete, set } from "../../worterbuch";
 import { appName } from "../../vscState";
@@ -38,6 +38,11 @@ export default function Editor(props: { receiver: [string, string] }) {
     "",
   );
 
+  const [originIP, setOriginIP] = createWbSignal<string, string>(
+    `/config/rx/receivers/${transceiverID(props.receiver)}/originIP`,
+    "",
+  );
+
   const [sourcePort, setSourcePort] = createWbSignal<string, number>(
     `/config/rx/receivers/${transceiverID(props.receiver)}/sourcePort`,
     "0",
@@ -63,8 +68,11 @@ export default function Editor(props: { receiver: [string, string] }) {
     const invalid =
       invalidChannels(channels()) ||
       invalidSampleFormat(sampleFormat()) ||
-      invalidSourceIP(sourceIP()) ||
-      invalidSourcePort(sourcePort());
+      invalidIP(sourceIP()) ||
+      invalidPort(sourcePort()) ||
+      invalidIP(originIP()) ||
+      invalidLinkOffset(linkOffset()) ||
+      invalidRtpOffset(rtpOffset());
     setConfigInvalid(invalid);
   });
 
@@ -96,6 +104,12 @@ export default function Editor(props: { receiver: [string, string] }) {
     const input = e.target as HTMLInputElement;
     const newSource = input.value;
     setSourcePort(newSource);
+  };
+
+  const updateOriginIP = (e: Event) => {
+    const input = e.target as HTMLInputElement;
+    const newSource = input.value;
+    setOriginIP(newSource);
   };
 
   const updateLinkOffset = (e: Event) => {
@@ -208,7 +222,7 @@ export default function Editor(props: { receiver: [string, string] }) {
         Source IP:
       </label>
       <input
-        classList={{ invalid: invalidSourceIP(sourceIP()) }}
+        classList={{ invalid: invalidIP(sourceIP()) }}
         id="sourceIP"
         type="text"
         inputmode="numeric"
@@ -221,12 +235,25 @@ export default function Editor(props: { receiver: [string, string] }) {
         Source Port:
       </label>
       <input
-        classList={{ invalid: invalidSourcePort(sourcePort()) }}
+        classList={{ invalid: invalidPort(sourcePort()) }}
         id="sourcePort"
         type="text"
         inputmode="numeric"
         value={sourcePort()}
         onChange={updateSourcePort}
+        disabled={running()}
+      />
+
+      <label class="key" for="originIP">
+        Origin IP:
+      </label>
+      <input
+        classList={{ invalid: invalidIP(originIP()) }}
+        id="originIP"
+        type="text"
+        inputmode="numeric"
+        value={originIP()}
+        onChange={updateOriginIP}
         disabled={running()}
       />
 

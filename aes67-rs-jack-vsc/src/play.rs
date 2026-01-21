@@ -13,7 +13,7 @@ use jack::{
 use miette::IntoDiagnostic;
 use std::time::{Duration, Instant};
 use tokio::{runtime::Handle, sync::mpsc, time::timeout};
-use tokio_graceful_shutdown::SubsystemHandle;
+use tokio_graceful_shutdown::{NestedSubsystem, SubsystemHandle};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
@@ -37,15 +37,14 @@ pub async fn start_playout(
     config: ReceiverConfig,
     clock: Clock,
     monitoring: Monitoring,
-    async_runtime: Handle,
-) -> miette::Result<()> {
+) -> miette::Result<NestedSubsystem> {
     // TODO evaluate client status
     let (client, status) =
         Client::new(&config.label, ClientOptions::default()).into_diagnostic()?;
 
     info!(
         "JACK client '{}' created with status {:?}",
-        config.id, status
+        config.label, status
     );
 
     let mut ports = vec![];
@@ -69,8 +68,11 @@ pub async fn start_playout(
     }
 
     let (tx, notifications) = mpsc::channel(1024);
-    let client_id = config.label.clone();
-    let notification_handler = SessionManagerNotificationHandler { client_id, tx };
+    let cid = config.label.clone();
+    let notification_handler = SessionManagerNotificationHandler {
+        client_id: cid.clone(),
+        tx,
+    };
     let process_handler_state = State {
         ports,
         receiver,
@@ -79,7 +81,7 @@ pub async fn start_playout(
         muted: false,
         monitoring,
         shutdown_token: subsys.create_cancellation_token(),
-        async_runtime,
+        async_runtime: Handle::current(),
     };
     let process_handler =
         ClosureProcessHandler::with_state(process_handler_state, process, buffer_change);
@@ -87,11 +89,10 @@ pub async fn start_playout(
     let active_client = client
         .activate_async(notification_handler, process_handler)
         .into_diagnostic()?;
-    start_session_manager(subsys, active_client, notifications, app_id);
 
-    subsys.on_shutdown_requested().await;
+    let session_manager = start_session_manager(subsys, active_client, notifications, app_id);
 
-    Ok(())
+    Ok(session_manager)
 }
 
 fn buffer_change(_: &mut State, client: &Client, buffer_len: jack::Frames) -> Control {

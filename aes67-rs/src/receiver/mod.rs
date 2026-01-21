@@ -165,7 +165,7 @@ impl<'a> Receiver<'a> {
         addr: SocketAddr,
         media_time_at_reception: u64,
     ) -> ReceiverInternalResult<()> {
-        if addr.ip() != self.config.source.ip() {
+        if addr.ip() != self.config.origin_ip {
             self.report_packet_from_wrong_sender(addr);
             return Ok(());
         }

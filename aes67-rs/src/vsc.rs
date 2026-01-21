@@ -52,7 +52,7 @@ enum VscApiMessage {
     DestroySenderById(u32, oneshot::Sender<SenderInternalResult<()>>),
     CreateReceiver(
         ReceiverConfig,
-        oneshot::Sender<ReceiverInternalResult<(ReceiverApi, Monitoring)>>,
+        oneshot::Sender<ReceiverInternalResult<(ReceiverApi, Monitoring, Clock)>>,
     ),
     UpdateReceiver(
         ReceiverConfig,
@@ -173,7 +173,7 @@ impl VirtualSoundCardApi {
     pub async fn create_receiver(
         &self,
         config: ReceiverConfig,
-    ) -> VscApiResult<(ReceiverApi, Monitoring)> {
+    ) -> VscApiResult<(ReceiverApi, Monitoring, Clock)> {
         let (tx, rx) = oneshot::channel();
         self.api_tx
             .send(VscApiMessage::CreateReceiver(config, tx))
@@ -345,7 +345,7 @@ impl VirtualSoundCard {
     async fn create_receiver(
         &mut self,
         config: ReceiverConfig,
-    ) -> ReceiverInternalResult<(ReceiverApi, Monitoring)> {
+    ) -> ReceiverInternalResult<(ReceiverApi, Monitoring, Clock)> {
         let id = config.id;
         let label = config.label.clone();
         let qualified_id = format!("{}/rx/{}", self.name, id);
@@ -359,7 +359,7 @@ impl VirtualSoundCard {
             label,
             self.audio_nic.clone(),
             config,
-            clock,
+            clock.clone(),
             monitoring.clone(),
             self.shutdown_token.clone(),
             #[cfg(feature = "tokio-metrics")]
@@ -371,7 +371,7 @@ impl VirtualSoundCard {
         self.rxs.insert(id, receiver_api.clone());
 
         info!("Receiver {qualified_id} successfully created.");
-        Ok((receiver_api, monitoring))
+        Ok((receiver_api, monitoring, clock))
     }
 
     async fn update_receiver(

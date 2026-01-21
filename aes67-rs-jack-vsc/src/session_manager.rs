@@ -7,7 +7,7 @@ use std::{
     path::PathBuf,
 };
 use tokio::{fs, select, sync::mpsc};
-use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
+use tokio_graceful_shutdown::{NestedSubsystem, SubsystemBuilder, SubsystemHandle};
 use tracing::{error, info, instrument, warn};
 
 pub enum Notification {
@@ -109,14 +109,15 @@ pub fn start_session_manager<N, P>(
     client: AsyncClient<N, P>,
     notifications: mpsc::Receiver<Notification>,
     app_id: String,
-) where
+) -> NestedSubsystem
+where
     N: 'static + Send + Sync + NotificationHandler,
     P: 'static + Send + ProcessHandler,
 {
     subsys.start(SubsystemBuilder::new(
         "session_manager",
         async |s: &mut SubsystemHandle| run(s, client, notifications, app_id).await,
-    ));
+    ))
 }
 
 async fn run<N, P>(

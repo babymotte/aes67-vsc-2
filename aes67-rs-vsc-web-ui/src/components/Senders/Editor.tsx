@@ -1,9 +1,9 @@
 import {
   createWbSignal,
   invalidChannels,
-  invalidDestinationIP,
-  invalidDestinationPort,
+  invalidIP,
   invalidPacketTime,
+  invalidPort,
   invalidSampleFormat,
   transceiverID,
 } from "../../utils";
@@ -18,35 +18,35 @@ import { createSender, deleteSender } from "../../api";
 export default function Editor(props: { sender: [string, string] }) {
   const [name, setName] = createWbSignal<string, string>(
     `/config/tx/senders/${transceiverID(props.sender)}/name`,
-    props.sender[1]
+    props.sender[1],
   );
 
   const [channels, setChannels] = createWbSignal<string, number>(
     `/config/tx/senders/${transceiverID(props.sender)}/channels`,
     "0",
-    [(s) => parseInt(s, 10) || 0, (n) => n.toString()]
+    [(s) => parseInt(s, 10) || 0, (n) => n.toString()],
   );
 
   const [sampleFormat, setSampleFormat] = createWbSignal<string, string>(
     `/config/tx/senders/${transceiverID(props.sender)}/sampleFormat`,
-    "L24"
+    "L24",
   );
 
   const [packetTime, setPacketTime] = createWbSignal<string, number>(
     `/config/tx/senders/${transceiverID(props.sender)}/packetTime`,
     "1",
-    [(s) => parseFloat(s) || 1, (n) => n.toString()]
+    [(s) => parseFloat(s) || 1, (n) => n.toString()],
   );
 
   const [destinationIP, setDestinationIP] = createWbSignal<string, string>(
     `/config/tx/senders/${transceiverID(props.sender)}/destinationIP`,
-    ""
+    "",
   );
 
   const [destinationPort, setDestinationPort] = createWbSignal<string, number>(
     `/config/tx/senders/${transceiverID(props.sender)}/destinationPort`,
     "0",
-    [(s) => parseInt(s, 10) || 0, (n) => n.toString()]
+    [(s) => parseInt(s, 10) || 0, (n) => n.toString()],
   );
 
   const [vscRunning] = createWbSignal<boolean, boolean>(`/running`, false);
@@ -56,8 +56,8 @@ export default function Editor(props: { sender: [string, string] }) {
     const invalid =
       invalidChannels(channels()) ||
       invalidSampleFormat(sampleFormat()) ||
-      invalidDestinationIP(destinationIP()) ||
-      invalidDestinationPort(destinationPort()) ||
+      invalidIP(destinationIP()) ||
+      invalidPort(destinationPort()) ||
       invalidPacketTime(packetTime());
     setConfigInvalid(invalid);
   });
@@ -100,19 +100,19 @@ export default function Editor(props: { sender: [string, string] }) {
 
   const [running] = createWbSignal<boolean, boolean>(
     `/tx/${transceiverID(props.sender)}/running`,
-    false
+    false,
   );
 
   const start = () => {
     console.log(`Starting sender ${transceiverID(props.sender)}...`);
     set(
       `${appName()}/config/tx/senders/${transceiverID(props.sender)}/autostart`,
-      true
+      true,
     );
 
     createSender(parseInt(transceiverID(props.sender), 10)).catch((err) =>
       // TODO show error to user
-      console.error(`Failed to start sender:`, err)
+      console.error(`Failed to start sender:`, err),
     );
   };
 
@@ -120,12 +120,12 @@ export default function Editor(props: { sender: [string, string] }) {
     console.log(`Stopping sender ${transceiverID(props.sender)}...`);
     set(
       `${appName()}/config/tx/senders/${transceiverID(props.sender)}/autostart`,
-      false
+      false,
     );
 
     deleteSender(parseInt(transceiverID(props.sender), 10)).catch((err) =>
       // TODO show error to user
-      console.error("Failed to stop sender:", err)
+      console.error("Failed to stop sender:", err),
     );
   };
 
@@ -207,7 +207,7 @@ export default function Editor(props: { sender: [string, string] }) {
         Destination IP:
       </label>
       <input
-        classList={{ invalid: invalidDestinationIP(destinationIP()) }}
+        classList={{ invalid: invalidIP(destinationIP()) }}
         id="destinationIP"
         type="text"
         inputmode="numeric"
@@ -220,7 +220,7 @@ export default function Editor(props: { sender: [string, string] }) {
         Destination Port:
       </label>
       <input
-        classList={{ invalid: invalidDestinationPort(destinationPort()) }}
+        classList={{ invalid: invalidPort(destinationPort()) }}
         id="destinationPort"
         type="text"
         inputmode="numeric"

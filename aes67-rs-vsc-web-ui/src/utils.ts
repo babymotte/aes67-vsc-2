@@ -69,13 +69,13 @@ export function createWbSignal<T, V extends Value>(
   ] as const;
 }
 
-export function invalidDestinationIP(value: string): boolean {
+export function invalidIP(value: string): boolean {
   return !/^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])$/.test(
     value,
   );
 }
 
-export function invalidDestinationPort(value: string): boolean {
+export function invalidPort(value: string): boolean {
   let port = parseInt(value, 10);
   return port < 1024 || port > 65535;
 }

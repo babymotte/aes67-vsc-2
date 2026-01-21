@@ -20,7 +20,7 @@ use aes67_rs::{
     nic::find_nic_with_name,
     receiver::{api::ReceiverApi, config::ReceiverConfig},
     sender::{api::SenderApi, config::SenderConfig},
-    time::get_clock,
+    time::{Clock, get_clock},
     vsc::VirtualSoundCardApi,
 };
 use aes67_rs_discovery::{sap::start_sap_discovery, state_transformers};
@@ -306,9 +306,16 @@ impl<'a, IOH: IoHandler> VscApiActor<'a, IOH> {
             None => return Err(VscApiError::NotRunning.into()),
             Some(vsc_api) => {
                 let config = self.fetch_receiver_config(id).await?;
-                let (api, monitoring) = vsc_api.create_receiver(config).await?;
+                let (receiver, monitoring, clock) = vsc_api.create_receiver(config.clone()).await?;
                 self.io_handler
-                    .receiver_created(id, api, monitoring)
+                    .receiver_created(
+                        self.app_id.clone(),
+                        self.subsys,
+                        receiver,
+                        config,
+                        clock,
+                        monitoring,
+                    )
                     .await?;
             }
         }
@@ -512,6 +519,14 @@ impl<'a, IOH: IoHandler> VscApiActor<'a, IOH> {
             )
             .await?;
 
+        let origin_ip = self
+            .config_param::<String>(
+                topic!(self.app_id, "config", "rx", "receivers", id, "originIP"),
+                "receiver origin IP not configured",
+            )
+            .await?
+            .parse()?;
+
         let config = ReceiverConfig {
             id,
             audio_format,
@@ -522,6 +537,7 @@ impl<'a, IOH: IoHandler> VscApiActor<'a, IOH> {
             payload_type,
             rtp_offset,
             source,
+            origin_ip,
         };
         Ok(config)
     }
@@ -542,26 +558,29 @@ impl<'a, IOH: IoHandler> VscApiActor<'a, IOH> {
 
 pub trait IoHandler: Send + Sync + 'static {
     fn sender_created(
-        &self,
+        &mut self,
         id: u32,
         sender_api: SenderApi,
         monitoring: Monitoring,
     ) -> impl Future<Output = IoHandlerResult<()>> + Send;
 
-    fn sender_updated(&self, id: u32) -> impl Future<Output = IoHandlerResult<()>> + Send;
+    fn sender_updated(&mut self, id: u32) -> impl Future<Output = IoHandlerResult<()>> + Send;
 
-    fn sender_deleted(&self, id: u32) -> impl Future<Output = IoHandlerResult<()>> + Send;
+    fn sender_deleted(&mut self, id: u32) -> impl Future<Output = IoHandlerResult<()>> + Send;
 
     fn receiver_created(
-        &self,
-        id: u32,
-        receiver_api: ReceiverApi,
+        &mut self,
+        app_id: String,
+        subsys: &mut SubsystemHandle,
+        receiver: ReceiverApi,
+        config: ReceiverConfig,
+        clock: Clock,
         monitoring: Monitoring,
     ) -> impl Future<Output = IoHandlerResult<()>> + Send;
 
-    fn receiver_updated(&self, id: u32) -> impl Future<Output = IoHandlerResult<()>> + Send;
+    fn receiver_updated(&mut self, id: u32) -> impl Future<Output = IoHandlerResult<()>> + Send;
 
-    fn receiver_deleted(&self, id: u32) -> impl Future<Output = IoHandlerResult<()>> + Send;
+    fn receiver_deleted(&mut self, id: u32) -> impl Future<Output = IoHandlerResult<()>> + Send;
 }
 
 pub async fn init_management_agent(

@@ -52,6 +52,7 @@ const addReceiver = async (
   sampleFormat: string = "L24",
   destinationIP?: string,
   destinationPort?: number,
+  originIP?: string,
 ) => {
   setCreateRcvSubmenuOpen(false);
   setSenderListOpen(false);
@@ -75,6 +76,9 @@ const addReceiver = async (
     }
     set(`${an}/config/rx/receivers/${id}/linkOffset`, 4);
     set(`${an}/config/rx/receivers/${id}/rtpOffset`, 0);
+    if (originIP != null) {
+      set(`${an}/config/rx/receivers/${id}/originIP`, originIP);
+    }
   }
   setTab(Number.MAX_SAFE_INTEGER);
 };
@@ -96,6 +100,7 @@ type SessionInfo = {
   sampleFormat: string;
   sampleRate: number;
   packetTime: number;
+  originIp: string;
 };
 
 function SessionList(props: { tabSignal: [Accessor<number>, Setter<number>] }) {
@@ -124,6 +129,7 @@ function SessionList(props: { tabSignal: [Accessor<number>, Setter<number>] }) {
                 session.sampleFormat,
                 session.destinationIp,
                 session.destinationPort,
+                session.originIp,
               );
             }}
           >

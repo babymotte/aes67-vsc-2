@@ -52,6 +52,7 @@ pub struct ReceiverConfig {
     pub label: String,
     pub audio_format: AudioFormat,
     pub source: SocketAddr,
+    pub origin_ip: IpAddr,
     pub payload_type: u8,
     pub rtp_offset: u32,
     pub channel_labels: Option<Vec<String>>,
@@ -137,12 +138,15 @@ pub struct SessionInfo {
     pub sample_format: SampleFormat,
     pub sample_rate: FramesPerSecond,
     pub packet_time: MilliSeconds,
+    pub origin_ip: IpAddr,
 }
 
 impl TryFrom<&SessionDescription> for SessionInfo {
     type Error = ConfigError;
 
     fn try_from(sd: &SessionDescription) -> Result<Self, Self::Error> {
+        let origin_ip = sd.origin.unicast_address.parse()?;
+
         let media = if let Some(it) = sd.media_descriptions.first() {
             it
         } else {
@@ -262,6 +266,7 @@ impl TryFrom<&SessionDescription> for SessionInfo {
             packet_time,
             sample_format: audio_format.frame_format.sample_format,
             sample_rate: audio_format.sample_rate,
+            origin_ip,
         })
     }
 }

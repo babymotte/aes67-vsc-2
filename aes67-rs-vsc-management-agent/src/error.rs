@@ -119,6 +119,13 @@ where
 }
 
 #[derive(Error, Debug, Diagnostic)]
-pub enum IoHandlerError {}
+#[error("I/O Handler error: {0}")]
+pub struct IoHandlerError(Report);
+
+impl From<Report> for IoHandlerError {
+    fn from(report: Report) -> Self {
+        IoHandlerError(report)
+    }
+}
 
 pub type IoHandlerResult<T> = Result<T, IoHandlerError>;
