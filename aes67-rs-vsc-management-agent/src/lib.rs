@@ -1,11 +1,11 @@
 pub mod config;
-mod error;
+pub mod error;
 mod netinf_watcher;
 mod rest;
 
 use crate::{
     config::{AppConfig, DEFAULT_PORT},
-    error::{ManagementAgentError, ManagementAgentResult},
+    error::{IoHandlerResult, ManagementAgentError, ManagementAgentResult},
     rest::{
         app_name, refresh_netinfs, vsc_rx_create, vsc_rx_delete, vsc_rx_update, vsc_start,
         vsc_stop, vsc_tx_create, vsc_tx_delete, vsc_tx_update,
@@ -16,9 +16,10 @@ use aes67_rs::{
     config::Config,
     error::{VscApiError, VscApiResult},
     formats::{AudioFormat, FrameFormat, Seconds},
+    monitoring::Monitoring,
     nic::find_nic_with_name,
-    receiver::config::ReceiverConfig,
-    sender::config::SenderConfig,
+    receiver::{api::ReceiverApi, config::ReceiverConfig},
+    sender::{api::SenderApi, config::SenderConfig},
     time::get_clock,
     vsc::VirtualSoundCardApi,
 };
@@ -39,17 +40,17 @@ use worterbuch::{
     PersistenceMode,
     server::{CloneableWbApi, axum::build_worterbuch_router},
 };
-use worterbuch_client::{ConnectionResult, Key, KeyValuePair, Worterbuch, topic};
+use worterbuch_client::{Key, KeyValuePair, Worterbuch, topic};
 
 enum VscApiMessage {
-    StartVsc(oneshot::Sender<VscApiResult<()>>),
-    StopVsc(oneshot::Sender<VscApiResult<()>>),
-    CreateSender(u32, oneshot::Sender<VscApiResult<()>>),
-    CreateReceiver(u32, oneshot::Sender<VscApiResult<()>>),
-    UpdateSender(u32, oneshot::Sender<VscApiResult<()>>),
-    UpdateReceiver(u32, oneshot::Sender<VscApiResult<()>>),
-    DeleteSender(u32, oneshot::Sender<VscApiResult<()>>),
-    DeleteReceiver(u32, oneshot::Sender<VscApiResult<()>>),
+    StartVsc(oneshot::Sender<ManagementAgentResult<()>>),
+    StopVsc(oneshot::Sender<ManagementAgentResult<()>>),
+    CreateSender(u32, oneshot::Sender<ManagementAgentResult<()>>),
+    CreateReceiver(u32, oneshot::Sender<ManagementAgentResult<()>>),
+    UpdateSender(u32, oneshot::Sender<ManagementAgentResult<()>>),
+    UpdateReceiver(u32, oneshot::Sender<ManagementAgentResult<()>>),
+    DeleteSender(u32, oneshot::Sender<ManagementAgentResult<()>>),
+    DeleteReceiver(u32, oneshot::Sender<ManagementAgentResult<()>>),
     Exit,
 }
 
@@ -61,7 +62,12 @@ pub struct ManagementAgentApi {
 }
 
 impl ManagementAgentApi {
-    pub fn new(subsys: &SubsystemHandle, app_id: String, wb: Worterbuch) -> Self {
+    pub fn new(
+        subsys: &SubsystemHandle,
+        app_id: String,
+        wb: Worterbuch,
+        io_handler: impl IoHandler + Send + Sync + 'static,
+    ) -> Self {
         let (api_tx, api_rx) = mpsc::channel(1);
 
         let app_idc = app_id.clone();
@@ -69,7 +75,7 @@ impl ManagementAgentApi {
         subsys.start(SubsystemBuilder::new(
             "api",
             async |s: &mut SubsystemHandle| {
-                let api_actor = VscApiActor::new(s, app_idc, api_rx, wbc);
+                let api_actor = VscApiActor::new(s, app_idc, api_rx, wbc, io_handler);
                 api_actor.run().await
             },
         ));
@@ -171,20 +177,22 @@ impl ManagementAgentApi {
     }
 }
 
-struct VscApiActor<'a> {
+struct VscApiActor<'a, IOH: IoHandler> {
     subsys: &'a mut SubsystemHandle,
     rx: mpsc::Receiver<VscApiMessage>,
     wb: Worterbuch,
     app_id: String,
     vsc_api: Option<VirtualSoundCardApi>,
+    io_handler: IOH,
 }
 
-impl<'a> VscApiActor<'a> {
+impl<'a, IOH: IoHandler> VscApiActor<'a, IOH> {
     fn new(
         subsys: &'a mut SubsystemHandle,
         app_id: String,
         rx: mpsc::Receiver<VscApiMessage>,
         wb: Worterbuch,
+        io_handler: IOH,
     ) -> Self {
         Self {
             subsys,
@@ -192,6 +200,7 @@ impl<'a> VscApiActor<'a> {
             wb,
             app_id,
             vsc_api: None,
+            io_handler,
         }
     }
 
@@ -239,9 +248,9 @@ impl<'a> VscApiActor<'a> {
         Ok(())
     }
 
-    async fn start_vsc(&mut self) -> VscApiResult<()> {
+    async fn start_vsc(&mut self) -> ManagementAgentResult<()> {
         if self.vsc_api.is_some() {
-            return Err(VscApiError::AlreadyRunning);
+            return Err(VscApiError::AlreadyRunning.into());
         }
 
         let config = Config::load(&self.app_id, &self.wb).await?;
@@ -268,9 +277,9 @@ impl<'a> VscApiActor<'a> {
         Ok(())
     }
 
-    async fn stop_vsc(&mut self) -> VscApiResult<()> {
+    async fn stop_vsc(&mut self) -> ManagementAgentResult<()> {
         match self.vsc_api.take() {
-            None => return Err(VscApiError::NotRunning),
+            None => return Err(VscApiError::NotRunning.into()),
             Some(vsc_api) => {
                 vsc_api.close().await?;
             }
@@ -279,70 +288,78 @@ impl<'a> VscApiActor<'a> {
         Ok(())
     }
 
-    async fn create_sender(&mut self, id: u32) -> VscApiResult<()> {
+    async fn create_sender(&mut self, id: u32) -> ManagementAgentResult<()> {
         match &self.vsc_api {
-            None => return Err(VscApiError::NotRunning),
+            None => return Err(VscApiError::NotRunning.into()),
             Some(vsc_api) => {
                 let config = self.fetch_sender_config(id).await?;
-                vsc_api.create_sender(config).await?;
+                let (api, monitoring) = vsc_api.create_sender(config).await?;
+                self.io_handler.sender_created(id, api, monitoring).await;
             }
         }
 
         Ok(())
     }
 
-    async fn create_receiver(&mut self, id: u32) -> VscApiResult<()> {
+    async fn create_receiver(&mut self, id: u32) -> ManagementAgentResult<()> {
         match &self.vsc_api {
-            None => return Err(VscApiError::NotRunning),
+            None => return Err(VscApiError::NotRunning.into()),
             Some(vsc_api) => {
                 let config = self.fetch_receiver_config(id).await?;
-                vsc_api.create_receiver(config).await?;
+                let (api, monitoring) = vsc_api.create_receiver(config).await?;
+                self.io_handler
+                    .receiver_created(id, api, monitoring)
+                    .await?;
             }
         }
 
         Ok(())
     }
 
-    async fn update_sender(&mut self, id: u32) -> VscApiResult<()> {
+    async fn update_sender(&mut self, id: u32) -> ManagementAgentResult<()> {
         match &self.vsc_api {
-            None => return Err(VscApiError::NotRunning),
+            None => return Err(VscApiError::NotRunning.into()),
             Some(vsc_api) => {
                 let config = self.fetch_sender_config(id).await?;
                 vsc_api.update_sender(config).await?;
+                self.io_handler.sender_updated(id).await?;
             }
         }
 
         Ok(())
     }
 
-    async fn update_receiver(&mut self, id: u32) -> VscApiResult<()> {
+    async fn update_receiver(&mut self, id: u32) -> ManagementAgentResult<()> {
         match &self.vsc_api {
-            None => return Err(VscApiError::NotRunning),
+            None => return Err(VscApiError::NotRunning.into()),
             Some(vsc_api) => {
                 let config = self.fetch_receiver_config(id).await?;
                 vsc_api.update_receiver(config).await?;
+                self.io_handler.receiver_updated(id).await?;
             }
         }
 
         Ok(())
     }
 
-    async fn delete_sender(&mut self, id: u32) -> VscApiResult<()> {
+    async fn delete_sender(&mut self, id: u32) -> ManagementAgentResult<()> {
         match &self.vsc_api {
-            None => return Err(VscApiError::NotRunning),
+            None => return Err(VscApiError::NotRunning.into()),
             Some(vsc_api) => {
                 vsc_api.destroy_sender(id).await?;
+                self.io_handler.sender_deleted(id).await?;
             }
         }
 
         Ok(())
     }
 
-    async fn delete_receiver(&mut self, id: u32) -> VscApiResult<()> {
+    async fn delete_receiver(&mut self, id: u32) -> ManagementAgentResult<()> {
         match &self.vsc_api {
-            None => return Err(VscApiError::NotRunning),
+            None => return Err(VscApiError::NotRunning.into()),
             Some(vsc_api) => {
                 vsc_api.destroy_receiver(id).await?;
+                self.io_handler.receiver_deleted(id).await?;
             }
         }
 
@@ -524,7 +541,27 @@ impl<'a> VscApiActor<'a> {
 }
 
 pub trait IoHandler: Send + Sync + 'static {
-    // TODO define methods for handling AES67 I/O
+    fn sender_created(
+        &self,
+        id: u32,
+        sender_api: SenderApi,
+        monitoring: Monitoring,
+    ) -> impl Future<Output = IoHandlerResult<()>> + Send;
+
+    fn sender_updated(&self, id: u32) -> impl Future<Output = IoHandlerResult<()>> + Send;
+
+    fn sender_deleted(&self, id: u32) -> impl Future<Output = IoHandlerResult<()>> + Send;
+
+    fn receiver_created(
+        &self,
+        id: u32,
+        receiver_api: ReceiverApi,
+        monitoring: Monitoring,
+    ) -> impl Future<Output = IoHandlerResult<()>> + Send;
+
+    fn receiver_updated(&self, id: u32) -> impl Future<Output = IoHandlerResult<()>> + Send;
+
+    fn receiver_deleted(&self, id: u32) -> impl Future<Output = IoHandlerResult<()>> + Send;
 }
 
 pub async fn init_management_agent(
@@ -588,9 +625,8 @@ pub async fn init_management_agent(
     ));
 
     // TODO get VSC config from worterbuch
-    // TODO register I/O handler
 
-    Aes67VscRestApi::new(subsys, config, worterbuch).await?;
+    Aes67VscRestApi::new(subsys, config, worterbuch, io_handler).await?;
 
     Ok(())
 }
@@ -604,6 +640,7 @@ impl Aes67VscRestApi {
         subsys: &SubsystemHandle,
         persistent_config: AppConfig,
         worterbuch: CloneableWbApi,
+        io_handler: impl IoHandler,
     ) -> Result<()> {
         let wb = worterbuch_client::local_client_wrapper(worterbuch.clone());
 
@@ -618,7 +655,7 @@ impl Aes67VscRestApi {
             .await?
             .unwrap_or(false);
 
-        let api = ManagementAgentApi::new(subsys, app_id, wb);
+        let api = ManagementAgentApi::new(subsys, app_id, wb, io_handler);
 
         if autostart {
             if let Err(e) = api.start_vsc().await {
@@ -761,24 +798,4 @@ async fn start_network_interface_watcher(
     wb: worterbuch_client::Worterbuch,
 ) -> netinf_watcher::Handle {
     netinf_watcher::start(app_id, Duration::from_secs(3), wb).await
-}
-
-async fn get_next_tx_id(app_id: &str, wb: &Worterbuch) -> ConnectionResult<u64> {
-    get_next_id(app_id, wb, "tx").await
-}
-
-async fn get_next_rx_id(app_id: &str, wb: &Worterbuch) -> ConnectionResult<u64> {
-    get_next_id(app_id, wb, "rx").await
-}
-
-async fn get_next_id(app_id: &str, wb: &Worterbuch, txrx: &str) -> ConnectionResult<u64> {
-    let key: String = topic!(app_id, "config", txrx, "next-id");
-    let keyc = key.clone();
-
-    wb.locked(keyc, async || {
-        let next_id = wb.get(key.clone()).await?.unwrap_or(1);
-        wb.set(key, next_id + 1).await?;
-        Ok(next_id)
-    })
-    .await?
 }

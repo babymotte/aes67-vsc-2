@@ -79,7 +79,6 @@ pub enum VscApiError {
     ReceiverConfigIncomplete(&'static str),
     #[error("Invalid IP address: {0}")]
     AddrParseError(#[from] AddrParseError),
-
     #[error("Not implemented yet.")]
     NotImplemented,
 }

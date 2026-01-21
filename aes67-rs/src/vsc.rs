@@ -35,7 +35,7 @@ use std::collections::HashMap;
 use tokio::sync::{mpsc, oneshot};
 use tokio_graceful_shutdown::SubsystemHandle;
 use tokio_util::sync::CancellationToken;
-use tracing::{info, warn};
+use tracing::info;
 use worterbuch_client::{Worterbuch, topic};
 
 type ApiMessageSender = mpsc::Sender<VscApiMessage>;
@@ -43,20 +43,20 @@ type ApiMessageSender = mpsc::Sender<VscApiMessage>;
 enum VscApiMessage {
     CreateSender(
         SenderConfig,
-        oneshot::Sender<SenderInternalResult<(SenderApi, u32)>>,
+        oneshot::Sender<SenderInternalResult<(SenderApi, Monitoring)>>,
     ),
     UpdateSender(
         SenderConfig,
-        oneshot::Sender<SenderInternalResult<(SenderApi, u32)>>,
+        oneshot::Sender<SenderInternalResult<SenderApi>>,
     ),
     DestroySenderById(u32, oneshot::Sender<SenderInternalResult<()>>),
     CreateReceiver(
         ReceiverConfig,
-        oneshot::Sender<ReceiverInternalResult<(ReceiverApi, Monitoring, u32)>>,
+        oneshot::Sender<ReceiverInternalResult<(ReceiverApi, Monitoring)>>,
     ),
     UpdateReceiver(
         ReceiverConfig,
-        oneshot::Sender<ReceiverInternalResult<(ReceiverApi, Monitoring, u32)>>,
+        oneshot::Sender<ReceiverInternalResult<ReceiverApi>>,
     ),
     DestroyReceiverById(u32, oneshot::Sender<ReceiverInternalResult<()>>),
     Stop(oneshot::Sender<()>),
@@ -140,7 +140,10 @@ impl VirtualSoundCardApi {
         Ok(api_tx)
     }
 
-    pub async fn create_sender(&self, config: SenderConfig) -> VscApiResult<(SenderApi, u32)> {
+    pub async fn create_sender(
+        &self,
+        config: SenderConfig,
+    ) -> VscApiResult<(SenderApi, Monitoring)> {
         let (tx, rx) = oneshot::channel();
         self.api_tx
             .send(VscApiMessage::CreateSender(config, tx))
@@ -149,7 +152,7 @@ impl VirtualSoundCardApi {
         Ok(rx.await.map_err(SenderInternalError::from)??)
     }
 
-    pub async fn update_sender(&self, config: SenderConfig) -> VscApiResult<(SenderApi, u32)> {
+    pub async fn update_sender(&self, config: SenderConfig) -> VscApiResult<SenderApi> {
         let (tx, rx) = oneshot::channel();
         self.api_tx
             .send(VscApiMessage::UpdateSender(config, tx))
@@ -170,7 +173,7 @@ impl VirtualSoundCardApi {
     pub async fn create_receiver(
         &self,
         config: ReceiverConfig,
-    ) -> VscApiResult<(ReceiverApi, Monitoring, u32)> {
+    ) -> VscApiResult<(ReceiverApi, Monitoring)> {
         let (tx, rx) = oneshot::channel();
         self.api_tx
             .send(VscApiMessage::CreateReceiver(config, tx))
@@ -179,10 +182,7 @@ impl VirtualSoundCardApi {
         Ok(rx.await.map_err(ReceiverInternalError::from)??)
     }
 
-    pub async fn update_receiver(
-        &self,
-        config: ReceiverConfig,
-    ) -> VscApiResult<(ReceiverApi, Monitoring, u32)> {
+    pub async fn update_receiver(&self, config: ReceiverConfig) -> VscApiResult<ReceiverApi> {
         let (tx, rx) = oneshot::channel();
         self.api_tx
             .send(VscApiMessage::UpdateReceiver(config, tx))
@@ -296,19 +296,20 @@ impl VirtualSoundCard {
     async fn create_sender(
         &mut self,
         config: SenderConfig,
-    ) -> SenderInternalResult<(SenderApi, u32)> {
+    ) -> SenderInternalResult<(SenderApi, Monitoring)> {
         let id = config.id;
         let label = config.label.clone();
         let qualified_id = format!("{}/tx/{}", self.name, id);
         info!("Creating sender '{label}' ({qualified_id}) …");
 
+        let monitoring = self.monitoring.child(qualified_id.clone());
         let sender_api = start_sender(
             self.name.clone(),
             qualified_id.clone(),
             label,
             self.audio_nic.clone(),
             config,
-            self.monitoring.child(qualified_id.clone()),
+            monitoring.clone(),
             self.shutdown_token.clone(),
             #[cfg(feature = "tokio-metrics")]
             self.wb.clone(),
@@ -319,13 +320,10 @@ impl VirtualSoundCard {
         self.txs.insert(id, sender_api.clone());
 
         info!("Sender {qualified_id} successfully created.");
-        Ok((sender_api, id))
+        Ok((sender_api, monitoring))
     }
 
-    async fn update_sender(
-        &mut self,
-        config: SenderConfig,
-    ) -> SenderInternalResult<(SenderApi, u32)> {
+    async fn update_sender(&mut self, config: SenderConfig) -> SenderInternalResult<SenderApi> {
         // TODO
         todo!()
     }
@@ -347,7 +345,7 @@ impl VirtualSoundCard {
     async fn create_receiver(
         &mut self,
         config: ReceiverConfig,
-    ) -> ReceiverInternalResult<(ReceiverApi, Monitoring, u32)> {
+    ) -> ReceiverInternalResult<(ReceiverApi, Monitoring)> {
         let id = config.id;
         let label = config.label.clone();
         let qualified_id = format!("{}/rx/{}", self.name, id);
@@ -373,13 +371,13 @@ impl VirtualSoundCard {
         self.rxs.insert(id, receiver_api.clone());
 
         info!("Receiver {qualified_id} successfully created.");
-        Ok((receiver_api, monitoring, id))
+        Ok((receiver_api, monitoring))
     }
 
     async fn update_receiver(
         &mut self,
         config: ReceiverConfig,
-    ) -> ReceiverInternalResult<(ReceiverApi, Monitoring, u32)> {
+    ) -> ReceiverInternalResult<ReceiverApi> {
         // TODO
         todo!()
     }

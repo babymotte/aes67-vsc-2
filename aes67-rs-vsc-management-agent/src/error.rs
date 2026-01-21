@@ -1,6 +1,6 @@
 use std::io;
 
-use aes67_rs::error::VscApiError;
+use aes67_rs::error::{ClockError, ConfigError, VscApiError};
 use axum::{http::StatusCode, response::IntoResponse};
 use miette::{Diagnostic, Report};
 use thiserror::Error;
@@ -30,6 +30,12 @@ pub enum ManagementAgentError {
     ChannelError,
     #[error("VSC api error: {0}")]
     VscApiError(#[from] VscApiError),
+    #[error("Clock error: {0}")]
+    ClockError(#[from] ClockError),
+    #[error("Config error: {0}")]
+    ConfigError(#[from] ConfigError),
+    #[error("I/O Handler error: {0}")]
+    IoHandlerError(#[from] IoHandlerError),
 }
 
 impl From<oneshot::error::RecvError> for ManagementAgentError {
@@ -80,6 +86,15 @@ impl From<ManagementAgentError> for (StatusCode, String) {
             ManagementAgentError::VscApiError(e) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
             }
+            ManagementAgentError::ClockError(e) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+            }
+            ManagementAgentError::ConfigError(e) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+            }
+            ManagementAgentError::IoHandlerError(e) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+            }
         }
     }
 }
@@ -102,3 +117,8 @@ where
         self
     }
 }
+
+#[derive(Error, Debug, Diagnostic)]
+pub enum IoHandlerError {}
+
+pub type IoHandlerResult<T> = Result<T, IoHandlerError>;

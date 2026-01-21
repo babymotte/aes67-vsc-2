@@ -118,12 +118,12 @@ pub fn try_create_receiver(config: &Aes67VscReceiverConfig) -> ReceiverInternalR
         Ok(it) => it,
         Err(err) => return Ok(-(err.error_code() as i32)),
     };
-    let (receiver_api, _, id) = match block_on(VIRTUAL_SOUND_CARD.create_receiver(config)) {
+    let (receiver_api, _) = match block_on(VIRTUAL_SOUND_CARD.create_receiver(config)) {
         Ok(it) => it,
         Err(err) => return Ok(-(err.error_code() as i32)),
     };
-    RECEIVERS.insert(id, receiver_api);
-    Ok(id as i32)
+    RECEIVERS.insert(0, receiver_api);
+    Ok(0)
 }
 
 pub fn try_receive<'a>(
