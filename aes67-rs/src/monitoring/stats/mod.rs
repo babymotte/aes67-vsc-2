@@ -27,11 +27,11 @@ use crate::monitoring::{
 };
 use std::collections::{HashMap, hash_map::Entry};
 use tokio::{select, sync::mpsc};
-use tokio_graceful_shutdown::SubsystemHandle;
+use tosub::Subsystem;
 use tracing::{info, warn};
 
 pub async fn stats(
-    subsys: &mut SubsystemHandle,
+    subsys: Subsystem,
     rx: mpsc::Receiver<(MonitoringEvent, String)>,
     tx: mpsc::Sender<Report>,
 ) -> Result<(), &'static str> {
@@ -39,8 +39,8 @@ pub async fn stats(
     Ok(())
 }
 
-struct StatsActor<'a> {
-    subsys: &'a mut SubsystemHandle,
+struct StatsActor {
+    subsys: Subsystem,
     rx: mpsc::Receiver<(MonitoringEvent, String)>,
     tx: mpsc::Sender<Report>,
     senders: HashMap<String, SenderStats>,
@@ -48,9 +48,9 @@ struct StatsActor<'a> {
     playouts: HashMap<String, PlayoutStats>,
 }
 
-impl<'a> StatsActor<'a> {
+impl StatsActor {
     fn new(
-        subsys: &'a mut SubsystemHandle,
+        subsys: Subsystem,
         rx: mpsc::Receiver<(MonitoringEvent, String)>,
         tx: mpsc::Sender<Report>,
     ) -> Self {
@@ -68,12 +68,15 @@ impl<'a> StatsActor<'a> {
         info!("Stats subsystem started.");
         loop {
             select! {
-                Some((evt,src)) = self.rx.recv() => self.process_event(evt,src).await,
-                _ = self.subsys.on_shutdown_requested() => break,
-                else => {
-                    self.subsys.request_shutdown();
-                    break;
+                recv = self.rx.recv() => match recv {
+                    Some((evt, src)) => self.process_event(evt,src).await,
+                    None => {
+                        info!("Monitoring event channel closed; shutting down subsystem");
+                        self.subsys.request_global_shutdown();
+                        break;
+                    }
                 },
+                _ = self.subsys.shutdown_requested() => break,
             }
         }
         info!("Stats subsystem stopped.");

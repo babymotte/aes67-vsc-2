@@ -30,8 +30,8 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, time::SystemTime};
 use tokio::{select, sync::broadcast};
-use tokio_graceful_shutdown::SubsystemHandle;
-use tracing::info;
+use tosub::Subsystem;
+use tracing::{info, warn};
 use worterbuch_client::{Worterbuch, topic};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -80,7 +80,7 @@ struct ReceiverData {
 }
 
 pub async fn observability(
-    subsys: &mut SubsystemHandle,
+    subsys: Subsystem,
     client_name: String,
     rx: broadcast::Receiver<Report>,
     worterbuch_client: Worterbuch,
@@ -91,8 +91,8 @@ pub async fn observability(
     Ok(())
 }
 
-struct ObservabilityActor<'a> {
-    subsys: &'a mut SubsystemHandle,
+struct ObservabilityActor {
+    subsys: Subsystem,
     client_name: String,
     rx: broadcast::Receiver<Report>,
     wb: Worterbuch,
@@ -101,9 +101,9 @@ struct ObservabilityActor<'a> {
     running: bool,
 }
 
-impl<'a> ObservabilityActor<'a> {
+impl ObservabilityActor {
     fn new(
-        subsys: &'a mut SubsystemHandle,
+        subsys: Subsystem,
         client_name: String,
         rx: broadcast::Receiver<Report>,
         wb: Worterbuch,
@@ -123,12 +123,18 @@ impl<'a> ObservabilityActor<'a> {
         info!("Observability subsystem started.");
         loop {
             select! {
-                Ok(evt) = self.rx.recv() => self.process_event(evt).await,
-                _ = self.subsys.on_shutdown_requested() => break,
-                else => {
-                    self.subsys.request_shutdown();
-                    break;
+                recv = self.rx.recv() => match recv {
+                    Ok(evt) => self.process_event(evt).await,
+                    Err(broadcast::error::RecvError::Lagged(_)) => {
+                        warn!("Observability receiver lagged behind; skipping events");
+                    },
+                    Err(broadcast::error::RecvError::Closed) => {
+                        info!("Observability event channel closed; shutting down subsystem");
+                        self.subsys.request_global_shutdown();
+                        break;
+                    },
                 },
+                _ = self.subsys.shutdown_requested() => break,
             }
         }
         info!("Observability subsystem stopped.");

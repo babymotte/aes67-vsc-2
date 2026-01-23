@@ -11,7 +11,6 @@ sap-rs = "0.4.0"
 serde = "1.0.228"
 thiserror = "2.0.17"
 tokio = "1.48.0"
-tokio-graceful-shutdown = { version = "0.19.2", features = ["tracing"] }
-tokio-util = "0.7.17"
+tosub = { version = "0.1.0", path = "../tosub" }
 tracing = "0.1.43"
-worterbuch-client = "1.4.2"
+worterbuch-client = { path = "../../../worterbuch/worterbuch/worterbuch-client" }

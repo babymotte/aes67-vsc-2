@@ -7,7 +7,7 @@ use std::{
     path::PathBuf,
 };
 use tokio::{fs, select, sync::mpsc};
-use tokio_graceful_shutdown::{NestedSubsystem, SubsystemBuilder, SubsystemHandle};
+use tosub::Subsystem;
 use tracing::{error, info, instrument, warn};
 
 pub enum Notification {
@@ -105,23 +105,22 @@ impl NotificationHandler for SessionManagerNotificationHandler {
 }
 
 pub fn start_session_manager<N, P>(
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
     client: AsyncClient<N, P>,
     notifications: mpsc::Receiver<Notification>,
     app_id: String,
-) -> NestedSubsystem
+) -> Subsystem
 where
     N: 'static + Send + Sync + NotificationHandler,
     P: 'static + Send + ProcessHandler,
 {
-    subsys.start(SubsystemBuilder::new(
-        "session_manager",
-        async |s: &mut SubsystemHandle| run(s, client, notifications, app_id).await,
-    ))
+    subsys.spawn("session_manager", async |s| {
+        run(s, client, notifications, app_id).await
+    })
 }
 
 async fn run<N, P>(
-    subsys: &mut SubsystemHandle,
+    subsys: Subsystem,
     client: AsyncClient<N, P>,
     mut notifications: mpsc::Receiver<Notification>,
     app_id: String,
@@ -135,13 +134,18 @@ where
     loop {
         select! {
             Some(notification) = notifications.recv() => handle_notification(client.as_client(), notification, &app_id).await?,
-            _ = subsys.on_shutdown_requested() => break,
+            _ = subsys.shutdown_requested() => break,
             else => break,
         }
     }
 
-    if let Err(e) = client.deactivate() {
-        error!("Error deactivating JACK client: {e}");
+    if let Err(e) = client
+        .deactivate()
+        .into_diagnostic()
+        .wrap_err("Could not deactivate JACK client")
+    {
+        error!("{e}");
+        eprintln!("{e:?}");
     }
 
     Ok(())
@@ -249,8 +253,11 @@ async fn store_connection(
         remove_connection(&mut config, this_port_name, other_port_name);
     }
 
-    if let Err(e) = save_client_config(client, config, app_id).await {
-        warn!("Could not write client config to file: {e}");
+    if let Err(e) = save_client_config(client, config, app_id)
+        .await
+        .wrap_err("Could not write client config to file")
+    {
+        warn!("{e}");
         return;
     }
 
@@ -299,11 +306,17 @@ async fn restore_connections(client: &Client, app_id: &str) {
         if let Some(port) = client.port_by_name(&port_name) {
             for other_port_name in connections {
                 if let Some(other_port) = client.port_by_name(&other_port_name) {
-                    if let Err(e) = client.connect_ports(&port, &other_port) {
-                        warn!(
-                            "Could not connect ports {} -> {}: {}",
-                            port_name, other_port_name, e
-                        );
+                    if let Err(e) = client
+                        .connect_ports(&port, &other_port)
+                        .into_diagnostic()
+                        .wrap_err_with(|| {
+                            format!(
+                                "Could not connect ports {} -> {}",
+                                port_name, other_port_name
+                            )
+                        })
+                    {
+                        warn!("{e}",);
                     }
                 } else {
                     warn!("Port {} not found.", other_port_name);

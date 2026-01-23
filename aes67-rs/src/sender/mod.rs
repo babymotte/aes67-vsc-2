@@ -19,7 +19,6 @@ pub mod api;
 pub mod config;
 
 use crate::{
-    app::{spawn_child_app, wait_for_start},
     buffer::{AudioBufferPointer, SenderBufferConsumer, sender_buffer_channel},
     error::{SenderInternalError, SenderInternalResult, WrappedRtpPacketBuildError},
     formats::Frames,
@@ -35,13 +34,12 @@ use pnet::datalink::NetworkInterface;
 use rtp_rs::{RtpPacketBuilder, Seq};
 use std::net::SocketAddr;
 use tokio::{net::UdpSocket, select, sync::mpsc};
-use tokio_graceful_shutdown::SubsystemHandle;
-use tokio_util::sync::CancellationToken;
-use tracing::{info, instrument};
+use tosub::Subsystem;
+use tracing::{info, instrument, warn};
 #[cfg(feature = "tokio-metrics")]
 use worterbuch_client::Worterbuch;
 
-#[instrument(skip(monitoring, shutdown_token, wb))]
+#[instrument(skip(monitoring, subsys, wb))]
 pub(crate) async fn start_sender(
     app_id: String,
     id: String,
@@ -49,7 +47,7 @@ pub(crate) async fn start_sender(
     iface: NetworkInterface,
     config: SenderConfig,
     monitoring: Monitoring,
-    shutdown_token: CancellationToken,
+    subsys: &Subsystem,
     #[cfg(feature = "tokio-metrics")] wb: Worterbuch,
 ) -> SenderInternalResult<SenderApi> {
     let sender_id = id.clone();
@@ -59,7 +57,7 @@ pub(crate) async fn start_sender(
     let socket = create_tx_socket(config.target, iface)?;
 
     let subsystem_name = id.clone();
-    let subsystem = async move |s: &mut SubsystemHandle| {
+    let subsystem = async move |s| {
         Sender {
             id,
             label,
@@ -78,25 +76,16 @@ pub(crate) async fn start_sender(
         .await
     };
 
-    let mut app = spawn_child_app(
-        #[cfg(feature = "tokio-metrics")]
-        app_id,
-        subsystem_name.clone(),
-        subsystem,
-        shutdown_token,
-        #[cfg(feature = "tokio-metrics")]
-        wb,
-    )?;
-    wait_for_start(subsystem_name, &mut app).await?;
+    subsys.spawn(subsystem_name, subsystem);
 
     info!("Sender '{sender_id}' started successfully.");
     Ok(SenderApi::new(api_tx, tx))
 }
 
-struct Sender<'a> {
+struct Sender {
     id: String,
     label: String,
-    subsys: &'a SubsystemHandle,
+    subsys: Subsystem,
     desc: TxDescriptor,
     api_rx: mpsc::Receiver<SenderApiMessage>,
     sequence_number: Seq,
@@ -108,22 +97,20 @@ struct Sender<'a> {
     ssrc: u32,
 }
 
-impl<'a> Sender<'a> {
+impl Sender {
     async fn run(mut self) -> SenderInternalResult<()> {
         info!("Sender '{}' started.", self.id);
 
         self.report_sender_created(AudioBufferPointer::from_slice(&self.rx.buffer))
             .await;
 
-        let shutdown_token = self.subsys.create_cancellation_token();
-
         loop {
             select! {
                 Some(api_msg) = self.api_rx.recv() => {
                     self.handle_api_message(api_msg).await?;
                 },
-                Ok(recv) = self.rx.read(&shutdown_token) => self.send(recv.0, recv.1, recv.2).await?,
-                _ = self.subsys.on_shutdown_requested() => break,
+                Ok(recv) = self.rx.read(&self.subsys) => self.send(recv.0, recv.1, recv.2).await?,
+                _ = self.subsys.shutdown_requested() => break,
                 else => break,
             }
         }
@@ -139,7 +126,6 @@ impl<'a> Sender<'a> {
         match api_msg {
             SenderApiMessage::Stop(tx) => {
                 self.subsys.request_local_shutdown();
-                self.subsys.wait_for_children().await;
                 tx.send(()).ok();
             }
         }
@@ -193,7 +179,7 @@ mod monitoring {
 
     use super::*;
 
-    impl<'a> Sender<'a> {
+    impl Sender {
         pub(crate) async fn report_sender_created(&self, buffer: AudioBufferPointer) {
             self.monitoring
                 .sender_state(SenderState::Created {

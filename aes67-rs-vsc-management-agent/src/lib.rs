@@ -12,7 +12,6 @@ use crate::{
     },
 };
 use aes67_rs::{
-    app::{propagate_exit, spawn_child_app},
     config::Config,
     error::{VscApiError, VscApiResult},
     formats::{AudioFormat, FrameFormat, Seconds},
@@ -26,7 +25,7 @@ use aes67_rs::{
 use aes67_rs_discovery::{sap::start_sap_discovery, state_transformers};
 use axum::routing::{get, post};
 use axum_server::Handle;
-use miette::{IntoDiagnostic, Result};
+use miette::{Context, IntoDiagnostic, Result};
 use serde::de::DeserializeOwned;
 use serde_json::json;
 use std::{io, net::SocketAddr, time::Duration};
@@ -34,8 +33,8 @@ use tokio::{
     select,
     sync::{mpsc, oneshot},
 };
-use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
-use tracing::{error, info};
+use tosub::Subsystem;
+use tracing::{error, info, warn};
 use worterbuch::{
     PersistenceMode,
     server::{CloneableWbApi, axum::build_worterbuch_router},
@@ -56,14 +55,14 @@ enum VscApiMessage {
 
 #[derive(Clone)]
 pub struct ManagementAgentApi {
-    app_id: String,
+    // app_id: String,
     api_tx: mpsc::Sender<VscApiMessage>,
-    wb: Worterbuch,
+    // wb: Worterbuch,
 }
 
 impl ManagementAgentApi {
     pub fn new(
-        subsys: &SubsystemHandle,
+        subsys: &Subsystem,
         app_id: String,
         wb: Worterbuch,
         io_handler: impl IoHandler + Send + Sync + 'static,
@@ -72,15 +71,16 @@ impl ManagementAgentApi {
 
         let app_idc = app_id.clone();
         let wbc = wb.clone();
-        subsys.start(SubsystemBuilder::new(
-            "api",
-            async |s: &mut SubsystemHandle| {
-                let api_actor = VscApiActor::new(s, app_idc, api_rx, wbc, io_handler);
-                api_actor.run().await
-            },
-        ));
+        subsys.spawn("api", |s| async move {
+            let api_actor = VscApiActor::new(s, app_idc, api_rx, wbc, io_handler);
+            api_actor.run().await
+        });
 
-        Self { app_id, api_tx, wb }
+        Self {
+            // app_id,
+            api_tx,
+            // wb
+        }
     }
 
     pub async fn start_vsc(&self) -> ManagementAgentResult<()> {
@@ -90,6 +90,8 @@ impl ManagementAgentApi {
         self.api_tx.send(VscApiMessage::StartVsc(tx)).await?;
 
         rx.await??;
+
+        info!("VSC started.");
 
         Ok(())
     }
@@ -177,8 +179,8 @@ impl ManagementAgentApi {
     }
 }
 
-struct VscApiActor<'a, IOH: IoHandler> {
-    subsys: &'a mut SubsystemHandle,
+struct VscApiActor<IOH: IoHandler> {
+    subsys: Subsystem,
     rx: mpsc::Receiver<VscApiMessage>,
     wb: Worterbuch,
     app_id: String,
@@ -186,9 +188,9 @@ struct VscApiActor<'a, IOH: IoHandler> {
     io_handler: IOH,
 }
 
-impl<'a, IOH: IoHandler> VscApiActor<'a, IOH> {
+impl<IOH: IoHandler> VscApiActor<IOH> {
     fn new(
-        subsys: &'a mut SubsystemHandle,
+        subsys: Subsystem,
         app_id: String,
         rx: mpsc::Receiver<VscApiMessage>,
         wb: Worterbuch,
@@ -208,6 +210,7 @@ impl<'a, IOH: IoHandler> VscApiActor<'a, IOH> {
         loop {
             select! {
                 Some(msg) = self.rx.recv() => self.process_api_message(msg).await?,
+                _ = self.subsys.shutdown_requested() => break,
                 else => break,
             }
         }
@@ -241,8 +244,9 @@ impl<'a, IOH: IoHandler> VscApiActor<'a, IOH> {
             VscApiMessage::DeleteReceiver(id, tx) => {
                 let _ = tx.send(self.delete_receiver(id).await);
             }
-
-            VscApiMessage::Exit => self.subsys.request_shutdown(),
+            VscApiMessage::Exit => {
+                self.subsys.request_global_shutdown();
+            }
         };
 
         Ok(())
@@ -259,7 +263,6 @@ impl<'a, IOH: IoHandler> VscApiActor<'a, IOH> {
         info!("Using configuration: {:?}", config);
 
         let name = self.app_id.clone();
-        let shutdown_token = self.subsys.create_cancellation_token();
         let wb = self.wb.clone();
         let clock = get_clock(
             name.clone(),
@@ -270,11 +273,87 @@ impl<'a, IOH: IoHandler> VscApiActor<'a, IOH> {
         .await?;
         let audio_nic = find_nic_with_name(&config.audio.nic)?;
 
-        let vsc_api = VirtualSoundCardApi::new(name, shutdown_token, wb, clock, audio_nic).await?;
+        let vsc_api = VirtualSoundCardApi::new(name, &self.subsys, wb, clock, audio_nic).await?;
 
         self.vsc_api = Some(vsc_api);
 
+        self.autostart_senders().await?;
+
+        self.autostart_receivers().await?;
+
         Ok(())
+    }
+
+    async fn autostart_senders(&mut self) -> Result<(), ManagementAgentError> {
+        info!("Autostarting senders …");
+        let senders = self
+            .wb
+            .pget::<bool>(topic!(
+                self.app_id,
+                "config",
+                "tx",
+                "senders",
+                "?",
+                "autostart"
+            ))
+            .await?;
+
+        let senders_to_autostart = senders
+            .into_iter()
+            .filter_map(|kvp| if kvp.value { Some(kvp.key) } else { None });
+
+        for sender in senders_to_autostart {
+            let Some(id) = sender.split('/').nth(4).and_then(|id| id.parse().ok()) else {
+                warn!("Could not parse sender id from key {}", sender);
+                continue;
+            };
+            if let Err(e) = self
+                .create_sender(id)
+                .await
+                .into_diagnostic()
+                .wrap_err_with(|| format!("Could not autostart sender {}", id))
+            {
+                error!("{e}");
+                eprintln!("{e:?}");
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn autostart_receivers(&mut self) -> Result<(), ManagementAgentError> {
+        info!("Autostarting receivers …");
+        let receivers = self
+            .wb
+            .pget::<bool>(topic!(
+                self.app_id,
+                "config",
+                "rx",
+                "receivers",
+                "?",
+                "autostart"
+            ))
+            .await?;
+
+        let receivers_to_autostart = receivers
+            .into_iter()
+            .filter_map(|kvp| if kvp.value { Some(kvp.key) } else { None });
+
+        Ok(for receiver in receivers_to_autostart {
+            let Some(id) = receiver.split('/').nth(4).and_then(|id| id.parse().ok()) else {
+                warn!("Could not parse receiver id from key {}", receiver);
+                continue;
+            };
+            if let Err(e) = self
+                .create_receiver(id)
+                .await
+                .into_diagnostic()
+                .wrap_err_with(|| format!("Could not autostart receiver {}", id))
+            {
+                error!("{e}");
+                eprintln!("{e:?}");
+            }
+        })
     }
 
     async fn stop_vsc(&mut self) -> ManagementAgentResult<()> {
@@ -294,7 +373,11 @@ impl<'a, IOH: IoHandler> VscApiActor<'a, IOH> {
             Some(vsc_api) => {
                 let config = self.fetch_sender_config(id).await?;
                 let (api, monitoring) = vsc_api.create_sender(config).await?;
-                self.io_handler.sender_created(id, api, monitoring).await;
+                if let Err(e) = self.io_handler.sender_created(id, api, monitoring).await {
+                    error!("Could not create I/O handler for sender '{}': {}", id, e);
+                    vsc_api.destroy_sender(id).await?;
+                    return Err(e.into());
+                }
             }
         }
 
@@ -307,16 +390,21 @@ impl<'a, IOH: IoHandler> VscApiActor<'a, IOH> {
             Some(vsc_api) => {
                 let config = self.fetch_receiver_config(id).await?;
                 let (receiver, monitoring, clock) = vsc_api.create_receiver(config.clone()).await?;
-                self.io_handler
+                if let Err(e) = self
+                    .io_handler
                     .receiver_created(
                         self.app_id.clone(),
-                        self.subsys,
+                        self.subsys.clone(),
                         receiver,
                         config,
                         clock,
                         monitoring,
                     )
-                    .await?;
+                    .await
+                {
+                    vsc_api.destroy_receiver(id).await?;
+                    return Err(e.into());
+                }
             }
         }
 
@@ -556,22 +644,22 @@ impl<'a, IOH: IoHandler> VscApiActor<'a, IOH> {
     }
 }
 
-pub trait IoHandler: Send + Sync + 'static {
+pub trait IoHandler: Clone + Send + Sync + 'static {
     fn sender_created(
-        &mut self,
+        &self,
         id: u32,
         sender_api: SenderApi,
         monitoring: Monitoring,
     ) -> impl Future<Output = IoHandlerResult<()>> + Send;
 
-    fn sender_updated(&mut self, id: u32) -> impl Future<Output = IoHandlerResult<()>> + Send;
+    fn sender_updated(&self, id: u32) -> impl Future<Output = IoHandlerResult<()>> + Send;
 
-    fn sender_deleted(&mut self, id: u32) -> impl Future<Output = IoHandlerResult<()>> + Send;
+    fn sender_deleted(&self, id: u32) -> impl Future<Output = IoHandlerResult<()>> + Send;
 
     fn receiver_created(
-        &mut self,
+        &self,
         app_id: String,
-        subsys: &mut SubsystemHandle,
+        subsys: Subsystem,
         receiver: ReceiverApi,
         config: ReceiverConfig,
         clock: Clock,
@@ -584,7 +672,7 @@ pub trait IoHandler: Send + Sync + 'static {
 }
 
 pub async fn init_management_agent(
-    subsys: &SubsystemHandle,
+    subsys: &Subsystem,
     app_id: String,
     io_handler: impl IoHandler,
 ) -> Result<()> {
@@ -631,19 +719,15 @@ pub async fn init_management_agent(
     let wbc = wb.clone();
     let wbd = wb.clone();
     let id = app_id.clone();
-    subsys.start(SubsystemBuilder::new(
-        "discovery",
-        async |s: &mut SubsystemHandle| {
-            let instance_name = id.clone();
-            s.start(SubsystemBuilder::new(
-                "state-transformers",
-                async |s: &mut SubsystemHandle| state_transformers::start(s, id, wbc).await,
-            ));
-            start_sap_discovery(&instance_name, wbd, s.create_cancellation_token()).await
-        },
-    ));
-
-    // TODO get VSC config from worterbuch
+    subsys.spawn("discovery", async |s| {
+        let instance_name = id.clone();
+        s.spawn("state-transformers", async |s| {
+            state_transformers::start(s, id, wbc).await
+        });
+        s.spawn("sap", |s| start_sap_discovery(instance_name, wbd, s));
+        s.shutdown_requested().await;
+        Ok::<(), ManagementAgentError>(())
+    });
 
     Aes67VscRestApi::new(subsys, config, worterbuch, io_handler).await?;
 
@@ -656,7 +740,7 @@ pub struct Aes67VscRestApi {}
 
 impl Aes67VscRestApi {
     pub async fn new<'a>(
-        subsys: &SubsystemHandle,
+        subsys: &Subsystem,
         persistent_config: AppConfig,
         worterbuch: CloneableWbApi,
         io_handler: impl IoHandler,
@@ -665,8 +749,6 @@ impl Aes67VscRestApi {
 
         let app_id = persistent_config.name.clone();
 
-        let shutdown_token = subsys.create_cancellation_token();
-
         let wbc = wb.clone();
 
         let autostart = wb
@@ -674,36 +756,35 @@ impl Aes67VscRestApi {
             .await?
             .unwrap_or(false);
 
+        info!("Starting VSC management agent …");
         let api = ManagementAgentApi::new(subsys, app_id, wb, io_handler);
 
         if autostart {
-            if let Err(e) = api.start_vsc().await {
-                error!("Could not start AES67-VSC REST API: {}", e);
+            info!("Autostarting VSC …");
+            if let Err(e) = api
+                .start_vsc()
+                .await
+                .into_diagnostic()
+                .wrap_err("Could not start AES67-VSC REST API")
+            {
+                error!("{e}");
+                eprintln!("{e:?}");
             };
         }
 
-        propagate_exit(
-            spawn_child_app(
-                #[cfg(feature = "tokio-metrics")]
-                persistent_config.vsc.app.name.clone(),
-                "aes67-rs-vsc-management-agent".to_owned(),
-                async |s: &mut SubsystemHandle| {
-                    run_rest_api(s, persistent_config, worterbuch, wbc, api).await
-                },
-                shutdown_token.clone(),
-                #[cfg(feature = "tokio-metrics")]
-                wb,
-            )
-            .into_diagnostic()?,
-            shutdown_token,
-        );
+        let name = "aes67-rs-vsc-management-agent".to_owned();
+
+        info!("Starting VSC management agent REST API …");
+        subsys.spawn(name, async |s| {
+            run_rest_api(s, persistent_config, worterbuch, wbc, api).await
+        });
 
         Ok(())
     }
 }
 
 async fn run_rest_api(
-    subsys: &SubsystemHandle,
+    subsys: Subsystem,
     mut persistent_config: AppConfig,
     worterbuch: CloneableWbApi,
     wb: Worterbuch,
@@ -740,7 +821,7 @@ async fn run_rest_api(
     };
 
     let app = build_worterbuch_router(
-        subsys,
+        &subsys,
         worterbuch,
         false,
         port,
@@ -801,7 +882,7 @@ async fn run_rest_api(
 
     select! {
         res = &mut serve => res?,
-        _ = subsys.on_shutdown_requested() => {
+        _ = subsys.shutdown_requested() => {
             handle.graceful_shutdown(Some(Duration::from_secs(5)));
             serve.await?;
         },

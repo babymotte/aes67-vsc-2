@@ -20,11 +20,10 @@ serde_json = "1.0.148"
 serde_yaml = "0.9.34"
 thiserror = "2.0.17"
 tokio = "1.47.1"
-tokio-graceful-shutdown = { version = "0.19.0", features = ["tracing"] }
-tokio-util = "0.7.16"
 tracing = "0.1.41"
-worterbuch = "1.4.0"
-worterbuch-client = "1.4.2"
+worterbuch = { path = "../../../worterbuch/worterbuch/worterbuch" }
+worterbuch-client = { path = "../../../worterbuch/worterbuch/worterbuch-client" }
+tosub = { version = "0.1.0", path = "../tosub" }
 
 [features]
 tokio-metrics = []

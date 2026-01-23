@@ -15,6 +15,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+use miette::IntoDiagnostic;
 use serde::Serialize;
 use std::{
     any::Any,
@@ -111,8 +112,10 @@ pub fn set_realtime_priority() {
         pid,
         ThreadPriority::Max,
         ThreadSchedulePolicy::Realtime(RealtimeThreadSchedulePolicy::Fifo),
-    ) {
-        warn!("Could not set thread priority: {e}");
+    )
+    .into_diagnostic()
+    {
+        warn!("Could not set thread priority: {:?}", e);
     } else {
         info!("Successfully set real time priority for thread {pid}.");
     }

@@ -1,6 +1,7 @@
 use crate::error::ManagementAgentResult;
 use aes67_rs::config::TelemetryConfig;
 use dirs::config_local_dir;
+use miette::{Context, IntoDiagnostic};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tokio::fs;
@@ -51,8 +52,14 @@ impl AppConfig {
     }
 
     pub async fn store(&self) {
-        if let Err(e) = self.try_store().await {
-            error!("Could not persist config: {e}");
+        if let Err(e) = self
+            .try_store()
+            .await
+            .into_diagnostic()
+            .wrap_err("Could not persist config")
+        {
+            error!("{e}");
+            eprintln!("{e:?}");
         }
     }
 

@@ -32,8 +32,8 @@ use dashmap::DashMap;
 use futures_lite::future::block_on;
 use lazy_static::lazy_static;
 use sdp::SessionDescription;
-use std::{env, io::Cursor, sync::Arc};
-use tokio_util::sync::CancellationToken;
+use std::{env, io::Cursor, sync::Arc, time::Duration};
+use tosub::Subsystem;
 use tracing::info;
 
 use crate::{AES_VSC_ERROR_RECEIVER_NOT_FOUND, AES_VSC_OK, Aes67VscReceiverConfig};
@@ -52,7 +52,13 @@ fn init_vsc() -> VscApiResult<Arc<VirtualSoundCardApi>> {
     let audio_nic = find_nic_with_name(config.audio.nic)?;
     let vsc_name = env::var("AES67_VSC_NAME").unwrap_or("aes67-virtual-sound-card".to_owned());
     info!("Creating new VSC with name '{vsc_name}' …");
-    let shutdown_token = CancellationToken::new();
+    let subsys = Subsystem::build_root(vsc_name.clone())
+        .with_timeout(Duration::from_secs(5))
+        .start(|s| async move {
+            s.shutdown_requested().await;
+            Ok::<(), VscInternalError>(())
+        });
+
     let clock = block_on(get_clock(
         vsc_name.clone(),
         config.ptp,
@@ -61,11 +67,12 @@ fn init_vsc() -> VscApiResult<Arc<VirtualSoundCardApi>> {
     ))?;
     let vsc = block_on(VirtualSoundCardApi::new(
         vsc_name.clone(),
-        shutdown_token,
+        &subsys,
         wb,
         clock,
         audio_nic,
     ))?;
+    // TODO store subsys somewhere to keep it alive
     info!("VSC '{}' created.", vsc_name);
     Ok(Arc::new(vsc))
 }

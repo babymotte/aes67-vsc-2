@@ -15,7 +15,6 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::app::{propagate_exit, spawn_child_app, wait_for_start};
 use crate::error::{SenderInternalError, SenderInternalResult};
 use crate::monitoring::{Monitoring, VscState, start_monitoring_service};
 use crate::sender::config::SenderConfig;
@@ -29,12 +28,11 @@ use crate::{
     receiver::{api::ReceiverApi, config::ReceiverConfig, start_receiver},
     sender::api::SenderApi,
 };
-use futures_lite::future::block_on;
 use pnet::datalink::NetworkInterface;
 use std::collections::HashMap;
+use tokio::select;
 use tokio::sync::{mpsc, oneshot};
-use tokio_graceful_shutdown::SubsystemHandle;
-use tokio_util::sync::CancellationToken;
+use tosub::Subsystem;
 use tracing::info;
 use worterbuch_client::{Worterbuch, topic};
 
@@ -70,13 +68,13 @@ pub struct VirtualSoundCardApi {
 impl VirtualSoundCardApi {
     pub async fn new(
         name: String,
-        shutdown_token: CancellationToken,
+        subsys: &Subsystem,
         worterbuch_client: Worterbuch,
         clock: Clock,
         audio_nic: NetworkInterface,
     ) -> VscApiResult<Self> {
         Ok(
-            VirtualSoundCardApi::try_new(name, shutdown_token, worterbuch_client, clock, audio_nic)
+            VirtualSoundCardApi::try_new(name, subsys, worterbuch_client, clock, audio_nic)
                 .await
                 .boxed()?,
         )
@@ -84,25 +82,20 @@ impl VirtualSoundCardApi {
 
     async fn try_new(
         name: String,
-        shutdown_token: CancellationToken,
+        subsys: &Subsystem,
         worterbuch_client: Worterbuch,
         clock: Clock,
         audio_nic: NetworkInterface,
     ) -> VscInternalResult<Self> {
-        let api_tx = VirtualSoundCardApi::create_vsc(
-            name,
-            shutdown_token,
-            worterbuch_client,
-            clock,
-            audio_nic,
-        )
-        .await?;
+        let api_tx =
+            VirtualSoundCardApi::create_vsc(name, subsys, worterbuch_client, clock, audio_nic)
+                .await?;
         Ok(VirtualSoundCardApi { api_tx })
     }
 
     async fn create_vsc(
         name: String,
-        shutdown_token: CancellationToken,
+        subsys: &Subsystem,
         worterbuch_client: Worterbuch,
         clock: Clock,
         audio_nic: NetworkInterface,
@@ -112,31 +105,13 @@ impl VirtualSoundCardApi {
         #[cfg(feature = "tokio-metrics")]
         let wb = worterbuch_client.clone();
 
-        let subsystem = async move |s: &mut SubsystemHandle| {
-            VirtualSoundCard::new(
-                name,
-                api_rx,
-                s.create_cancellation_token(),
-                worterbuch_client,
-                clock,
-                audio_nic,
-            )?
-            .run()
-            .await;
+        subsys.spawn(subsystem_name.clone(), |s| async move {
+            VirtualSoundCard::new(name, api_rx, s, worterbuch_client, clock, audio_nic)?
+                .run()
+                .await;
             Ok::<(), VscInternalError>(())
-        };
+        });
 
-        let mut app = spawn_child_app(
-            #[cfg(feature = "tokio-metrics")]
-            subsystem_name.clone(),
-            subsystem_name.clone(),
-            subsystem,
-            shutdown_token.clone(),
-            #[cfg(feature = "tokio-metrics")]
-            wb,
-        )?;
-        wait_for_start(subsystem_name, &mut app).await?;
-        propagate_exit(app, shutdown_token);
         Ok(api_tx)
     }
 
@@ -217,31 +192,22 @@ struct VirtualSoundCard {
     // tx_names: HashMap<u32, String>,
     // rx_names: HashMap<u32, String>,
     monitoring: Monitoring,
-    shutdown_token: CancellationToken,
+    subsys: Subsystem,
     wb: Worterbuch,
-}
-
-impl Drop for VirtualSoundCard {
-    fn drop(&mut self) {
-        info!("Virtual sound card '{}' destroyed.", self.name);
-        block_on(self.wb.set(topic!(self.name, "running"), false)).ok();
-    }
 }
 
 impl VirtualSoundCard {
     fn new(
         name: String,
         api_rx: mpsc::Receiver<VscApiMessage>,
-        shutdown_token: CancellationToken,
+        subsys: Subsystem,
         worterbuch_client: Worterbuch,
         clock: Clock,
         audio_nic: NetworkInterface,
     ) -> VscInternalResult<Self> {
-        let monitoring = start_monitoring_service(
-            name.clone(),
-            shutdown_token.clone(),
-            worterbuch_client.clone(),
-        )?;
+        info!("Creating virtual sound card '{}' …", name);
+        let monitoring =
+            start_monitoring_service(name.clone(), &subsys, worterbuch_client.clone())?;
         Ok(VirtualSoundCard {
             name,
             api_rx,
@@ -250,7 +216,7 @@ impl VirtualSoundCard {
             // tx_names: HashMap::new(),
             // rx_names: HashMap::new(),
             monitoring,
-            shutdown_token,
+            subsys,
             #[cfg(any(feature = "tokio-metrics", feature = "statime"))]
             wb: worterbuch_client,
             clock,
@@ -263,34 +229,45 @@ impl VirtualSoundCard {
 
         self.monitoring.vsc_state(VscState::VscCreated).await;
 
-        while let Some(msg) = self.api_rx.recv().await {
-            match msg {
-                VscApiMessage::CreateSender(config, tx) => {
-                    tx.send(self.create_sender(config).await).ok();
+        loop {
+            select! {
+                Some(msg) = self.api_rx.recv() => {
+                    match msg {
+                        VscApiMessage::CreateSender(config, tx) => {
+                            tx.send(self.create_sender(config).await).ok();
+                        }
+                        VscApiMessage::UpdateSender(config, tx) => {
+                            tx.send(self.update_sender(config).await).ok();
+                        }
+                        VscApiMessage::DestroySenderById(id, tx) => {
+                            tx.send(self.destroy_sender(id).await).ok();
+                        }
+                        VscApiMessage::CreateReceiver(config, tx) => {
+                            tx.send(self.create_receiver(config).await).ok();
+                        }
+                        VscApiMessage::UpdateReceiver(config, tx) => {
+                            tx.send(self.update_receiver(config).await).ok();
+                        }
+                        VscApiMessage::DestroyReceiverById(id, tx) => {
+                            tx.send(self.destroy_receiver(id).await).ok();
+                        }
+                        VscApiMessage::Stop(tx) => {
+                            info!("Stopping virtual sound card '{vsc_id}' …");
+                            self.subsys.request_local_shutdown();
+                            tx.send(()).ok();
+                            break;
+                        }
+                    }
                 }
-                VscApiMessage::UpdateSender(config, tx) => {
-                    tx.send(self.update_sender(config).await).ok();
-                }
-                VscApiMessage::DestroySenderById(id, tx) => {
-                    tx.send(self.destroy_sender(id).await).ok();
-                }
-                VscApiMessage::CreateReceiver(config, tx) => {
-                    tx.send(self.create_receiver(config).await).ok();
-                }
-                VscApiMessage::UpdateReceiver(config, tx) => {
-                    tx.send(self.update_receiver(config).await).ok();
-                }
-                VscApiMessage::DestroyReceiverById(id, tx) => {
-                    tx.send(self.destroy_receiver(id).await).ok();
-                }
-                VscApiMessage::Stop(tx) => {
-                    info!("Stopping Virtual sound card '{vsc_id}' …");
-                    drop(self);
-                    tx.send(()).ok();
+                _ = self.subsys.shutdown_requested() => {
+                    info!("Shutdown requested, stopping virtual sound card '{vsc_id}' …");
                     break;
-                }
+                },
             }
         }
+
+        info!("Virtual sound card '{vsc_id}' stopped.");
+        self.wb.set(topic!(vsc_id, "running"), false).await.ok();
     }
 
     async fn create_sender(
@@ -310,7 +287,7 @@ impl VirtualSoundCard {
             self.audio_nic.clone(),
             config,
             monitoring.clone(),
-            self.shutdown_token.clone(),
+            &self.subsys,
             #[cfg(feature = "tokio-metrics")]
             self.wb.clone(),
         )
@@ -361,7 +338,7 @@ impl VirtualSoundCard {
             config,
             clock.clone(),
             monitoring.clone(),
-            self.shutdown_token.clone(),
+            &self.subsys,
             #[cfg(feature = "tokio-metrics")]
             self.wb.clone(),
         )

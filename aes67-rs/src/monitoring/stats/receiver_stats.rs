@@ -97,7 +97,7 @@ impl ReceiverStats {
                 .await;
             }
             RxStats::MalformedRtpPacket(e) => {
-                warn!("{}: Received malformed rtp packet: {e:?}", self.id);
+                warn!("{}: Received malformed rtp packet: {e}", self.id);
             }
             RxStats::TimeTravellingPacket {
                 sequence_number,

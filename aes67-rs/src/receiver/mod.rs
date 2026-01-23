@@ -23,7 +23,6 @@ pub mod api;
 pub mod config;
 
 use crate::{
-    app::{spawn_child_app, wait_for_start},
     buffer::{AudioBufferPointer, ReceiverBufferProducer, receiver_buffer_channel},
     error::ReceiverInternalResult,
     monitoring::{Monitoring, ReceiverState, RxStats},
@@ -39,13 +38,12 @@ use pnet::datalink::NetworkInterface;
 use rtp_rs::{RtpReader, Seq};
 use std::net::SocketAddr;
 use tokio::{net::UdpSocket, select, sync::mpsc};
-use tokio_graceful_shutdown::SubsystemHandle;
-use tokio_util::sync::CancellationToken;
+use tosub::Subsystem;
 use tracing::{debug, info, instrument, warn};
 #[cfg(feature = "tokio-metrics")]
 use worterbuch_client::Worterbuch;
 
-#[instrument(skip(clock, monitoring, shutdown_token, wb))]
+#[instrument(skip(clock, monitoring, subsys, wb))]
 pub(crate) async fn start_receiver(
     app_id: String,
     id: String,
@@ -54,7 +52,7 @@ pub(crate) async fn start_receiver(
     config: ReceiverConfig,
     clock: Clock,
     monitoring: Monitoring,
-    shutdown_token: CancellationToken,
+    subsys: &Subsystem,
     #[cfg(feature = "tokio-metrics")] wb: Worterbuch,
 ) -> ReceiverInternalResult<ReceiverApi> {
     let receiver_id = id.clone();
@@ -63,7 +61,7 @@ pub(crate) async fn start_receiver(
     let socket = create_rx_socket(&config, iface)?;
 
     let subsystem_name = id.clone();
-    let subsystem = async move |s: &mut SubsystemHandle| {
+    let subsystem = async move |s| {
         Receiver {
             id,
             label,
@@ -82,25 +80,16 @@ pub(crate) async fn start_receiver(
         .await
     };
 
-    let mut app = spawn_child_app(
-        #[cfg(feature = "tokio-metrics")]
-        app_id,
-        subsystem_name.clone(),
-        subsystem,
-        shutdown_token,
-        #[cfg(feature = "tokio-metrics")]
-        wb,
-    )?;
-    wait_for_start(subsystem_name, &mut app).await?;
+    subsys.spawn(subsystem_name, subsystem);
 
     info!("Receiver '{receiver_id}' started successfully.");
     Ok(ReceiverApi::new(api_tx, rx))
 }
 
-struct Receiver<'a> {
+struct Receiver {
     id: String,
     label: String,
-    subsys: &'a mut SubsystemHandle,
+    subsys: Subsystem,
     config: ReceiverConfig,
     clock: Clock,
     api_rx: mpsc::Receiver<ReceiverApiMessage>,
@@ -112,7 +101,7 @@ struct Receiver<'a> {
     tx: ReceiverBufferProducer,
 }
 
-impl<'a> Receiver<'a> {
+impl Receiver {
     async fn run(mut self) -> ReceiverInternalResult<()> {
         let mut receive_buffer = [0; 65_535];
 
@@ -130,7 +119,7 @@ impl<'a> Receiver<'a> {
                     let time = self.clock.current_media_time()?;
                     self.rtp_data_received(&receive_buffer[..len], addr, time).await?;
                 },
-                _ = self.subsys.on_shutdown_requested() => {
+                _ = self.subsys.shutdown_requested() => {
                     info!("Shutdown of receiver '{}' requested.", self.id);
                     break;
                 },
@@ -152,7 +141,6 @@ impl<'a> Receiver<'a> {
         match api_msg {
             ReceiverApiMessage::Stop(tx) => {
                 self.subsys.request_local_shutdown();
-                self.subsys.wait_for_children().await;
                 tx.send(()).ok();
             }
         }
@@ -293,7 +281,7 @@ mod monitoring {
 
     use super::*;
 
-    impl<'a> Receiver<'a> {
+    impl Receiver {
         pub(crate) async fn report_receiver_created(&mut self, buffer: AudioBufferPointer) {
             self.monitoring
                 .receiver_state(ReceiverState::Created {

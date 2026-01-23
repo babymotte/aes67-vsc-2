@@ -100,18 +100,19 @@ impl From<ManagementAgentError> for (StatusCode, String) {
 }
 
 pub trait LogError<T, E> {
-    fn log_error(self, context: &str) -> Result<T, E>;
+    fn log_error(self, context: &'static str) -> Result<T, E>;
 }
 
 impl<T, E> LogError<T, E> for Result<T, E>
 where
-    E: std::fmt::Display,
+    E: std::fmt::Debug + std::fmt::Display,
 {
-    fn log_error(self, context: &str) -> Result<T, E> {
+    fn log_error(self, context: &'static str) -> Result<T, E> {
         match &self {
             Ok(_) => {}
             Err(e) => {
                 tracing::error!("{}: {}", context, e);
+                eprintln!("{e:?}")
             }
         }
         self
@@ -119,7 +120,7 @@ where
 }
 
 #[derive(Error, Debug, Diagnostic)]
-#[error("I/O Handler error: {0}")]
+#[error("{0}")]
 pub struct IoHandlerError(Report);
 
 impl From<Report> for IoHandlerError {

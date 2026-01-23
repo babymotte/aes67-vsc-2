@@ -2,16 +2,16 @@ use aes67_rs_sdp::SdpWrapper;
 use sap_rs::{Event, Sap};
 use std::time::SystemTime;
 use tokio::select;
-use tokio_util::sync::CancellationToken;
+use tosub::Subsystem;
 use tracing::{debug, info};
 use worterbuch_client::{Worterbuch, topic};
 
 use crate::{Session, error::DiscoveryResult};
 
 pub async fn start_sap_discovery(
-    instance_name: &str,
+    instance_name: String,
     worterbuch_client: Worterbuch,
-    shutdown_token: CancellationToken,
+    subsys: Subsystem,
 ) -> DiscoveryResult<()> {
     info!("Starting SAP discovery …");
 
@@ -22,9 +22,9 @@ pub async fn start_sap_discovery(
 
     loop {
         select! {
-            _ = shutdown_token.cancelled() => break,
+            _ = subsys.shutdown_requested() => break,
             evt = events.recv() => match evt {
-                Some(msg) => process_event(msg, instance_name, &worterbuch_client).await?,
+                Some(msg) => process_event(msg, &instance_name, &worterbuch_client).await?,
                 None => break,
             }
         }

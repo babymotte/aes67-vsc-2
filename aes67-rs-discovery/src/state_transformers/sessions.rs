@@ -5,12 +5,12 @@ use std::{
     time::Duration,
 };
 use tokio::{select, sync::mpsc};
-use tokio_graceful_shutdown::SubsystemHandle;
+use tosub::Subsystem;
 use tracing::{debug, info, warn};
 use worterbuch_client::{TypedPStateEvent, Worterbuch, topic};
 
 pub async fn start(
-    subsys: &mut SubsystemHandle,
+    subsys: Subsystem,
     instance_name: String,
     worterbuch_client: Worterbuch,
 ) -> DiscoveryResult<()> {
@@ -47,12 +47,12 @@ struct ProcessLoop {
 impl ProcessLoop {
     async fn start(
         mut self,
-        subsys: &mut SubsystemHandle,
+        subsys: Subsystem,
         mut all_sessions: mpsc::UnboundedReceiver<TypedPStateEvent<Session>>,
     ) -> DiscoveryResult<()> {
         loop {
             select! {
-                _ = subsys.on_shutdown_requested() => break,
+                _ = subsys.shutdown_requested() => break,
                 Some(event) = all_sessions.recv() => self.process_session(event).await?,
                 else => break,
             }

@@ -22,11 +22,11 @@ use tokio::{
     select,
     sync::{broadcast, mpsc},
 };
-use tokio_graceful_shutdown::SubsystemHandle;
+use tosub::Subsystem;
 use tracing::info;
 
 pub async fn health(
-    subsys: &mut SubsystemHandle,
+    subsys: Subsystem,
     rx: mpsc::Receiver<Report>,
     tx: broadcast::Sender<Report>,
 ) -> Result<(), &'static str> {
@@ -58,8 +58,8 @@ impl PlayoutHealth {
     }
 }
 
-struct HealthActor<'a> {
-    subsys: &'a mut SubsystemHandle,
+struct HealthActor {
+    subsys: Subsystem,
     rx: mpsc::Receiver<Report>,
     tx: broadcast::Sender<Report>,
     senders: HashMap<String, SenderHealth>,
@@ -67,12 +67,8 @@ struct HealthActor<'a> {
     playouts: HashMap<String, PlayoutHealth>,
 }
 
-impl<'a> HealthActor<'a> {
-    fn new(
-        subsys: &'a mut SubsystemHandle,
-        rx: mpsc::Receiver<Report>,
-        tx: broadcast::Sender<Report>,
-    ) -> Self {
+impl HealthActor {
+    fn new(subsys: Subsystem, rx: mpsc::Receiver<Report>, tx: broadcast::Sender<Report>) -> Self {
         Self {
             subsys,
             rx,
@@ -87,12 +83,15 @@ impl<'a> HealthActor<'a> {
         info!("Health subsystem started.");
         loop {
             select! {
-                Some(report) = self.rx.recv() => self.process_report(report).await,
-                _ = self.subsys.on_shutdown_requested() => break,
-                else => {
-                    self.subsys.request_shutdown();
-                    break;
+                recv = self.rx.recv() => match recv {
+                    Some(report) => self.process_report(report).await,
+                    None => {
+                        info!("Health report channel closed; shutting down subsystem");
+                        self.subsys.request_global_shutdown();
+                        break;
+                    }
                 },
+                _ = self.subsys.shutdown_requested() => break,
             }
         }
         info!("Health subsystem stopped.");

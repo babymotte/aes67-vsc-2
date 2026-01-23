@@ -13,8 +13,7 @@ use jack::{
 use miette::IntoDiagnostic;
 use std::time::{Duration, Instant};
 use tokio::{runtime::Handle, sync::mpsc, time::timeout};
-use tokio_graceful_shutdown::{NestedSubsystem, SubsystemHandle};
-use tokio_util::sync::CancellationToken;
+use tosub::Subsystem;
 use tracing::{error, info};
 
 struct State {
@@ -24,7 +23,7 @@ struct State {
     config: ReceiverConfig,
     muted: bool,
     monitoring: Monitoring,
-    shutdown_token: CancellationToken,
+    subsys: Subsystem,
     async_runtime: Handle,
 }
 
@@ -32,12 +31,12 @@ impl State {}
 
 pub async fn start_playout(
     app_id: String,
-    subsys: &mut SubsystemHandle,
+    subsys: Subsystem,
     receiver: ReceiverApi,
     config: ReceiverConfig,
     clock: Clock,
     monitoring: Monitoring,
-) -> miette::Result<NestedSubsystem> {
+) -> miette::Result<Subsystem> {
     // TODO evaluate client status
     let (client, status) =
         Client::new(&config.label, ClientOptions::default()).into_diagnostic()?;
@@ -80,7 +79,7 @@ pub async fn start_playout(
         config,
         muted: false,
         monitoring,
-        shutdown_token: subsys.create_cancellation_token(),
+        subsys: subsys.clone(),
         async_runtime: Handle::current(),
     };
     let process_handler =
@@ -90,7 +89,7 @@ pub async fn start_playout(
         .activate_async(notification_handler, process_handler)
         .into_diagnostic()?;
 
-    let session_manager = start_session_manager(subsys, active_client, notifications, app_id);
+    let session_manager = start_session_manager(&subsys, active_client, notifications, app_id);
 
     Ok(session_manager)
 }
@@ -127,9 +126,7 @@ fn process(state: &mut State, _: &Client, ps: &ProcessScope) -> Control {
     match state.async_runtime.block_on(async {
         timeout(
             Duration::from_millis(100),
-            state
-                .receiver
-                .receive(buffers, ingress_time, &state.shutdown_token),
+            state.receiver.receive(buffers, ingress_time, &state.subsys),
         )
         .await
     }) {

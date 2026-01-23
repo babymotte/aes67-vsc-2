@@ -17,7 +17,7 @@
 
 use crate::{buffer::ReceiverBufferConsumer, error::ReceiverInternalResult, formats::Frames};
 use tokio::sync::{mpsc, oneshot};
-use tokio_util::sync::CancellationToken;
+use tosub::Subsystem;
 use tracing::instrument;
 
 #[derive(Debug, PartialEq)]
@@ -57,10 +57,8 @@ impl ReceiverApi {
         &mut self,
         buffers: impl Iterator<Item = Option<&'a mut [f32]>>,
         ingress_time: Frames,
-        cancellation_token: &CancellationToken,
+        subsys: &Subsystem,
     ) -> ReceiverInternalResult<bool> {
-        self.rx
-            .read(buffers, ingress_time, cancellation_token)
-            .await
+        self.rx.read(buffers, ingress_time, subsys).await
     }
 }

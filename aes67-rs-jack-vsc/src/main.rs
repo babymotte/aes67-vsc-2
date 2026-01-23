@@ -23,12 +23,9 @@ mod telemetry;
 
 use aes67_rs_jack_vsc::JackIoHandler;
 use aes67_rs_vsc_management_agent::{config::AppConfig, init_management_agent};
-use miette::miette;
 use std::time::Duration;
-use tokio_graceful_shutdown::{
-    SubsystemBuilder, SubsystemHandle, Toplevel, errors::SubsystemError,
-};
-use tracing::{error, info};
+use tosub::Subsystem;
+use tracing::info;
 
 #[tokio::main]
 async fn main() -> miette::Result<()> {
@@ -38,40 +35,22 @@ async fn main() -> miette::Result<()> {
 
     telemetry::init(&app_id, config.telemetry.as_ref()).await?;
 
-    let res = Toplevel::new(async move |s: &mut SubsystemHandle| {
-        s.start(SubsystemBuilder::new(
-            app_id.clone(),
-            async move |s: &mut SubsystemHandle| run(s, app_id).await,
-        ));
-    })
-    .catch_signals()
-    .handle_shutdown_requests(Duration::from_secs(2))
-    .await;
-
-    if let Err(e) = &res {
-        for e in e.get_subsystem_errors() {
-            match e {
-                SubsystemError::Failed(_, err) => {
-                    error!("{e}: {err}");
-                    eprintln!("{:?}", err.get_error());
-                }
-                SubsystemError::Panicked(_) => {
-                    error!("{e}");
-                }
-            }
-        }
-        return Err(miette!("aes67-jack-vsc exited with errors"));
-    }
+    Subsystem::build_root(app_id.clone())
+        .catch_signals()
+        .with_timeout(Duration::from_secs(5))
+        .start(|subsys| async move { run(subsys, app_id).await })
+        .join()
+        .await;
 
     Ok(())
 }
 
-async fn run(subsys: &mut SubsystemHandle, id: String) -> miette::Result<()> {
+async fn run(subsys: Subsystem, id: String) -> miette::Result<()> {
     info!("Starting {} …", id);
 
-    init_management_agent(subsys, id, JackIoHandler::new()).await?;
+    init_management_agent(&subsys, id, JackIoHandler::new()).await?;
 
-    subsys.on_shutdown_requested().await;
+    subsys.shutdown_requested().await;
 
     Ok(())
 }
@@ -112,7 +91,7 @@ async fn run(subsys: &mut SubsystemHandle, id: String) -> miette::Result<()> {
 //             {
 //                 Ok((sender, _)) => start_recording(app_id, s, sender, descriptor, clk).await,
 //                 Err(e) => {
-//                     error!("Error creating sender '{}': {}", descriptor.id, e);
+//                     error!("Error creating sender '{}': {:?}", descriptor.id, e);
 //                     Ok(())
 //                 }
 //             },
@@ -136,7 +115,7 @@ async fn run(subsys: &mut SubsystemHandle, id: String) -> miette::Result<()> {
 //                     start_playout(app_id, s, receiver, descriptor, clk, monitoring, rt).await
 //                 }
 //                 Err(e) => {
-//                     error!("Error creating receiver '{}': {}", descriptor.id, e);
+//                     error!("Error creating receiver '{}': {:?}", descriptor.id, e);
 //                     Ok(())
 //                 }
 //             },

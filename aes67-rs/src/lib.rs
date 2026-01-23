@@ -15,7 +15,6 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-pub mod app;
 pub mod buffer;
 pub mod config;
 pub mod error;

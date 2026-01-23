@@ -20,7 +20,6 @@ mod observability;
 mod stats;
 
 use crate::{
-    app::{propagate_exit, spawn_child_app},
     buffer::AudioBufferPointer,
     error::{ChildAppError, ChildAppResult},
     formats::{Frames, MilliSeconds},
@@ -37,8 +36,7 @@ use tokio::{
         mpsc::{self, error::TrySendError},
     },
 };
-use tokio_graceful_shutdown::{SubsystemBuilder, SubsystemHandle};
-use tokio_util::sync::CancellationToken;
+use tosub::Subsystem;
 use tracing::warn;
 use worterbuch_client::Worterbuch;
 
@@ -298,7 +296,7 @@ impl Monitoring {
 
 pub fn start_monitoring_service(
     root_id: String,
-    shutdown_token: CancellationToken,
+    subsys: &Subsystem,
     worterbuch_client: Worterbuch,
 ) -> ChildAppResult<Monitoring> {
     let (mon_tx, mon_rx) = mpsc::channel::<(MonitoringEvent, String)>(1024);
@@ -309,13 +307,7 @@ pub fn start_monitoring_service(
 
     let (child, start) = parent.deferred_child(root_id);
 
-    monitoring(
-        client_name,
-        mon_rx,
-        start,
-        shutdown_token,
-        worterbuch_client,
-    )?;
+    monitoring(client_name, mon_rx, start, subsys, worterbuch_client)?;
 
     Ok(child)
 }
@@ -324,7 +316,7 @@ fn monitoring(
     client_name: String,
     mon_rx: mpsc::Receiver<(MonitoringEvent, String)>,
     start: impl Future<Output = ()> + Send + 'static,
-    shutdown_token: CancellationToken,
+    subsys: &Subsystem,
     worterbuch_client: Worterbuch,
 ) -> ChildAppResult<()> {
     #[cfg(feature = "tokio-metrics")]
@@ -334,33 +326,19 @@ fn monitoring(
     let (stats_tx, stats_rx) = mpsc::channel::<Report>(1024);
     let (observ_tx, observ_rx) = broadcast::channel::<Report>(1024);
 
-    let stats = async |s: &mut SubsystemHandle| stats(s, mon_rx, stats_tx).await;
-    let health = async |s: &mut SubsystemHandle| health(s, stats_rx, observ_tx).await;
+    let stats = async |s| stats(s, mon_rx, stats_tx).await;
+    let health = async |s| health(s, stats_rx, observ_tx).await;
     let wb = worterbuch_client.clone();
-    let observability =
-        async |s: &mut SubsystemHandle| observability(s, client_name, observ_rx, wb).await;
+    let observability = async |s| observability(s, client_name, observ_rx, wb).await;
 
-    let subsystem = async move |s: &mut SubsystemHandle| {
+    subsys.spawn(name, async move |s| {
         spawn(start);
-        s.start(SubsystemBuilder::new("stats", stats));
-        s.start(SubsystemBuilder::new("health", health));
-        s.start(SubsystemBuilder::new("observability", observability));
-        s.on_shutdown_requested().await;
+        s.spawn("stats", stats);
+        s.spawn("health", health);
+        s.spawn("observability", observability);
+        s.shutdown_requested().await;
         Ok::<(), ChildAppError>(())
-    };
-
-    propagate_exit(
-        spawn_child_app(
-            #[cfg(feature = "tokio-metrics")]
-            app_id,
-            name,
-            subsystem,
-            shutdown_token.clone(),
-            #[cfg(feature = "tokio-metrics")]
-            worterbuch_client,
-        )?,
-        shutdown_token,
-    );
+    });
 
     Ok(())
 }

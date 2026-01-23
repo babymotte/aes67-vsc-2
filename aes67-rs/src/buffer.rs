@@ -32,7 +32,7 @@ use tokio::{
     select,
     sync::{mpsc, watch},
 };
-use tokio_util::sync::CancellationToken;
+use tosub::Subsystem;
 use tracing::{debug, error, warn};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -319,7 +319,7 @@ impl ReceiverBufferConsumer {
         &mut self,
         buffers: impl Iterator<Item = Option<&'a mut [f32]>>,
         ingress_time: Frames,
-        cancellation_token: &CancellationToken,
+        subsys: &Subsystem,
     ) -> ReceiverInternalResult<bool> {
         let buf = self.buffer_pointer.buffer::<f32>();
 
@@ -349,7 +349,7 @@ impl ReceiverBufferConsumer {
 
                 select! {
                     lrf = self.rx.wait_for(|f| f >= &last_requested_frame) => latest_received_frame = *lrf?,
-                    _ = cancellation_token.cancelled() => return Ok(false),
+                    _ = subsys.shutdown_requested() => return Ok(false),
                 }
 
                 let wait_end = Instant::now();
@@ -495,11 +495,11 @@ impl SenderBufferProducer {
 impl SenderBufferConsumer {
     pub async fn read(
         &mut self,
-        cancellation_token: &CancellationToken,
+        subsys: &Subsystem,
     ) -> SenderInternalResult<(usize, Frames, Frames)> {
         let received = select! {
             it = self.rx.recv() => it,
-            _ = cancellation_token.cancelled() => return Err(SenderInternalError::ShutdownTriggered),
+            _ = subsys.shutdown_requested() => return Err(SenderInternalError::ShutdownTriggered),
         };
 
         let Some(data) = received else {
