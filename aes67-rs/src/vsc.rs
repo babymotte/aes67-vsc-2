@@ -41,7 +41,7 @@ type ApiMessageSender = mpsc::Sender<VscApiMessage>;
 enum VscApiMessage {
     CreateSender(
         SenderConfig,
-        oneshot::Sender<SenderInternalResult<(SenderApi, Monitoring)>>,
+        oneshot::Sender<SenderInternalResult<(SenderApi, Monitoring, Clock)>>,
     ),
     UpdateSender(
         SenderConfig,
@@ -118,7 +118,7 @@ impl VirtualSoundCardApi {
     pub async fn create_sender(
         &self,
         config: SenderConfig,
-    ) -> VscApiResult<(SenderApi, Monitoring)> {
+    ) -> VscApiResult<(SenderApi, Monitoring, Clock)> {
         let (tx, rx) = oneshot::channel();
         self.api_tx
             .send(VscApiMessage::CreateSender(config, tx))
@@ -273,7 +273,7 @@ impl VirtualSoundCard {
     async fn create_sender(
         &mut self,
         config: SenderConfig,
-    ) -> SenderInternalResult<(SenderApi, Monitoring)> {
+    ) -> SenderInternalResult<(SenderApi, Monitoring, Clock)> {
         let id = config.id;
         let label = config.label.clone();
         let qualified_id = format!("{}/tx/{}", self.name, id);
@@ -297,7 +297,7 @@ impl VirtualSoundCard {
         self.txs.insert(id, sender_api.clone());
 
         info!("Sender {qualified_id} successfully created.");
-        Ok((sender_api, monitoring))
+        Ok((sender_api, monitoring, self.clock.clone()))
     }
 
     async fn update_sender(&mut self, config: SenderConfig) -> SenderInternalResult<SenderApi> {

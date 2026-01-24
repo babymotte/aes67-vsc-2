@@ -1,8 +1,8 @@
-use crate::play::start_playout;
+use crate::{play::start_playout, record::start_recording};
 use aes67_rs::{
     monitoring::Monitoring,
     receiver::{api::ReceiverApi, config::ReceiverConfig},
-    sender::api::SenderApi,
+    sender::{api::SenderApi, config::SenderConfig},
     time::Clock,
 };
 use aes67_rs_vsc_management_agent::{IoHandler, error::IoHandlerResult};
@@ -39,8 +39,18 @@ impl JackIoHandlerActor {
 
     async fn process_message(&mut self, msg: JackIoHandlerMessage) {
         match msg {
-            JackIoHandlerMessage::SenderCreated(id, sender_api, monitoring, resp_tx) => {
-                let res = self.sender_created(id, sender_api, monitoring).await;
+            JackIoHandlerMessage::SenderCreated(
+                app_id,
+                subsys,
+                receiver,
+                config,
+                clock,
+                monitoring,
+                resp_tx,
+            ) => {
+                let res = self
+                    .sender_created(app_id, subsys, receiver, config, clock, monitoring)
+                    .await;
                 let _ = resp_tx.send(res);
             }
             JackIoHandlerMessage::SenderUpdated(id, resp_tx) => {
@@ -78,11 +88,17 @@ impl JackIoHandlerActor {
 
     async fn sender_created(
         &mut self,
-        id: u32,
-        sender_api: SenderApi,
+        app_id: String,
+        subsys: Subsystem,
+        sender: SenderApi,
+        config: SenderConfig,
+        clock: Clock,
         monitoring: Monitoring,
     ) -> IoHandlerResult<()> {
-        return Err(miette!("not implemented").into());
+        let id = config.id;
+        let recording = start_recording(app_id, subsys, sender, config, clock, monitoring).await?;
+        self.clients.insert(id, recording);
+        Ok(())
     }
 
     async fn sender_updated(&mut self, id: u32) -> IoHandlerResult<()> {
@@ -90,7 +106,12 @@ impl JackIoHandlerActor {
     }
 
     async fn sender_deleted(&mut self, id: u32) -> IoHandlerResult<()> {
-        return Err(miette!("not implemented").into());
+        let Some(recording) = self.clients.remove(&id) else {
+            error!("No recording found for sender id {}", id);
+            return Ok(());
+        };
+        recording.request_local_shutdown();
+        Ok(())
     }
 
     async fn receiver_created(
@@ -133,8 +154,11 @@ impl Drop for JackIoHandlerActor {
 
 enum JackIoHandlerMessage {
     SenderCreated(
-        u32,
+        String,
+        Subsystem,
         SenderApi,
+        SenderConfig,
+        Clock,
         Monitoring,
         oneshot::Sender<IoHandlerResult<()>>,
     ),
@@ -172,12 +196,17 @@ impl JackIoHandler {
 impl IoHandler for JackIoHandler {
     async fn sender_created(
         &self,
-        id: u32,
-        sender_api: SenderApi,
+        app_id: String,
+        subsys: Subsystem,
+        sender: SenderApi,
+        config: SenderConfig,
+        clock: Clock,
         monitoring: Monitoring,
     ) -> IoHandlerResult<()> {
         let (resp_tx, resp_rx) = oneshot::channel();
-        let msg = JackIoHandlerMessage::SenderCreated(id, sender_api, monitoring, resp_tx);
+        let msg = JackIoHandlerMessage::SenderCreated(
+            app_id, subsys, sender, config, clock, monitoring, resp_tx,
+        );
         self.tx.send(msg).await.into_diagnostic()?;
         resp_rx.await.into_diagnostic()??;
         Ok(())

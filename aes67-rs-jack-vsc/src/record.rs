@@ -4,7 +4,11 @@ use crate::{
 };
 use aes67_rs::{
     buffer::AudioBufferPointer,
-    sender::{api::SenderApi, config::TxDescriptor},
+    monitoring::{self, Monitoring},
+    sender::{
+        api::SenderApi,
+        config::{SenderConfig, TxDescriptor},
+    },
     time::{Clock, MILLIS_PER_SEC_F},
 };
 use futures_lite::future::block_on;
@@ -33,22 +37,32 @@ pub async fn start_recording(
     app_id: String,
     subsys: Subsystem,
     sender: SenderApi,
-    descriptor: TxDescriptor,
+    config: SenderConfig,
     clock: Clock,
-) -> miette::Result<()> {
+    monitoring: Monitoring,
+) -> miette::Result<Subsystem> {
     // TODO evaluate client status
     let (client, status) =
-        Client::new(&descriptor.label, ClientOptions::default()).into_diagnostic()?;
+        Client::new(&config.label, ClientOptions::default()).into_diagnostic()?;
 
     info!(
         "JACK client '{}' created with status {:?}",
-        descriptor.label, status
+        config.label, status
     );
 
     let mut ports = vec![];
 
-    for (i, l) in descriptor.channel_labels.iter().enumerate() {
-        let label = l.to_owned().unwrap_or(format!("in{}", i + 1));
+    for l in config
+        .channel_labels
+        .clone()
+        .unwrap_or_else(|| {
+            (0..config.audio_format.frame_format.channels)
+                .map(|i| format!("{}", i + 1))
+                .collect()
+        })
+        .iter()
+    {
+        let label = l.to_owned();
         ports.push(
             client
                 .register_port(&label, AudioIn::default())
@@ -56,12 +70,12 @@ pub async fn start_recording(
         );
     }
 
-    let send_buffer_len = descriptor.audio_format.sample_rate as usize
-        * descriptor.audio_format.frame_format.channels;
+    let send_buffer_len =
+        config.audio_format.sample_rate as usize * config.audio_format.frame_format.channels;
     let send_buffer = vec![0.0; send_buffer_len].into();
 
     let (tx, notifications) = mpsc::channel(1024);
-    let client_id = descriptor.label.clone();
+    let client_id = config.label.clone();
     let notification_handler = SessionManagerNotificationHandler { client_id, tx };
     let process_handler_state = State {
         app_id: app_id.clone(),
@@ -69,13 +83,13 @@ pub async fn start_recording(
         ports,
         channel_bufs: vec![
             AudioBufferPointer::new(0, 0);
-            descriptor.audio_format.frame_format.channels
+            config.audio_format.frame_format.channels
         ]
         .into(),
         clock: JackClock::new(clock),
         send_buffer,
         send_buf_pos: 0,
-        sample_rate: descriptor.audio_format.sample_rate,
+        sample_rate: config.audio_format.sample_rate,
     };
     let process_handler =
         ClosureProcessHandler::with_state(process_handler_state, process, buffer_change);
@@ -83,11 +97,9 @@ pub async fn start_recording(
     let active_client = client
         .activate_async(notification_handler, process_handler)
         .into_diagnostic()?;
-    start_session_manager(&subsys, active_client, notifications, app_id);
+    let session_manager = start_session_manager(&subsys, active_client, notifications, app_id);
 
-    subsys.shutdown_requested().await;
-
-    Ok(())
+    Ok(session_manager)
 }
 
 fn buffer_change(_: &mut State, client: &Client, buffer_len: jack::Frames) -> Control {

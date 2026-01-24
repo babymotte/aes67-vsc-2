@@ -372,8 +372,19 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
             None => return Err(VscApiError::NotRunning.into()),
             Some(vsc_api) => {
                 let config = self.fetch_sender_config(id).await?;
-                let (api, monitoring) = vsc_api.create_sender(config).await?;
-                if let Err(e) = self.io_handler.sender_created(id, api, monitoring).await {
+                let (api, monitoring, clock) = vsc_api.create_sender(config.clone()).await?;
+                if let Err(e) = self
+                    .io_handler
+                    .sender_created(
+                        self.app_id.clone(),
+                        self.subsys.clone(),
+                        api,
+                        config,
+                        clock,
+                        monitoring,
+                    )
+                    .await
+                {
                     error!("Could not create I/O handler for sender '{}': {}", id, e);
                     vsc_api.destroy_sender(id).await?;
                     return Err(e.into());
@@ -389,13 +400,13 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
             None => return Err(VscApiError::NotRunning.into()),
             Some(vsc_api) => {
                 let config = self.fetch_receiver_config(id).await?;
-                let (receiver, monitoring, clock) = vsc_api.create_receiver(config.clone()).await?;
+                let (api, monitoring, clock) = vsc_api.create_receiver(config.clone()).await?;
                 if let Err(e) = self
                     .io_handler
                     .receiver_created(
                         self.app_id.clone(),
                         self.subsys.clone(),
-                        receiver,
+                        api,
                         config,
                         clock,
                         monitoring,
@@ -647,8 +658,11 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
 pub trait IoHandler: Clone + Send + Sync + 'static {
     fn sender_created(
         &self,
-        id: u32,
-        sender_api: SenderApi,
+        app_id: String,
+        subsys: Subsystem,
+        sender: SenderApi,
+        config: SenderConfig,
+        clock: Clock,
         monitoring: Monitoring,
     ) -> impl Future<Output = IoHandlerResult<()>> + Send;
 
