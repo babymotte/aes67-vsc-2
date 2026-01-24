@@ -11,9 +11,9 @@ futures-lite = "2.6.1"
 lazy_static = "1.5.0"
 safer-ffi = "0.1.13"
 sdp = "0.10.0"
-tosub = { version = "0.1.0", path = "../tosub" }
+tosub = "0.1.0"
 tracing = "0.1.43"
-worterbuch-client = { path = "../../../worterbuch/worterbuch/worterbuch-client" }
+worterbuch-client = "1.5.0-alpha.1"
 
 [features]
 headers = ["safer-ffi/headers"]

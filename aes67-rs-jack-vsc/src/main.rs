@@ -21,7 +21,7 @@ mod record;
 mod session_manager;
 mod telemetry;
 
-use aes67_rs_jack_vsc::JackIoHandler;
+use aes67_rs_jack_vsc::io_handler::JackIoHandler;
 use aes67_rs_vsc_management_agent::{config::AppConfig, init_management_agent};
 use std::time::Duration;
 use tosub::Subsystem;
@@ -54,75 +54,3 @@ async fn run(subsys: Subsystem, id: String) -> miette::Result<()> {
 
     Ok(())
 }
-
-// async fn run(subsys: &mut SubsystemHandle, config: PersistentConfig) -> miette::Result<()> {
-//     let id = config.vsc.instance_name().to_owned();
-
-//     let vsc_config = config.vsc.clone();
-
-//     let ptp_mode = vsc_config.ptp;
-
-//     let clock = get_clock(id.to_owned(), ptp_mode, vsc_config.sample_rate, wb.clone()).await?;
-//     let audio_nic = find_nic_with_name(&config.vsc.audio.nic)?;
-
-//     Aes67VscRestApi::new(config, worterbuch, subsys.create_cancellation_token()).await?;
-
-//     let vsc = VirtualSoundCardApi::new(
-//         id.to_owned(),
-//         subsys.create_cancellation_token(),
-//         wb,
-//         clock.clone(),
-//         audio_nic,
-//     )
-//     .await
-//     .into_diagnostic()?;
-
-//     for tx_config in vsc_config.senders {
-//         let descriptor = TxDescriptor::try_from(&tx_config).into_diagnostic()?;
-//         let vsc = vsc.clone();
-//         let app_id = id.clone();
-//         let clk = clock.clone();
-//         subsys.start(SubsystemBuilder::new(
-//             format!("sender/{}", descriptor.id),
-//             async move |s: &mut SubsystemHandle| match vsc
-//                 .create_sender(tx_config)
-//                 .await
-//                 .into_diagnostic()
-//             {
-//                 Ok((sender, _)) => start_recording(app_id, s, sender, descriptor, clk).await,
-//                 Err(e) => {
-//                     error!("Error creating sender '{}': {:?}", descriptor.id, e);
-//                     Ok(())
-//                 }
-//             },
-//         ));
-//     }
-
-//     for rx_config in vsc_config.receivers {
-//         let descriptor = RxDescriptor::try_from(&rx_config).into_diagnostic()?;
-//         let vsc = vsc.clone();
-//         let app_id = id.clone();
-//         let clk = clock.clone();
-//         let rt = Handle::current();
-//         subsys.start(SubsystemBuilder::new(
-//             format!("receiver/{}", descriptor.id),
-//             async move |s: &mut SubsystemHandle| match vsc
-//                 .create_receiver(rx_config)
-//                 .await
-//                 .into_diagnostic()
-//             {
-//                 Ok((receiver, monitoring, _)) => {
-//                     start_playout(app_id, s, receiver, descriptor, clk, monitoring, rt).await
-//                 }
-//                 Err(e) => {
-//                     error!("Error creating receiver '{}': {:?}", descriptor.id, e);
-//                     Ok(())
-//                 }
-//             },
-//         ));
-//     }
-
-//     subsys.on_shutdown_requested().await;
-
-//     Ok(())
-// }
