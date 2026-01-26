@@ -15,28 +15,15 @@ import { appName, running } from "./vscState";
 import { connected, get, locked, pSubscribe, set } from "./worterbuch";
 import Indicator from "./components/Indicator";
 import { useNavigate } from "@solidjs/router";
+import { createReceiverConfig, createSenderConfig } from "./api";
 
 function AddSenderButton(props: {
   tabSignal: [Accessor<number>, Setter<number>];
 }) {
   return (
     <button
-      onclick={async () => {
-        const an = appName();
-        console.log("Add sender ...");
-        let id = await locked(`${appName()}/config/tx/next-id`, async () => {
-          const id = (await get<number>(`${appName()}/config/tx/next-id`)) || 1;
-          set(`${an}/config/tx/next-id`, id + 1);
-          return id;
-        });
-        if (id != null) {
-          set(`${an}/config/tx/senders/${id}/name`, null);
-          set(`${an}/config/tx/senders/${id}/channels`, 2);
-          set(`${an}/config/tx/senders/${id}/autostart`, false);
-          set(`${an}/config/tx/senders/${id}/packetTime`, 1);
-          set(`${an}/config/tx/senders/${id}/sampleFormat`, "L24");
-        }
-        props.tabSignal[1](Number.MAX_SAFE_INTEGER);
+      onclick={() => {
+        addSender(props.tabSignal[1]);
       }}
     >
       +
@@ -44,42 +31,29 @@ function AddSenderButton(props: {
   );
 }
 
-const addReceiver = async (
-  setTab: Setter<number>,
-  name: string | null = null,
-  channels: number = 2,
-  autostart: boolean = false,
-  sampleFormat: string = "L24",
-  destinationIP?: string,
-  destinationPort?: number,
-  originIP?: string,
-) => {
+const addSender = async (setTab: Setter<number>) => {
+  createSenderConfig().catch((error) => {
+    console.error("Error creating sender config:", error);
+    // TODO: show error to user
+  });
+  setTab(Number.MAX_SAFE_INTEGER);
+};
+
+const addReceiverFromSdp = async (setTab: Setter<number>) => {
   setCreateRcvSubmenuOpen(false);
   setSenderListOpen(false);
-  const an = appName();
-  console.log("Add receiver ...");
-  let id = await locked(`${appName()}/config/rx/next-id`, async () => {
-    const id = (await get<number>(`${appName()}/config/rx/next-id`)) || 1;
-    set(`${an}/config/rx/next-id`, id + 1);
-    return id;
+  // TODO: open dialog to get SDP content or URL
+  console.log("Adding receiver from SDP ...");
+  setTab(Number.MAX_SAFE_INTEGER);
+};
+
+const addReceiver = async (setTab: Setter<number>) => {
+  setCreateRcvSubmenuOpen(false);
+  setSenderListOpen(false);
+  createReceiverConfig().catch((error) => {
+    console.error("Error creating receiver config:", error);
+    // TODO: show error to user
   });
-  if (id != null) {
-    set(`${an}/config/rx/receivers/${id}/name`, name);
-    set(`${an}/config/rx/receivers/${id}/channels`, channels);
-    set(`${an}/config/rx/receivers/${id}/autostart`, autostart);
-    set(`${an}/config/rx/receivers/${id}/sampleFormat`, sampleFormat);
-    if (destinationIP != null) {
-      set(`${an}/config/rx/receivers/${id}/sourceIP`, destinationIP);
-    }
-    if (destinationPort != null) {
-      set(`${an}/config/rx/receivers/${id}/sourcePort`, destinationPort);
-    }
-    set(`${an}/config/rx/receivers/${id}/linkOffset`, 4);
-    set(`${an}/config/rx/receivers/${id}/rtpOffset`, 0);
-    if (originIP != null) {
-      set(`${an}/config/rx/receivers/${id}/originIP`, originIP);
-    }
-  }
   setTab(Number.MAX_SAFE_INTEGER);
 };
 
@@ -121,16 +95,7 @@ function SessionList(props: { tabSignal: [Accessor<number>, Setter<number>] }) {
           <div
             class="menuitem"
             onclick={() => {
-              addReceiver(
-                props.tabSignal[1],
-                session.name,
-                session.channels,
-                false,
-                session.sampleFormat,
-                session.destinationIp,
-                session.destinationPort,
-                session.originIp,
-              );
+              addReceiver(props.tabSignal[1]);
             }}
           >
             {session.name}
@@ -159,9 +124,6 @@ function AddReceiverButton(props: {
         class="dropdown-menu"
         classList={{ open: createRcvSubmenuOpen() }}
       >
-        <div class="menuitem" onclick={() => addReceiver(props.tabSignal[1])}>
-          Custom
-        </div>
         <div
           class="menuitem submenu"
           on:mouseenter={() => setSenderListOpen(true)}
@@ -170,6 +132,15 @@ function AddReceiverButton(props: {
           <span>From Sender</span>
           <span>🢒</span>
           <SessionList tabSignal={props.tabSignal} />
+        </div>
+        <div
+          class="menuitem"
+          onclick={() => addReceiverFromSdp(props.tabSignal[1])}
+        >
+          From SDP
+        </div>
+        <div class="menuitem" onclick={() => addReceiver(props.tabSignal[1])}>
+          Custom
         </div>
       </div>
     </div>

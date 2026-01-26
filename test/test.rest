@@ -45,3 +45,25 @@ POST http://127.0.0.1:43567/api/v1/vsc/rx/delete
 Content-Type: application/json
 
 {"id": 1}
+
+### Creat sender config
+POST http://127.0.0.1:43567/api/v1/vsc/tx/create/config
+Content-Type: application/json
+
+### Create receiver config
+POST http://127.0.0.1:43567/api/v1/vsc/rx/create/config
+Content-Type: application/json
+
+{"sdp": null}
+
+### Create receiver config
+POST http://127.0.0.1:43567/api/v1/vsc/rx/create/config
+Content-Type: application/json
+
+{"sdp": {"content": "v=0\r\no=- 0 0 IN IP4"}}
+
+### Create receiver config
+POST http://127.0.0.1:43567/api/v1/vsc/rx/create/config
+Content-Type: application/json
+
+{"sdp": {"url": "http://example.com/some.sdp"}}

@@ -1,5 +1,5 @@
 use crate::{
-    ManagementAgentApi,
+    ManagementAgentApi, Sdp,
     error::{LogError, ManagementAgentResult},
     netinf_watcher,
 };
@@ -31,6 +31,25 @@ pub(crate) async fn vsc_stop(State(api): State<ManagementAgentApi>) -> Managemen
 #[derive(serde::Deserialize)]
 pub(crate) struct TransceiverSpec {
     id: u32,
+}
+
+pub(crate) async fn vsc_tx_config_create(
+    State(api): State<ManagementAgentApi>,
+) -> ManagementAgentResult<()> {
+    api.create_sender_config()
+        .await
+        .log_error("Failed to create sender config")?;
+    Ok(())
+}
+
+pub(crate) async fn vsc_rx_config_create(
+    State(api): State<ManagementAgentApi>,
+    Json(sdp): Json<Option<Sdp>>,
+) -> ManagementAgentResult<()> {
+    api.create_receiver_config(sdp)
+        .await
+        .log_error("Failed to create receiver config")?;
+    Ok(())
 }
 
 pub(crate) async fn vsc_tx_create(

@@ -29,6 +29,7 @@ pub type NanoSeconds = u128;
 pub type Frames = u64;
 pub type FramesPerSecond = u32;
 pub type BitDepth = u8;
+pub type PayloadType = u8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
 pub struct BufferFormat {

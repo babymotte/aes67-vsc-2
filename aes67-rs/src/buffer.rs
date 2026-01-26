@@ -528,3 +528,17 @@ mod monitoring {
         }
     }
 }
+
+////////////////////////////////////////////// new API
+
+pub trait BufferProducer {
+    fn produce_data(channel: u32, data: &[u8], egress_time: Frames);
+}
+
+pub trait TxBufferConsumer {
+    fn on_data<'a>() -> impl Future<Output = (Frames, &'a [u8])>;
+}
+
+pub trait RxBufferConsumer {
+    fn provide_data(channel: u32, data: &[u8], egress_time: Frames);
+}

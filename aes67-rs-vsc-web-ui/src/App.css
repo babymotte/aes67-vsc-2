@@ -222,6 +222,13 @@ input.invalid:active {
   white-space: nowrap;
 }
 
+.menuitem.submenu {
+  display: flex;
+  flex-direction: row;
+  gap: 1em;
+  align-items: center;
+}
+
 .menuitem:hover {
   background-color: #333;
 }

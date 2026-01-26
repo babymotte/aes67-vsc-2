@@ -1,7 +1,7 @@
 export async function fetchAppName(): Promise<string> {
-  const url = "/api/v1/backend/app-name";
+  const apiUrl = "/api/v1/backend/app-name";
 
-  const response = await fetch(url, {
+  const response = await fetch(apiUrl, {
     method: "GET",
   });
 
@@ -13,8 +13,8 @@ export async function fetchAppName(): Promise<string> {
 }
 
 export async function stopVsc(): Promise<void> {
-  const url = "/api/v1/vsc/stop";
-  const response = await fetch(url, {
+  const apiUrl = "/api/v1/vsc/stop";
+  const response = await fetch(apiUrl, {
     method: "POST",
   });
 
@@ -24,8 +24,8 @@ export async function stopVsc(): Promise<void> {
 }
 
 export async function startVsc(): Promise<void> {
-  const url = "/api/v1/vsc/start";
-  const response = await fetch(url, {
+  const apiUrl = "/api/v1/vsc/start";
+  const response = await fetch(apiUrl, {
     method: "POST",
   });
 
@@ -34,9 +34,71 @@ export async function startVsc(): Promise<void> {
   }
 }
 
+export async function createSenderConfig(): Promise<void> {
+  const apiUrl = "/api/v1/vsc/tx/create/config";
+  const response = await fetch(apiUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to create sender config: ${response.statusText}`);
+  }
+}
+
+export async function createReceiverConfig(): Promise<void> {
+  const apiUrl = "/api/v1/vsc/rx/create/config";
+  const response = await fetch(apiUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ sdp: null }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to create receiver config: ${response.statusText}`);
+  }
+}
+
+export async function createReceiverConfigFromSdpContent(
+  content: string,
+): Promise<void> {
+  const apiUrl = "/api/v1/vsc/rx/create/config";
+  const response = await fetch(apiUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ sdp: { content } }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to create receiver config: ${response.statusText}`);
+  }
+}
+export async function createReceiverConfigFromSdpUrl(
+  url: string,
+): Promise<void> {
+  const apiUrl = "/api/v1/vsc/rx/create/config";
+  const response = await fetch(apiUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ sdp: { url } }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to create receiver config: ${response.statusText}`);
+  }
+}
+
 export async function createSender(id: number): Promise<void> {
-  const url = "/api/v1/vsc/tx/create";
-  const response = await fetch(url, {
+  const apiUrl = "/api/v1/vsc/tx/create";
+  const response = await fetch(apiUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -50,8 +112,8 @@ export async function createSender(id: number): Promise<void> {
 }
 
 export async function createReceiver(id: number): Promise<void> {
-  const url = "/api/v1/vsc/rx/create";
-  const response = await fetch(url, {
+  const apiUrl = "/api/v1/vsc/rx/create";
+  const response = await fetch(apiUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -65,8 +127,8 @@ export async function createReceiver(id: number): Promise<void> {
 }
 
 export async function updateSender(id: number): Promise<void> {
-  const url = "/api/v1/vsc/tx/update";
-  const response = await fetch(url, {
+  const apiUrl = "/api/v1/vsc/tx/update";
+  const response = await fetch(apiUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -95,8 +157,8 @@ export async function updateReceiver(id: number): Promise<void> {
 }
 
 export async function deleteSender(id: number): Promise<void> {
-  const url = "/api/v1/vsc/tx/delete";
-  const response = await fetch(url, {
+  const apiUrl = "/api/v1/vsc/tx/delete";
+  const response = await fetch(apiUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -110,8 +172,8 @@ export async function deleteSender(id: number): Promise<void> {
 }
 
 export async function deleteReceiver(id: number): Promise<void> {
-  const url = "/api/v1/vsc/rx/delete";
-  const response = await fetch(url, {
+  const apiUrl = "/api/v1/vsc/rx/delete";
+  const response = await fetch(apiUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

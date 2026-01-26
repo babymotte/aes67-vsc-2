@@ -15,9 +15,42 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{error::ConfigError, formats::AudioFormat};
+use crate::{
+    error::ConfigError,
+    formats::{AudioFormat, FrameFormat, MilliSeconds, PayloadType, SampleFormat},
+};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PartialSenderConfig {
+    pub label: Option<String>,
+    pub audio_format: Option<AudioFormat>,
+    pub target: Option<SocketAddr>,
+    pub payload_type: Option<PayloadType>,
+    pub channel_labels: Option<Vec<String>>,
+    pub packet_time: Option<MilliSeconds>,
+}
+
+impl Default for PartialSenderConfig {
+    fn default() -> Self {
+        Self {
+            label: Some("".to_owned()),
+            audio_format: Some(AudioFormat {
+                sample_rate: 48_000,
+                frame_format: FrameFormat {
+                    channels: 2,
+                    sample_format: SampleFormat::L24,
+                },
+            }),
+            target: Some(SocketAddr::from(([239, 255, 0, 1], 5004))),
+            payload_type: Some(98),
+            channel_labels: Some(vec!["Left".to_owned(), "Right".to_owned()]),
+            packet_time: Some(1.0),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -26,7 +59,8 @@ pub struct SenderConfig {
     pub label: String,
     pub audio_format: AudioFormat,
     pub target: SocketAddr,
-    pub payload_type: u8,
+    pub packet_time: MilliSeconds,
+    pub payload_type: PayloadType,
     pub channel_labels: Option<Vec<String>>,
 }
 
@@ -35,7 +69,7 @@ pub struct TxDescriptor {
     pub id: u32,
     pub label: String,
     pub audio_format: AudioFormat,
-    pub payload_type: u8,
+    pub payload_type: PayloadType,
     pub channel_labels: Vec<Option<String>>,
 }
 

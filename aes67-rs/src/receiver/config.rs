@@ -47,6 +47,48 @@ lazy_static! {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct PartialReceiverConfig {
+    pub label: Option<String>,
+    pub audio_format: Option<AudioFormat>,
+    pub source: Option<SocketAddr>,
+    pub origin_ip: Option<IpAddr>,
+    pub link_offset: Option<MilliSeconds>,
+    pub rtp_offset: Option<u32>,
+    pub channel_labels: Option<Vec<Option<String>>>,
+}
+
+impl PartialReceiverConfig {
+    pub fn with_sample_rate(sample_rate: FramesPerSecond) -> Self {
+        let mut it = Self::default();
+        it.audio_format
+            .as_mut()
+            .map(|af| af.sample_rate = sample_rate);
+        it
+    }
+}
+
+impl Default for PartialReceiverConfig {
+    fn default() -> Self {
+        Self {
+            label: Some("".to_owned()),
+            audio_format: Some(AudioFormat {
+                sample_rate: 48_000,
+                frame_format: FrameFormat {
+                    channels: 2,
+                    sample_format: SampleFormat::L24,
+                },
+            }),
+            source: None,
+            origin_ip: None,
+            link_offset: Some(4.0),
+            rtp_offset: Some(0),
+            channel_labels: Some(vec![Some("Left".to_owned()), Some("Right".to_owned())]),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ReceiverConfig {
     pub id: u32,
     pub label: String,
@@ -139,6 +181,7 @@ pub struct SessionInfo {
     pub sample_rate: FramesPerSecond,
     pub packet_time: MilliSeconds,
     pub origin_ip: IpAddr,
+    pub channel_labels: Vec<Option<String>>,
 }
 
 impl TryFrom<&SessionDescription> for SessionInfo {
@@ -267,6 +310,7 @@ impl TryFrom<&SessionDescription> for SessionInfo {
             sample_format: audio_format.frame_format.sample_format,
             sample_rate: audio_format.sample_rate,
             origin_ip,
+            channel_labels: channel_labels,
         })
     }
 }
