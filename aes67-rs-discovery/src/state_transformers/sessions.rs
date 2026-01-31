@@ -5,12 +5,12 @@ use std::{
     time::Duration,
 };
 use tokio::{select, sync::mpsc};
-use tosub::Subsystem;
+use tosub::SubsystemHandle;
 use tracing::{debug, info, warn};
 use worterbuch_client::{TypedPStateEvent, Worterbuch, topic};
 
 pub async fn start(
-    subsys: Subsystem,
+    subsys: SubsystemHandle,
     instance_name: String,
     worterbuch_client: Worterbuch,
 ) -> DiscoveryResult<()> {
@@ -47,7 +47,7 @@ struct ProcessLoop {
 impl ProcessLoop {
     async fn start(
         mut self,
-        subsys: Subsystem,
+        subsys: SubsystemHandle,
         mut all_sessions: mpsc::UnboundedReceiver<TypedPStateEvent<Session>>,
     ) -> DiscoveryResult<()> {
         loop {

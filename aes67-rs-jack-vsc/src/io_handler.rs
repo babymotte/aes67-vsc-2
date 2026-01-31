@@ -12,11 +12,11 @@ use tokio::{
     select,
     sync::{mpsc, oneshot},
 };
-use tosub::Subsystem;
+use tosub::SubsystemHandle;
 use tracing::{error, info, warn};
 
 pub struct JackIoHandlerActor {
-    clients: HashMap<u32, Subsystem>,
+    clients: HashMap<u32, SubsystemHandle>,
 }
 
 impl JackIoHandlerActor {
@@ -89,7 +89,7 @@ impl JackIoHandlerActor {
     async fn sender_created(
         &mut self,
         app_id: String,
-        subsys: Subsystem,
+        subsys: SubsystemHandle,
         sender: SenderApi,
         config: SenderConfig,
         clock: Clock,
@@ -117,7 +117,7 @@ impl JackIoHandlerActor {
     async fn receiver_created(
         &mut self,
         app_id: String,
-        subsys: Subsystem,
+        subsys: SubsystemHandle,
         receiver: ReceiverApi,
         config: ReceiverConfig,
         clock: Clock,
@@ -145,7 +145,7 @@ impl JackIoHandlerActor {
 
 impl Drop for JackIoHandlerActor {
     fn drop(&mut self) {
-        warn!("JACK I/O handler dropped. Shutting down all playout subsystems …");
+        warn!("JACK I/O handler dropped. Shutting down all playout SubsystemHandles …");
         for (_, playout) in self.clients.drain() {
             playout.request_local_shutdown();
         }
@@ -155,7 +155,7 @@ impl Drop for JackIoHandlerActor {
 enum JackIoHandlerMessage {
     SenderCreated(
         String,
-        Subsystem,
+        SubsystemHandle,
         SenderApi,
         SenderConfig,
         Clock,
@@ -166,7 +166,7 @@ enum JackIoHandlerMessage {
     SenderDeleted(u32, oneshot::Sender<IoHandlerResult<()>>),
     ReceiverCreated(
         String,
-        Subsystem,
+        SubsystemHandle,
         ReceiverApi,
         ReceiverConfig,
         Clock,
@@ -197,7 +197,7 @@ impl IoHandler for JackIoHandler {
     async fn sender_created(
         &self,
         app_id: String,
-        subsys: Subsystem,
+        subsys: SubsystemHandle,
         sender: SenderApi,
         config: SenderConfig,
         clock: Clock,
@@ -231,7 +231,7 @@ impl IoHandler for JackIoHandler {
     async fn receiver_created(
         &self,
         app_id: String,
-        subsys: Subsystem,
+        subsys: SubsystemHandle,
         receiver: ReceiverApi,
         config: ReceiverConfig,
         clock: Clock,

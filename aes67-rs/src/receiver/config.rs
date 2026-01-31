@@ -16,6 +16,7 @@
  */
 
 use crate::{
+    config::adjust_labels_for_channel_count,
     error::ConfigError,
     formats::{
         self, AudioFormat, FrameFormat, Frames, FramesPerSecond, MilliSeconds, SampleFormat,
@@ -54,7 +55,7 @@ pub struct PartialReceiverConfig {
     pub origin_ip: Option<IpAddr>,
     pub link_offset: Option<MilliSeconds>,
     pub rtp_offset: Option<u32>,
-    pub channel_labels: Option<Vec<Option<String>>>,
+    pub channel_labels: Vec<String>,
 }
 
 impl PartialReceiverConfig {
@@ -64,6 +65,50 @@ impl PartialReceiverConfig {
             .as_mut()
             .map(|af| af.sample_rate = sample_rate);
         it
+    }
+
+    pub fn from_sdp_content(sdp_content: &str) -> Result<Self, ConfigError> {
+        todo!()
+    }
+
+    pub async fn from_sdp_url(sdp_url: &str) -> Result<Self, ConfigError> {
+        let response = reqwest::get(sdp_url)
+            .await
+            .map_err(|e| ConfigError::InvalidSdp(e.to_string()))?;
+        let sdp_content = response
+            .text()
+            .await
+            .map_err(|e| ConfigError::InvalidSdp(e.to_string()))?;
+        Self::from_sdp_content(&sdp_content)
+    }
+
+    pub fn from_session_info(session_info: &SessionInfo) -> Self {
+        let label = Some(session_info.name.clone());
+        let audio_format = Some(AudioFormat {
+            sample_rate: session_info.sample_rate,
+            frame_format: FrameFormat {
+                channels: session_info.channels,
+                sample_format: session_info.sample_format,
+            },
+        });
+        let source = Some(SocketAddr::from((
+            session_info.destination_ip,
+            session_info.destination_port,
+        )));
+        let origin_ip = Some(session_info.origin_ip);
+        let link_offset = Some(4.0);
+        let rtp_offset = Some(session_info.rtp_offset);
+        let channel_labels = session_info.channel_labels.clone();
+
+        Self {
+            label,
+            audio_format,
+            source,
+            origin_ip,
+            link_offset,
+            rtp_offset,
+            channel_labels,
+        }
     }
 }
 
@@ -82,7 +127,7 @@ impl Default for PartialReceiverConfig {
             origin_ip: None,
             link_offset: Some(4.0),
             rtp_offset: Some(0),
-            channel_labels: Some(vec![Some("Left".to_owned()), Some("Right".to_owned())]),
+            channel_labels: vec!["Left".to_owned(), "Right".to_owned()],
         }
     }
 }
@@ -95,9 +140,8 @@ pub struct ReceiverConfig {
     pub audio_format: AudioFormat,
     pub source: SocketAddr,
     pub origin_ip: IpAddr,
-    pub payload_type: u8,
     pub rtp_offset: u32,
-    pub channel_labels: Option<Vec<String>>,
+    pub channel_labels: Vec<String>,
     pub link_offset: MilliSeconds,
     #[serde(default)]
     pub delay_calculation_interval: Option<Seconds>,
@@ -181,7 +225,8 @@ pub struct SessionInfo {
     pub sample_rate: FramesPerSecond,
     pub packet_time: MilliSeconds,
     pub origin_ip: IpAddr,
-    pub channel_labels: Vec<Option<String>>,
+    pub channel_labels: Vec<String>,
+    pub rtp_offset: u32,
 }
 
 impl TryFrom<&SessionDescription> for SessionInfo {
@@ -223,23 +268,18 @@ impl TryFrom<&SessionDescription> for SessionInfo {
                 return Err(ConfigError::InvalidSdp("malformed rtpmap".to_owned()));
             };
 
-        let no_labels = || {
-            let mut v = vec![];
-            for _ in 0..channels {
-                v.push(None);
-            }
-            v
-        };
+        let no_labels = |count| Vec::with_capacity(count);
 
-        let channel_labels = if let Some(i) = &sd.session_information {
+        let mut channel_labels = if let Some(i) = &sd.session_information {
             if let Some(caps) = CHANNELS_REGEX.captures(i) {
-                caps[2].split(", ").map(|it| Some(it.to_owned())).collect()
+                caps[2].split(", ").map(|it| it.to_owned()).collect()
             } else {
-                no_labels()
+                no_labels(channels)
             }
         } else {
-            no_labels()
+            no_labels(channels)
         };
+        adjust_labels_for_channel_count(channels, &mut channel_labels);
 
         if &payload_type != fmt {
             return Err(ConfigError::InvalidSdp(
@@ -297,6 +337,17 @@ impl TryFrom<&SessionDescription> for SessionInfo {
                 "invalid ip address: {destination_address}"
             )));
         };
+        let rtp_offset = media
+            .attribute("mediaclk")
+            .and_then(|it| it)
+            .and_then(|clk| {
+                if let Some(caps) = MEDIACLK_REGEX.captures(&clk) {
+                    caps[1].parse().ok()
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(0);
 
         let destination_port = media.media_name.port.value.to_owned() as u16;
 
@@ -310,7 +361,8 @@ impl TryFrom<&SessionDescription> for SessionInfo {
             sample_format: audio_format.frame_format.sample_format,
             sample_rate: audio_format.sample_rate,
             origin_ip,
-            channel_labels: channel_labels,
+            channel_labels,
+            rtp_offset,
         })
     }
 }

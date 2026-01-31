@@ -27,11 +27,11 @@ use crate::monitoring::{
 };
 use std::collections::{HashMap, hash_map::Entry};
 use tokio::{select, sync::mpsc};
-use tosub::Subsystem;
+use tosub::SubsystemHandle;
 use tracing::{info, warn};
 
 pub async fn stats(
-    subsys: Subsystem,
+    subsys: SubsystemHandle,
     rx: mpsc::Receiver<(MonitoringEvent, String)>,
     tx: mpsc::Sender<Report>,
 ) -> Result<(), &'static str> {
@@ -40,7 +40,7 @@ pub async fn stats(
 }
 
 struct StatsActor {
-    subsys: Subsystem,
+    subsys: SubsystemHandle,
     rx: mpsc::Receiver<(MonitoringEvent, String)>,
     tx: mpsc::Sender<Report>,
     senders: HashMap<String, SenderStats>,
@@ -50,7 +50,7 @@ struct StatsActor {
 
 impl StatsActor {
     fn new(
-        subsys: Subsystem,
+        subsys: SubsystemHandle,
         rx: mpsc::Receiver<(MonitoringEvent, String)>,
         tx: mpsc::Sender<Report>,
     ) -> Self {
@@ -65,13 +65,13 @@ impl StatsActor {
     }
 
     async fn run(mut self) {
-        info!("Stats subsystem started.");
+        info!("Stats SubsystemHandle started.");
         loop {
             select! {
                 recv = self.rx.recv() => match recv {
                     Some((evt, src)) => self.process_event(evt,src).await,
                     None => {
-                        info!("Monitoring event channel closed; shutting down subsystem");
+                        info!("Monitoring event channel closed; shutting down SubsystemHandle");
                         self.subsys.request_global_shutdown();
                         break;
                     }
@@ -79,7 +79,7 @@ impl StatsActor {
                 _ = self.subsys.shutdown_requested() => break,
             }
         }
-        info!("Stats subsystem stopped.");
+        info!("Stats SubsystemHandle stopped.");
     }
 
     async fn process_event(&mut self, evt: MonitoringEvent, src: String) {

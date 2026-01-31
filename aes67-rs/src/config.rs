@@ -128,3 +128,25 @@ impl Config {
         })
     }
 }
+
+pub fn adjust_labels_for_channel_count(channels: usize, channel_labels: &mut Vec<String>) {
+    channel_labels.retain(|it| !it.trim().is_empty());
+
+    let len = channel_labels.len();
+
+    if len == channels {
+        return;
+    }
+
+    eprint!("Adjusting channel labels: {:?} => ", channel_labels);
+
+    if len < channels {
+        channel_labels.extend(((len + 1)..=channels).map(|ch| ch.to_string()));
+    }
+
+    if len > channels {
+        channel_labels.truncate(channels);
+    }
+
+    eprintln!("{:?}", channel_labels);
+}

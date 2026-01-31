@@ -48,6 +48,23 @@ export async function createSenderConfig(): Promise<void> {
   }
 }
 
+export async function createReceiverConfigForSession(
+  sessionId: string,
+): Promise<void> {
+  const apiUrl = "/api/v1/vsc/rx/create/config";
+  const response = await fetch(apiUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ sdp: { sessionId } }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to create receiver config: ${response.statusText}`);
+  }
+}
+
 export async function createReceiverConfig(): Promise<void> {
   const apiUrl = "/api/v1/vsc/rx/create/config";
   const response = await fetch(apiUrl, {

@@ -2,7 +2,7 @@ use aes67_rs_sdp::SdpWrapper;
 use sap_rs::{Event, Sap};
 use std::time::SystemTime;
 use tokio::select;
-use tosub::Subsystem;
+use tosub::SubsystemHandle;
 use tracing::{debug, info};
 use worterbuch_client::{Worterbuch, topic};
 
@@ -11,7 +11,7 @@ use crate::{Session, error::DiscoveryResult};
 pub async fn start_sap_discovery(
     instance_name: String,
     worterbuch_client: Worterbuch,
-    subsys: Subsystem,
+    subsys: SubsystemHandle,
 ) -> DiscoveryResult<()> {
     info!("Starting SAP discovery …");
 

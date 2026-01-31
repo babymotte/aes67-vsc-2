@@ -6,16 +6,21 @@ import {
   type Accessor,
   type Setter,
   For,
+  createEffect,
 } from "solid-js";
 import Receivers from "./components/Receivers/Receivers";
 import Senders from "./components/Senders/Senders";
 import Config from "./components/Config/Config";
 import "./App.css";
 import { appName, running } from "./vscState";
-import { connected, get, locked, pSubscribe, set } from "./worterbuch";
+import { connected, pSubscribe } from "./worterbuch";
 import Indicator from "./components/Indicator";
 import { useNavigate } from "@solidjs/router";
-import { createReceiverConfig, createSenderConfig } from "./api";
+import {
+  createReceiverConfig,
+  createReceiverConfigForSession,
+  createSenderConfig,
+} from "./api";
 
 function AddSenderButton(props: {
   tabSignal: [Accessor<number>, Setter<number>];
@@ -47,10 +52,16 @@ const addReceiverFromSdp = async (setTab: Setter<number>) => {
   setTab(Number.MAX_SAFE_INTEGER);
 };
 
-const addReceiver = async (setTab: Setter<number>) => {
+const addReceiver = async (setTab: Setter<number>, sessionId?: string) => {
+  console.log("sessionId", sessionId);
+
   setCreateRcvSubmenuOpen(false);
   setSenderListOpen(false);
-  createReceiverConfig().catch((error) => {
+
+  (sessionId
+    ? createReceiverConfigForSession(sessionId)
+    : createReceiverConfig()
+  ).catch((error) => {
     console.error("Error creating receiver config:", error);
     // TODO: show error to user
   });
@@ -61,32 +72,16 @@ const [createRcvSubmenuOpen, setCreateRcvSubmenuOpen] =
   createSignal<boolean>(false);
 const [senderListOpen, setSenderListOpen] = createSignal<boolean>(false);
 
-type SessionId = {
-  id: number;
-  version: number;
-};
-type SessionInfo = {
-  id: SessionId;
-  name: string;
-  destinationIp: string;
-  destinationPort: number;
-  channels: number;
-  sampleFormat: string;
-  sampleRate: number;
-  packetTime: number;
-  originIp: string;
-};
-
 function SessionList(props: { tabSignal: [Accessor<number>, Setter<number>] }) {
-  const [sessions, setSessions] = createSignal<SessionInfo[]>([]);
+  const [sessions, setSessions] = createSignal<[string, string][]>([]);
 
-  pSubscribe<SessionInfo>(
-    `${appName()}/discovery/sessions/?/config`,
-    (sessionNames) => {
-      const sessions = Array.from(sessionNames.values());
+  createEffect(() => {
+    const an = appName();
+    pSubscribe<string>(`${an}/discovery/sessions/?/name`, (sessionNames) => {
+      const sessions = Array.from(sessionNames.entries());
       setSessions(sessions);
-    },
-  );
+    });
+  });
 
   return (
     <div class="dropdown-menu" classList={{ open: senderListOpen() }}>
@@ -95,10 +90,10 @@ function SessionList(props: { tabSignal: [Accessor<number>, Setter<number>] }) {
           <div
             class="menuitem"
             onclick={() => {
-              addReceiver(props.tabSignal[1]);
+              addReceiver(props.tabSignal[1], session[0].split("/")[3]);
             }}
           >
-            {session.name}
+            {session[1]}
           </div>
         )}
       </For>

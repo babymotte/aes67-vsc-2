@@ -13,7 +13,7 @@ use jack::{
 use miette::IntoDiagnostic;
 use std::time::{Duration, Instant};
 use tokio::{runtime::Handle, sync::mpsc, time::timeout};
-use tosub::Subsystem;
+use tosub::SubsystemHandle;
 use tracing::{error, info};
 
 struct State {
@@ -23,7 +23,7 @@ struct State {
     config: ReceiverConfig,
     muted: bool,
     monitoring: Monitoring,
-    subsys: Subsystem,
+    subsys: SubsystemHandle,
     async_runtime: Handle,
 }
 
@@ -31,12 +31,12 @@ impl State {}
 
 pub async fn start_playout(
     app_id: String,
-    subsys: Subsystem,
+    subsys: SubsystemHandle,
     receiver: ReceiverApi,
     config: ReceiverConfig,
     clock: Clock,
     monitoring: Monitoring,
-) -> miette::Result<Subsystem> {
+) -> miette::Result<SubsystemHandle> {
     // TODO evaluate client status
     let (client, status) =
         Client::new(&config.label, ClientOptions::default()).into_diagnostic()?;
@@ -48,16 +48,7 @@ pub async fn start_playout(
 
     let mut ports = vec![];
 
-    for l in config
-        .channel_labels
-        .clone()
-        .unwrap_or_else(|| {
-            (0..config.audio_format.frame_format.channels)
-                .map(|i| format!("{}", i + 1))
-                .collect()
-        })
-        .iter()
-    {
+    for l in config.channel_labels.clone().iter() {
         let label = l.to_owned();
         ports.push(
             client

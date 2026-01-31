@@ -1,11 +1,11 @@
 use crate::error::DiscoveryResult;
-use tosub::Subsystem;
+use tosub::SubsystemHandle;
 use worterbuch_client::Worterbuch;
 
 mod available_sessions;
 mod sessions;
 
-pub async fn start(subsys: Subsystem, id: String, worterbuch: Worterbuch) -> DiscoveryResult<()> {
+pub async fn start(subsys: SubsystemHandle, id: String, worterbuch: Worterbuch) -> DiscoveryResult<()> {
     let instance_name = id.clone();
     let wb = worterbuch.clone();
     let mut sessions = subsys.spawn("sessions", async |s| {

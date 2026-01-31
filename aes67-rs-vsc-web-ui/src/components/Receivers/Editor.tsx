@@ -61,6 +61,12 @@ export default function Editor(props: { receiver: [string, string] }) {
     [(s) => parseInt(s, 10) || 0, (n) => n.toString()],
   );
 
+  const [channelLabels, setChannelLabels] = createWbSignal<string, string[]>(
+    `/config/rx/receivers/${transceiverID(props.receiver)}/channelLabels`,
+    "0",
+    [(s) => s.split(",").map((str) => str.trim()), (n) => n.join(", ")],
+  );
+
   const [vscRunning] = createWbSignal<boolean, boolean>(`/running`, false);
 
   const [configInvalid, setConfigInvalid] = createSignal<boolean>(false);
@@ -122,6 +128,12 @@ export default function Editor(props: { receiver: [string, string] }) {
     const input = e.target as HTMLInputElement;
     const newSource = input.value;
     setRtpOffset(newSource);
+  };
+
+  const updateChannelLabels = (e: Event) => {
+    const input = e.target as HTMLInputElement;
+    const newSource = input.value;
+    setChannelLabels(newSource);
   };
 
   const [running] = createWbSignal<boolean, boolean>(
@@ -201,6 +213,18 @@ export default function Editor(props: { receiver: [string, string] }) {
         inputmode="numeric"
         value={channels() || "0"}
         onChange={updateChannels}
+        disabled={running()}
+      />
+
+      <label class="key" for="channelLabels">
+        Channel Labels:
+      </label>
+      <input
+        classList={{ invalid: invalidChannels(channels()) }}
+        id="channelLabels"
+        type="text"
+        value={channelLabels() || ""}
+        onChange={updateChannelLabels}
         disabled={running()}
       />
 

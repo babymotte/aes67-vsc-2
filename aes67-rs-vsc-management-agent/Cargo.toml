@@ -20,10 +20,10 @@ serde_json = "1.0.148"
 serde_yaml = "0.9.34"
 thiserror = "2.0.17"
 tokio = "1.47.1"
-tosub = "0.1.0"
+tosub = "1.0.0-rc.2"
 tracing = "0.1.41"
-worterbuch = "1.5.0-alpha.1"
-worterbuch-client = "1.5.0-alpha.1"
+worterbuch = "1.5.0-alpha.2"
+worterbuch-client = "1.5.0-alpha.2"
 
 [features]
 tokio-metrics = []

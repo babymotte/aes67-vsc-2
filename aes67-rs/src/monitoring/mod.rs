@@ -25,7 +25,7 @@ use crate::{
     formats::{Frames, MilliSeconds},
     monitoring::{health::health, observability::observability, stats::stats},
     receiver::config::ReceiverConfig,
-    sender::config::TxDescriptor,
+    sender::config::SenderConfig,
 };
 use rtp_rs::Seq;
 use std::{net::IpAddr, time::SystemTime};
@@ -36,7 +36,7 @@ use tokio::{
         mpsc::{self, error::TrySendError},
     },
 };
-use tosub::Subsystem;
+use tosub::SubsystemHandle;
 use tracing::warn;
 use worterbuch_client::Worterbuch;
 
@@ -69,7 +69,7 @@ pub enum VscState {
 pub enum SenderState {
     Created {
         id: String,
-        descriptor: TxDescriptor,
+        config: SenderConfig,
         label: String,
         address: AudioBufferPointer,
     },
@@ -296,7 +296,7 @@ impl Monitoring {
 
 pub fn start_monitoring_service(
     root_id: String,
-    subsys: &Subsystem,
+    subsys: &SubsystemHandle,
     worterbuch_client: Worterbuch,
 ) -> ChildAppResult<Monitoring> {
     let (mon_tx, mon_rx) = mpsc::channel::<(MonitoringEvent, String)>(1024);
@@ -316,7 +316,7 @@ fn monitoring(
     client_name: String,
     mon_rx: mpsc::Receiver<(MonitoringEvent, String)>,
     start: impl Future<Output = ()> + Send + 'static,
-    subsys: &Subsystem,
+    subsys: &SubsystemHandle,
     worterbuch_client: Worterbuch,
 ) -> ChildAppResult<()> {
     #[cfg(feature = "tokio-metrics")]

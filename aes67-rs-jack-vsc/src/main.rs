@@ -24,7 +24,7 @@ mod telemetry;
 use aes67_rs_jack_vsc::io_handler::JackIoHandler;
 use aes67_rs_vsc_management_agent::{config::AppConfig, init_management_agent};
 use std::time::Duration;
-use tosub::Subsystem;
+use tosub::SubsystemHandle;
 use tracing::info;
 
 #[tokio::main]
@@ -35,17 +35,16 @@ async fn main() -> miette::Result<()> {
 
     telemetry::init(&app_id, config.telemetry.as_ref()).await?;
 
-    Subsystem::build_root(app_id.clone())
+    tosub::build_root(app_id.clone())
         .catch_signals()
         .with_timeout(Duration::from_secs(5))
         .start(|subsys| async move { run(subsys, app_id).await })
-        .join()
-        .await;
+        .await?;
 
     Ok(())
 }
 
-async fn run(subsys: Subsystem, id: String) -> miette::Result<()> {
+async fn run(subsys: SubsystemHandle, id: String) -> miette::Result<()> {
     info!("Starting {} …", id);
 
     init_management_agent(&subsys, id, JackIoHandler::new()).await?;

@@ -33,7 +33,7 @@ use futures_lite::future::block_on;
 use lazy_static::lazy_static;
 use sdp::SessionDescription;
 use std::{env, io::Cursor, sync::Arc, time::Duration};
-use tosub::Subsystem;
+use tosub::SubsystemHandle;
 use tracing::info;
 
 use crate::{AES_VSC_ERROR_RECEIVER_NOT_FOUND, AES_VSC_OK, Aes67VscReceiverConfig};
@@ -52,7 +52,7 @@ fn init_vsc() -> VscApiResult<Arc<VirtualSoundCardApi>> {
     let audio_nic = find_nic_with_name(config.audio.nic)?;
     let vsc_name = env::var("AES67_VSC_NAME").unwrap_or("aes67-virtual-sound-card".to_owned());
     info!("Creating new VSC with name '{vsc_name}' …");
-    let subsys = Subsystem::build_root(vsc_name.clone())
+    let subsys = tosub::build_root(vsc_name.clone())
         .with_timeout(Duration::from_secs(5))
         .start(|s| async move {
             s.shutdown_requested().await;
@@ -65,16 +65,17 @@ fn init_vsc() -> VscApiResult<Arc<VirtualSoundCardApi>> {
         config.audio.sample_rate,
         wb.clone(),
     ))?;
-    let vsc = block_on(VirtualSoundCardApi::new(
-        vsc_name.clone(),
-        &subsys,
-        wb,
-        clock,
-        audio_nic,
-    ))?;
+    // let vsc = block_on(VirtualSoundCardApi::new(
+    //     vsc_name.clone(),
+    //     &subsys,
+    //     wb,
+    //     clock,
+    //     audio_nic,
+    // ))?;
     // TODO store subsys somewhere to keep it alive
     info!("VSC '{}' created.", vsc_name);
-    Ok(Arc::new(vsc))
+    // Ok(Arc::new(vsc))
+    todo!()
 }
 
 fn try_init() -> VscInternalResult<Config> {
@@ -90,7 +91,7 @@ fn try_init() -> VscInternalResult<Config> {
     };
     // runtime.block_on(init_future)?;
     block_on(init_future)?;
-    info!("AES67 VSC subsystem initialized successfully.");
+    info!("AES67 VSC SubsystemHandle initialized successfully.");
     Ok(config)
 }
 

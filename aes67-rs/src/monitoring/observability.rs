@@ -24,13 +24,13 @@ use crate::{
         VscHealthReport, VscState, VscStatsReport,
     },
     receiver::config::ReceiverConfig,
-    sender::config::TxDescriptor,
+    sender::config::SenderConfig,
     utils::publish_individual,
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, time::SystemTime};
 use tokio::{select, sync::broadcast};
-use tosub::Subsystem;
+use tosub::SubsystemHandle;
 use tracing::{info, warn};
 use worterbuch_client::{Worterbuch, topic};
 
@@ -62,7 +62,7 @@ struct ReceiverStats {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SenderData {
-    config: TxDescriptor,
+    config: SenderConfig,
     stats: SenderStats,
     label: String,
     address: AudioBufferPointer,
@@ -80,7 +80,7 @@ struct ReceiverData {
 }
 
 pub async fn observability(
-    subsys: Subsystem,
+    subsys: SubsystemHandle,
     client_name: String,
     rx: broadcast::Receiver<Report>,
     worterbuch_client: Worterbuch,
@@ -92,7 +92,7 @@ pub async fn observability(
 }
 
 struct ObservabilityActor {
-    subsys: Subsystem,
+    subsys: SubsystemHandle,
     client_name: String,
     rx: broadcast::Receiver<Report>,
     wb: Worterbuch,
@@ -103,7 +103,7 @@ struct ObservabilityActor {
 
 impl ObservabilityActor {
     fn new(
-        subsys: Subsystem,
+        subsys: SubsystemHandle,
         client_name: String,
         rx: broadcast::Receiver<Report>,
         wb: Worterbuch,
@@ -120,7 +120,7 @@ impl ObservabilityActor {
     }
 
     async fn run(mut self) {
-        info!("Observability subsystem started.");
+        info!("Observability SubsystemHandle started.");
         loop {
             select! {
                 recv = self.rx.recv() => match recv {
@@ -129,7 +129,7 @@ impl ObservabilityActor {
                         warn!("Observability receiver lagged behind; skipping events");
                     },
                     Err(broadcast::error::RecvError::Closed) => {
-                        info!("Observability event channel closed; shutting down subsystem");
+                        info!("Observability event channel closed; shutting down SubsystemHandle");
                         self.subsys.request_global_shutdown();
                         break;
                     },
@@ -137,7 +137,7 @@ impl ObservabilityActor {
                 _ = self.subsys.shutdown_requested() => break,
             }
         }
-        info!("Observability subsystem stopped.");
+        info!("Observability SubsystemHandle stopped.");
     }
 
     async fn re_publish(&self) {
@@ -178,10 +178,10 @@ impl ObservabilityActor {
         match e {
             SenderState::Created {
                 id,
-                descriptor,
+                config,
                 label,
                 address,
-            } => self.sender_created(id, label, descriptor, address).await,
+            } => self.sender_created(id, label, config, address).await,
             SenderState::Renamed { id, label } => self.sender_renamed(id, label).await,
             SenderState::Destroyed { id } => self.sender_destroyed(id).await,
         }
@@ -226,11 +226,11 @@ impl ObservabilityActor {
         &mut self,
         name: String,
         label: String,
-        descriptor: TxDescriptor,
+        config: SenderConfig,
         address: AudioBufferPointer,
     ) {
         let data = SenderData {
-            config: descriptor.clone(),
+            config: config.clone(),
             stats: SenderStats::default(),
             label,
             address,
@@ -444,7 +444,7 @@ impl ObservabilityActor {
         publish_individual(&self.wb, topic!(qualified_id), data).await;
     }
 
-    async fn publish_sender_config(&self, qualified_id: &str, config: TxDescriptor) {
+    async fn publish_sender_config(&self, qualified_id: &str, config: SenderConfig) {
         publish_individual(&self.wb, topic!(qualified_id, "config"), config).await;
     }
 

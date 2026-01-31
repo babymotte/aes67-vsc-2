@@ -32,7 +32,7 @@ use pnet::datalink::NetworkInterface;
 use std::collections::HashMap;
 use tokio::select;
 use tokio::sync::{mpsc, oneshot};
-use tosub::Subsystem;
+use tosub::SubsystemHandle;
 use tracing::info;
 use worterbuch_client::{Worterbuch, topic};
 
@@ -68,7 +68,7 @@ pub struct VirtualSoundCardApi {
 impl VirtualSoundCardApi {
     pub async fn new(
         name: String,
-        subsys: &Subsystem,
+        subsys: &SubsystemHandle,
         worterbuch_client: Worterbuch,
         clock: Clock,
         audio_nic: NetworkInterface,
@@ -82,7 +82,7 @@ impl VirtualSoundCardApi {
 
     async fn try_new(
         name: String,
-        subsys: &Subsystem,
+        subsys: &SubsystemHandle,
         worterbuch_client: Worterbuch,
         clock: Clock,
         audio_nic: NetworkInterface,
@@ -95,17 +95,17 @@ impl VirtualSoundCardApi {
 
     async fn create_vsc(
         name: String,
-        subsys: &Subsystem,
+        subsys: &SubsystemHandle,
         worterbuch_client: Worterbuch,
         clock: Clock,
         audio_nic: NetworkInterface,
     ) -> VscInternalResult<ApiMessageSender> {
-        let subsystem_name = name.clone();
+        let SubsystemHandle_name = name.clone();
         let (api_tx, api_rx) = mpsc::channel(1024);
         #[cfg(feature = "tokio-metrics")]
         let wb = worterbuch_client.clone();
 
-        subsys.spawn(subsystem_name.clone(), |s| async move {
+        subsys.spawn(SubsystemHandle_name.clone(), |s| async move {
             VirtualSoundCard::new(name, api_rx, s, worterbuch_client, clock, audio_nic)?
                 .run()
                 .await;
@@ -192,7 +192,7 @@ struct VirtualSoundCard {
     // tx_names: HashMap<u32, String>,
     // rx_names: HashMap<u32, String>,
     monitoring: Monitoring,
-    subsys: Subsystem,
+    subsys: SubsystemHandle,
     wb: Worterbuch,
 }
 
@@ -200,7 +200,7 @@ impl VirtualSoundCard {
     fn new(
         name: String,
         api_rx: mpsc::Receiver<VscApiMessage>,
-        subsys: Subsystem,
+        subsys: SubsystemHandle,
         worterbuch_client: Worterbuch,
         clock: Clock,
         audio_nic: NetworkInterface,

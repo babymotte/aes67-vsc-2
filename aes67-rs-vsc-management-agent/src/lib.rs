@@ -13,14 +13,14 @@ use crate::{
     },
 };
 use aes67_rs::{
-    config::Config,
-    error::{VscApiError, VscApiResult},
+    config::{Config, adjust_labels_for_channel_count},
+    error::{ConfigError, VscApiError, VscApiResult},
     formats::{AudioFormat, FrameFormat, Seconds},
     monitoring::Monitoring,
     nic::find_nic_with_name,
     receiver::{
         api::ReceiverApi,
-        config::{PartialReceiverConfig, ReceiverConfig},
+        config::{PartialReceiverConfig, ReceiverConfig, SessionInfo},
     },
     sender::{
         api::SenderApi,
@@ -40,7 +40,7 @@ use tokio::{
     select,
     sync::{mpsc, oneshot},
 };
-use tosub::Subsystem;
+use tosub::SubsystemHandle;
 use tracing::{error, info, warn};
 use worterbuch::{
     PersistenceMode,
@@ -72,6 +72,7 @@ pub struct Sdp {
 pub enum SdpSource {
     Content(String),
     Url(String),
+    SessionId(String),
 }
 
 #[derive(Clone)]
@@ -83,7 +84,7 @@ pub struct ManagementAgentApi {
 
 impl ManagementAgentApi {
     pub fn new(
-        subsys: &Subsystem,
+        subsys: &SubsystemHandle,
         app_id: String,
         wb: Worterbuch,
         io_handler: impl IoHandler + Send + Sync + 'static,
@@ -230,7 +231,7 @@ impl ManagementAgentApi {
 }
 
 struct VscApiActor<IOH: IoHandler> {
-    subsys: Subsystem,
+    subsys: SubsystemHandle,
     rx: mpsc::Receiver<VscApiMessage>,
     wb: Worterbuch,
     app_id: String,
@@ -240,7 +241,7 @@ struct VscApiActor<IOH: IoHandler> {
 
 impl<IOH: IoHandler> VscApiActor<IOH> {
     fn new(
-        subsys: Subsystem,
+        subsys: SubsystemHandle,
         app_id: String,
         rx: mpsc::Receiver<VscApiMessage>,
         wb: Worterbuch,
@@ -438,10 +439,16 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
 
     async fn create_receiver_config(&mut self, sdp: Option<Sdp>) -> ManagementAgentResult<()> {
         let config = match sdp {
-            Some(sdp) => {
-                // TODO parse SDP
-                PartialReceiverConfig::default()
-            }
+            Some(sdp) => match sdp.sdp {
+                Some(SdpSource::Content(content)) => {
+                    PartialReceiverConfig::from_sdp_content(&content)?
+                }
+                Some(SdpSource::Url(url)) => PartialReceiverConfig::from_sdp_url(&url).await?,
+                Some(SdpSource::SessionId(session_id)) => {
+                    self.fetch_config_from_session(session_id).await?
+                }
+                None => PartialReceiverConfig::default(),
+            },
             None => PartialReceiverConfig::default(),
         };
 
@@ -452,6 +459,28 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
         self.publish_receiver_config(id, &config).await?;
 
         Ok(())
+    }
+
+    async fn fetch_config_from_session(
+        &mut self,
+        session_id: String,
+    ) -> ManagementAgentResult<PartialReceiverConfig> {
+        let Some(session_info) = self
+            .wb
+            .get::<SessionInfo>(topic!(
+                self.app_id,
+                "discovery",
+                "sessions",
+                &session_id,
+                "config"
+            ))
+            .await?
+        else {
+            return Err(ManagementAgentError::ConfigError(
+                ConfigError::MissingReceiverConfig,
+            ));
+        };
+        Ok(PartialReceiverConfig::from_session_info(&session_info))
     }
 
     async fn next_id(&self, key: String) -> ManagementAgentResult<u32> {
@@ -549,8 +578,20 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
         match &self.vsc_api {
             None => return Err(VscApiError::NotRunning.into()),
             Some(vsc_api) => {
-                vsc_api.destroy_sender(id).await?;
+                let res = vsc_api.destroy_sender(id).await;
                 self.io_handler.sender_deleted(id).await?;
+                if let Err(e) = res {
+                    self.wb
+                        .pdelete_async(topic!(self.app_id, "tx", id, "#"), true)
+                        .await?;
+                    self.wb
+                        .set_async(
+                            topic!(self.app_id, "config", "tx", "senders", id, "autostart"),
+                            false,
+                        )
+                        .await?;
+                    return Err(e.into());
+                }
             }
         }
 
@@ -561,8 +602,20 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
         match &self.vsc_api {
             None => return Err(VscApiError::NotRunning.into()),
             Some(vsc_api) => {
-                vsc_api.destroy_receiver(id).await?;
+                let res = vsc_api.destroy_receiver(id).await;
                 self.io_handler.receiver_deleted(id).await?;
+                if let Err(e) = res {
+                    self.wb
+                        .pdelete_async(topic!(self.app_id, "rx", id, "#"), true)
+                        .await?;
+                    self.wb
+                        .set_async(
+                            topic!(self.app_id, "config", "rx", "receivers", id, "autostart"),
+                            false,
+                        )
+                        .await?;
+                    return Err(e.into());
+                }
             }
         }
 
@@ -641,14 +694,12 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
                 )
                 .await?;
         }
-        if let Some(channel_labels) = &config.channel_labels {
-            self.wb
-                .set_async(
-                    topic!(self.app_id, "config", "tx", "senders", id, "channelLabels"),
-                    channel_labels,
-                )
-                .await?;
-        }
+        self.wb
+            .set_async(
+                topic!(self.app_id, "config", "tx", "senders", id, "channelLabels"),
+                &config.channel_labels,
+            )
+            .await?;
         Ok(())
     }
 
@@ -667,6 +718,21 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
                 "sender channels not configured",
             )
             .await?;
+
+        let mut channel_labels = self
+            .wb
+            .get(topic!(
+                self.app_id,
+                "config",
+                "tx",
+                "senders",
+                id,
+                "channelLabels"
+            ))
+            .await?
+            .unwrap_or_else(|| Vec::with_capacity(channels));
+        adjust_labels_for_channel_count(channels, &mut channel_labels);
+
         let sample_rate = self
             .config_param(
                 topic!(self.app_id, "config", "audio", "sampleRate"),
@@ -720,17 +786,6 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
                 topic!(self.app_id, "config", "tx", "senders", id, "packetTime"),
                 "sender packet time not configured",
             )
-            .await?;
-        let channel_labels = self
-            .wb
-            .get(topic!(
-                self.app_id,
-                "config",
-                "tx",
-                "senders",
-                id,
-                "channelLabels"
-            ))
             .await?;
 
         Ok(SenderConfig {
@@ -817,21 +872,19 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
                 )
                 .await?;
         }
-        if let Some(channel_labels) = &config.channel_labels {
-            self.wb
-                .set_async(
-                    topic!(
-                        self.app_id,
-                        "config",
-                        "rx",
-                        "receivers",
-                        id,
-                        "channelLabels"
-                    ),
-                    channel_labels,
-                )
-                .await?;
-        }
+        self.wb
+            .set_async(
+                topic!(
+                    self.app_id,
+                    "config",
+                    "rx",
+                    "receivers",
+                    id,
+                    "channelLabels"
+                ),
+                &config.channel_labels,
+            )
+            .await?;
         Ok(())
     }
 
@@ -885,10 +938,19 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
             )
             .await?;
         let source = SocketAddr::new(source_ip, source_port);
-        // TODO how do we manage payload type correctly?
-        let payload_type = 97;
-        // TODO fetch channel labels from worterbuch
-        let channel_labels = None;
+        let channel_labels = self
+            .config_param(
+                topic!(
+                    self.app_id,
+                    "config",
+                    "rx",
+                    "receivers",
+                    id,
+                    "channelLabels"
+                ),
+                "receiver channel labels not configured",
+            )
+            .await?;
 
         let delay_calculation_interval = self
             .wb
@@ -924,7 +986,6 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
             delay_calculation_interval,
             label,
             link_offset,
-            payload_type,
             rtp_offset,
             source,
             origin_ip,
@@ -950,7 +1011,7 @@ pub trait IoHandler: Clone + Send + Sync + 'static {
     fn sender_created(
         &self,
         app_id: String,
-        subsys: Subsystem,
+        subsys: SubsystemHandle,
         sender: SenderApi,
         config: SenderConfig,
         clock: Clock,
@@ -964,7 +1025,7 @@ pub trait IoHandler: Clone + Send + Sync + 'static {
     fn receiver_created(
         &self,
         app_id: String,
-        subsys: Subsystem,
+        subsys: SubsystemHandle,
         receiver: ReceiverApi,
         config: ReceiverConfig,
         clock: Clock,
@@ -977,7 +1038,7 @@ pub trait IoHandler: Clone + Send + Sync + 'static {
 }
 
 pub async fn init_management_agent(
-    subsys: &Subsystem,
+    subsys: &SubsystemHandle,
     app_id: String,
     io_handler: impl IoHandler,
 ) -> Result<()> {
@@ -1045,7 +1106,7 @@ pub struct Aes67VscRestApi {}
 
 impl Aes67VscRestApi {
     pub async fn new<'a>(
-        subsys: &Subsystem,
+        subsys: &SubsystemHandle,
         persistent_config: AppConfig,
         worterbuch: CloneableWbApi,
         io_handler: impl IoHandler,
@@ -1089,7 +1150,7 @@ impl Aes67VscRestApi {
 }
 
 async fn run_rest_api(
-    subsys: Subsystem,
+    subsys: SubsystemHandle,
     mut persistent_config: AppConfig,
     worterbuch: CloneableWbApi,
     wb: Worterbuch,

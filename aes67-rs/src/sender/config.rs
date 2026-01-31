@@ -15,10 +15,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{
-    error::ConfigError,
-    formats::{AudioFormat, FrameFormat, MilliSeconds, PayloadType, SampleFormat},
-};
+use crate::formats::{AudioFormat, FrameFormat, MilliSeconds, PayloadType, SampleFormat};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 
@@ -29,7 +26,7 @@ pub struct PartialSenderConfig {
     pub audio_format: Option<AudioFormat>,
     pub target: Option<SocketAddr>,
     pub payload_type: Option<PayloadType>,
-    pub channel_labels: Option<Vec<String>>,
+    pub channel_labels: Vec<String>,
     pub packet_time: Option<MilliSeconds>,
 }
 
@@ -46,7 +43,7 @@ impl Default for PartialSenderConfig {
             }),
             target: Some(SocketAddr::from(([239, 255, 0, 1], 5004))),
             payload_type: Some(98),
-            channel_labels: Some(vec!["Left".to_owned(), "Right".to_owned()]),
+            channel_labels: vec!["Left".to_owned(), "Right".to_owned()],
             packet_time: Some(1.0),
         }
     }
@@ -61,32 +58,5 @@ pub struct SenderConfig {
     pub target: SocketAddr,
     pub packet_time: MilliSeconds,
     pub payload_type: PayloadType,
-    pub channel_labels: Option<Vec<String>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TxDescriptor {
-    pub id: u32,
-    pub label: String,
-    pub audio_format: AudioFormat,
-    pub payload_type: PayloadType,
-    pub channel_labels: Vec<Option<String>>,
-}
-
-impl TryFrom<&SenderConfig> for TxDescriptor {
-    type Error = ConfigError;
-
-    fn try_from(value: &SenderConfig) -> Result<Self, Self::Error> {
-        let labels = (0..value.audio_format.frame_format.channels)
-            .map(|i| value.channel_labels.as_ref().and_then(|it| it.get(i)))
-            .map(|it| it.map(|it| it.to_owned()))
-            .collect::<Vec<Option<String>>>();
-        Ok(Self {
-            id: value.id,
-            label: value.label.clone(),
-            audio_format: value.audio_format,
-            payload_type: value.payload_type,
-            channel_labels: labels,
-        })
-    }
+    pub channel_labels: Vec<String>,
 }

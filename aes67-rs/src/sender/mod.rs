@@ -25,7 +25,7 @@ use crate::{
     monitoring::Monitoring,
     sender::{
         api::{SenderApi, SenderApiMessage},
-        config::{SenderConfig, TxDescriptor},
+        config::SenderConfig,
     },
     socket::create_tx_socket,
     utils::U32_WRAP,
@@ -34,8 +34,8 @@ use pnet::datalink::NetworkInterface;
 use rtp_rs::{RtpPacketBuilder, Seq};
 use std::net::SocketAddr;
 use tokio::{net::UdpSocket, select, sync::mpsc};
-use tosub::Subsystem;
-use tracing::{info, instrument, warn};
+use tosub::SubsystemHandle;
+use tracing::{info, instrument};
 #[cfg(feature = "tokio-metrics")]
 use worterbuch_client::Worterbuch;
 
@@ -47,28 +47,28 @@ pub(crate) async fn start_sender(
     iface: NetworkInterface,
     config: SenderConfig,
     monitoring: Monitoring,
-    subsys: &Subsystem,
+    subsys: &SubsystemHandle,
     #[cfg(feature = "tokio-metrics")] wb: Worterbuch,
 ) -> SenderInternalResult<SenderApi> {
     let sender_id = id.clone();
     let (api_tx, api_rx) = mpsc::channel(1024);
-    let desc = TxDescriptor::try_from(&config)?;
-    let (tx, rx) = sender_buffer_channel(desc.clone());
-    let socket = create_tx_socket(config.target, iface)?;
+    let (tx, rx) = sender_buffer_channel(config.clone());
+    let target = config.target;
+    let socket = create_tx_socket(target, iface)?;
 
-    let subsystem_name = id.clone();
-    let subsystem = async move |s| {
+    let SubsystemHandle_name = id.clone();
+    let SubsystemHandle = async move |s| {
         Sender {
             id,
             label,
             subsys: s,
-            desc,
+            config,
             api_rx,
             sequence_number: Seq::from(rand::random::<u16>()),
             rx,
             rtp_buffer: [0u8; 65536],
             socket,
-            target_address: config.target,
+            target_address: target,
             monitoring,
             ssrc: rand::random(),
         }
@@ -76,7 +76,7 @@ pub(crate) async fn start_sender(
         .await
     };
 
-    subsys.spawn(subsystem_name, subsystem);
+    subsys.spawn(SubsystemHandle_name, SubsystemHandle);
 
     info!("Sender '{sender_id}' started successfully.");
     Ok(SenderApi::new(api_tx, tx))
@@ -85,8 +85,8 @@ pub(crate) async fn start_sender(
 struct Sender {
     id: String,
     label: String,
-    subsys: Subsystem,
-    desc: TxDescriptor,
+    subsys: SubsystemHandle,
+    config: SenderConfig,
     api_rx: mpsc::Receiver<SenderApiMessage>,
     sequence_number: Seq,
     rx: SenderBufferConsumer,
@@ -138,7 +138,7 @@ impl Sender {
         ptime_frames: Frames,
         ingress_time: Frames,
     ) -> SenderInternalResult<()> {
-        let payload_type = self.desc.payload_type;
+        let payload_type = self.config.payload_type;
         let seq = self.sequence_number;
         self.sequence_number = seq.next();
         let timestamp = (ingress_time % U32_WRAP) as u32;
@@ -185,7 +185,7 @@ mod monitoring {
                 .sender_state(SenderState::Created {
                     id: self.id.clone(),
                     label: self.label.clone(),
-                    descriptor: self.desc.clone(),
+                    config: self.config.clone(),
                     address: buffer,
                 })
                 .await;

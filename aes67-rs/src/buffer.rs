@@ -20,7 +20,7 @@ use crate::{
     formats::{BufferFormat, Frames, SampleReader, SampleWriter, frames_to_duration},
     monitoring::Monitoring,
     receiver::{api::DataState, config::ReceiverConfig},
-    sender::config::TxDescriptor,
+    sender::config::SenderConfig,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -32,7 +32,7 @@ use tokio::{
     select,
     sync::{mpsc, watch},
 };
-use tosub::Subsystem;
+use tosub::SubsystemHandle;
 use tracing::{debug, error, warn};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -319,7 +319,7 @@ impl ReceiverBufferConsumer {
         &mut self,
         buffers: impl Iterator<Item = Option<&'a mut [f32]>>,
         ingress_time: Frames,
-        subsys: &Subsystem,
+        subsys: &SubsystemHandle,
     ) -> ReceiverInternalResult<bool> {
         let buf = self.buffer_pointer.buffer::<f32>();
 
@@ -400,16 +400,14 @@ impl ReceiverBufferConsumer {
     }
 }
 
-pub fn sender_buffer_channel(
-    descriptor: TxDescriptor,
-) -> (SenderBufferProducer, SenderBufferConsumer) {
+pub fn sender_buffer_channel(config: SenderConfig) -> (SenderBufferProducer, SenderBufferConsumer) {
     let (tx, rx) = mpsc::channel(65536);
     let buffer = vec![0u8; 65536].into_boxed_slice();
     let buffer_pointer = AudioBufferPointer::from_slice(&buffer);
     (
         SenderBufferProducer {
             buffer_pointer,
-            descriptor: descriptor.clone(),
+            config: config.clone(),
             tx,
         },
         SenderBufferConsumer { buffer, rx },
@@ -419,7 +417,7 @@ pub fn sender_buffer_channel(
 #[derive(Debug, Clone)]
 pub struct SenderBufferProducer {
     buffer_pointer: AudioBufferPointer,
-    descriptor: TxDescriptor,
+    config: SenderConfig,
     tx: mpsc::Sender<(usize, Frames, Frames)>,
 }
 
@@ -432,7 +430,7 @@ pub struct SenderBufferConsumer {
 // TODO generalize start and end indices/packet time
 impl SenderBufferProducer {
     pub async fn write(&mut self, channel_buffers: &[AudioBufferPointer], ingress_time: Frames) {
-        let channels = self.descriptor.audio_format.frame_format.channels;
+        let channels = self.config.audio_format.frame_format.channels;
 
         debug_assert_eq!(
             channels,
@@ -444,7 +442,7 @@ impl SenderBufferProducer {
 
         // TODO cache that?
         let target_bytes_per_sample = self
-            .descriptor
+            .config
             .audio_format
             .frame_format
             .sample_format
@@ -476,7 +474,7 @@ impl SenderBufferProducer {
                         + ch * target_bytes_per_sample;
                     let dest_buf =
                         &mut audio_buffer[target_index..target_index + target_bytes_per_sample];
-                    self.descriptor
+                    self.config
                         .audio_format
                         .frame_format
                         .sample_format
@@ -495,7 +493,7 @@ impl SenderBufferProducer {
 impl SenderBufferConsumer {
     pub async fn read(
         &mut self,
-        subsys: &Subsystem,
+        subsys: &SubsystemHandle,
     ) -> SenderInternalResult<(usize, Frames, Frames)> {
         let received = select! {
             it = self.rx.recv() => it,

@@ -38,7 +38,7 @@ use pnet::datalink::NetworkInterface;
 use rtp_rs::{RtpReader, Seq};
 use std::net::SocketAddr;
 use tokio::{net::UdpSocket, select, sync::mpsc};
-use tosub::Subsystem;
+use tosub::SubsystemHandle;
 use tracing::{debug, info, instrument, warn};
 #[cfg(feature = "tokio-metrics")]
 use worterbuch_client::Worterbuch;
@@ -52,7 +52,7 @@ pub(crate) async fn start_receiver(
     config: ReceiverConfig,
     clock: Clock,
     monitoring: Monitoring,
-    subsys: &Subsystem,
+    subsys: &SubsystemHandle,
     #[cfg(feature = "tokio-metrics")] wb: Worterbuch,
 ) -> ReceiverInternalResult<ReceiverApi> {
     let receiver_id = id.clone();
@@ -60,8 +60,8 @@ pub(crate) async fn start_receiver(
     let (tx, rx) = receiver_buffer_channel(config.clone(), monitoring.clone());
     let socket = create_rx_socket(&config, iface)?;
 
-    let subsystem_name = id.clone();
-    let subsystem = async move |s| {
+    let SubsystemHandle_name = id.clone();
+    let SubsystemHandle = async move |s| {
         Receiver {
             id,
             label,
@@ -80,7 +80,7 @@ pub(crate) async fn start_receiver(
         .await
     };
 
-    subsys.spawn(subsystem_name, subsystem);
+    subsys.spawn(SubsystemHandle_name, SubsystemHandle);
 
     info!("Receiver '{receiver_id}' started successfully.");
     Ok(ReceiverApi::new(api_tx, rx))
@@ -89,7 +89,7 @@ pub(crate) async fn start_receiver(
 struct Receiver {
     id: String,
     label: String,
-    subsys: Subsystem,
+    subsys: SubsystemHandle,
     config: ReceiverConfig,
     clock: Clock,
     api_rx: mpsc::Receiver<ReceiverApiMessage>,

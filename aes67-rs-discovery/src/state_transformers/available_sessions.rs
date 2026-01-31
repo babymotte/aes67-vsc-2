@@ -2,12 +2,12 @@ use crate::{Session, error::DiscoveryResult};
 use aes67_rs::receiver::config::SessionId;
 use std::{collections::HashMap, time::Duration};
 use tokio::{select, sync::mpsc};
-use tosub::Subsystem;
+use tosub::SubsystemHandle;
 use tracing::{debug, info};
 use worterbuch_client::{TypedPStateEvent, Worterbuch, topic};
 
 pub async fn start(
-    subsys: Subsystem,
+    subsys: SubsystemHandle,
     instance_name: String,
     worterbuch_client: Worterbuch,
 ) -> DiscoveryResult<()> {
@@ -51,7 +51,7 @@ struct ProcessLoop {
 impl ProcessLoop {
     async fn start(
         mut self,
-        subsys: Subsystem,
+        subsys: SubsystemHandle,
         mut used_sessions: mpsc::UnboundedReceiver<TypedPStateEvent<SessionId>>,
         mut all_sessions: mpsc::UnboundedReceiver<TypedPStateEvent<String>>,
     ) -> DiscoveryResult<()> {
