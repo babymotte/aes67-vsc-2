@@ -87,7 +87,7 @@ impl ManagementAgentApi {
         subsys: &SubsystemHandle,
         app_id: String,
         wb: Worterbuch,
-        io_handler: impl IoHandler + Send + Sync + 'static,
+        io_handler: impl IoHandler + 'static,
     ) -> Self {
         let (api_tx, api_rx) = mpsc::channel(1);
 
@@ -397,7 +397,7 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
             .into_iter()
             .filter_map(|kvp| if kvp.value { Some(kvp.key) } else { None });
 
-        Ok(for receiver in receivers_to_autostart {
+        let _: () = for receiver in receivers_to_autostart {
             let Some(id) = receiver.split('/').nth(4).and_then(|id| id.parse().ok()) else {
                 warn!("Could not parse receiver id from key {}", receiver);
                 continue;
@@ -411,7 +411,8 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
                 error!("{e}");
                 eprintln!("{e:?}");
             }
-        })
+        };
+        Ok(())
     }
 
     async fn stop_vsc(&mut self) -> ManagementAgentResult<()> {

@@ -36,7 +36,7 @@ pub async fn start_recording(
     sender: SenderApi,
     config: SenderConfig,
     clock: Clock,
-    monitoring: Monitoring,
+    _monitoring: Monitoring,
 ) -> miette::Result<SubsystemHandle> {
     // TODO evaluate client status
     let (client, status) =

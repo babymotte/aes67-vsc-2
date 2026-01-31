@@ -33,7 +33,6 @@ use futures_lite::future::block_on;
 use lazy_static::lazy_static;
 use sdp::SessionDescription;
 use std::{env, io::Cursor, sync::Arc, time::Duration};
-use tosub::SubsystemHandle;
 use tracing::info;
 
 use crate::{AES_VSC_ERROR_RECEIVER_NOT_FOUND, AES_VSC_OK, Aes67VscReceiverConfig};
@@ -49,17 +48,17 @@ fn init_vsc() -> VscApiResult<Arc<VirtualSoundCardApi>> {
     let (wb, _, _) = block_on(worterbuch_client::connect_with_default_config())
         .map_err(VscInternalError::from)
         .boxed()?;
-    let audio_nic = find_nic_with_name(config.audio.nic)?;
+    let _audio_nic = find_nic_with_name(config.audio.nic)?;
     let vsc_name = env::var("AES67_VSC_NAME").unwrap_or("aes67-virtual-sound-card".to_owned());
     info!("Creating new VSC with name '{vsc_name}' …");
-    let subsys = tosub::build_root(vsc_name.clone())
+    let _subsys = tosub::build_root(vsc_name.clone())
         .with_timeout(Duration::from_secs(5))
         .start(|s| async move {
             s.shutdown_requested().await;
             Ok::<(), VscInternalError>(())
         });
 
-    let clock = block_on(get_clock(
+    let _clock = block_on(get_clock(
         vsc_name.clone(),
         config.ptp,
         config.audio.sample_rate,
@@ -99,16 +98,16 @@ impl<'a> TryFrom<&Aes67VscReceiverConfig<'a>> for ReceiverConfig {
     type Error = ConfigError;
     fn try_from(value: &Aes67VscReceiverConfig<'a>) -> ConfigResult<Self> {
         let id = value.id;
-        let label = value
+        let _label = value
             .name
             .map(|it| it.to_string())
             .unwrap_or_else(|| id.to_string());
-        let session = SdpWrapper(
+        let _session = SdpWrapper(
             SessionDescription::unmarshal(&mut Cursor::new(value.sdp.to_str()))
                 .map_err(|e| ConfigError::InvalidSdp(e.to_string()))?,
         );
-        let link_offset = value.link_offset;
-        let delay_calculation_interval: Option<()> = None;
+        let _link_offset = value.link_offset;
+        let _delay_calculation_interval: Option<()> = None;
 
         todo!()
         // Ok(ReceiverConfig {

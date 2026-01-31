@@ -67,7 +67,7 @@ impl PartialReceiverConfig {
         it
     }
 
-    pub fn from_sdp_content(sdp_content: &str) -> Result<Self, ConfigError> {
+    pub fn from_sdp_content(_sdp_content: &str) -> Result<Self, ConfigError> {
         todo!()
     }
 
@@ -341,7 +341,7 @@ impl TryFrom<&SessionDescription> for SessionInfo {
             .attribute("mediaclk")
             .and_then(|it| it)
             .and_then(|clk| {
-                if let Some(caps) = MEDIACLK_REGEX.captures(&clk) {
+                if let Some(caps) = MEDIACLK_REGEX.captures(clk) {
                     caps[1].parse().ok()
                 } else {
                     None

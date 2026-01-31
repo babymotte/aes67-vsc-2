@@ -19,6 +19,12 @@ pub struct JackIoHandlerActor {
     clients: HashMap<u32, SubsystemHandle>,
 }
 
+impl Default for JackIoHandlerActor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl JackIoHandlerActor {
     pub fn new() -> Self {
         Self {
@@ -101,8 +107,8 @@ impl JackIoHandlerActor {
         Ok(())
     }
 
-    async fn sender_updated(&mut self, id: u32) -> IoHandlerResult<()> {
-        return Err(miette!("not implemented").into());
+    async fn sender_updated(&mut self, _id: u32) -> IoHandlerResult<()> {
+        Err(miette!("not implemented").into())
     }
 
     async fn sender_deleted(&mut self, id: u32) -> IoHandlerResult<()> {
@@ -129,8 +135,8 @@ impl JackIoHandlerActor {
         Ok(())
     }
 
-    async fn receiver_updated(&mut self, id: u32) -> IoHandlerResult<()> {
-        return Err(miette!("not implemented").into());
+    async fn receiver_updated(&mut self, _id: u32) -> IoHandlerResult<()> {
+        Err(miette!("not implemented").into())
     }
 
     async fn receiver_deleted(&mut self, id: u32) -> IoHandlerResult<()> {
@@ -180,6 +186,12 @@ enum JackIoHandlerMessage {
 #[derive(Clone)]
 pub struct JackIoHandler {
     tx: mpsc::Sender<JackIoHandlerMessage>,
+}
+
+impl Default for JackIoHandler {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl JackIoHandler {

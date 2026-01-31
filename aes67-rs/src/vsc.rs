@@ -300,7 +300,7 @@ impl VirtualSoundCard {
         Ok((sender_api, monitoring, self.clock.clone()))
     }
 
-    async fn update_sender(&mut self, config: SenderConfig) -> SenderInternalResult<SenderApi> {
+    async fn update_sender(&mut self, _config: SenderConfig) -> SenderInternalResult<SenderApi> {
         // TODO
         todo!()
     }
@@ -353,7 +353,7 @@ impl VirtualSoundCard {
 
     async fn update_receiver(
         &mut self,
-        config: ReceiverConfig,
+        _config: ReceiverConfig,
     ) -> ReceiverInternalResult<ReceiverApi> {
         // TODO
         todo!()
