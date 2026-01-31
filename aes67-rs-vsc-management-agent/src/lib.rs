@@ -20,7 +20,7 @@ use aes67_rs::{
     nic::find_nic_with_name,
     receiver::{
         api::ReceiverApi,
-        config::{PartialReceiverConfig, ReceiverConfig, SessionInfo},
+        config::{PartialReceiverConfig, ReceiverConfig},
     },
     sender::{
         api::SenderApi,
@@ -29,7 +29,7 @@ use aes67_rs::{
     time::{Clock, get_clock},
     vsc::VirtualSoundCardApi,
 };
-use aes67_rs_discovery::{sap::start_sap_discovery, state_transformers};
+use aes67_rs_discovery::{DiscoveryApi, start_discovery};
 use axum::routing::{get, post};
 use axum_server::Handle;
 use miette::{Context, IntoDiagnostic, Result};
@@ -77,9 +77,7 @@ pub enum SdpSource {
 
 #[derive(Clone)]
 pub struct ManagementAgentApi {
-    // app_id: String,
     api_tx: mpsc::Sender<VscApiMessage>,
-    // wb: Worterbuch,
 }
 
 impl ManagementAgentApi {
@@ -91,18 +89,17 @@ impl ManagementAgentApi {
     ) -> Self {
         let (api_tx, api_rx) = mpsc::channel(1);
 
+        let discovery = start_discovery(subsys, app_id.clone(), wb.clone());
+
         let app_idc = app_id.clone();
         let wbc = wb.clone();
+        let discc = discovery.clone();
         subsys.spawn("api", |s| async move {
-            let api_actor = VscApiActor::new(s, app_idc, api_rx, wbc, io_handler);
+            let api_actor = VscApiActor::new(s, app_idc, api_rx, wbc, io_handler, discc);
             api_actor.run().await
         });
 
-        Self {
-            // app_id,
-            api_tx,
-            // wb
-        }
+        Self { api_tx }
     }
 
     pub async fn start_vsc(&self) -> ManagementAgentResult<()> {
@@ -237,6 +234,7 @@ struct VscApiActor<IOH: IoHandler> {
     app_id: String,
     vsc_api: Option<VirtualSoundCardApi>,
     io_handler: IOH,
+    discovery: DiscoveryApi,
 }
 
 impl<IOH: IoHandler> VscApiActor<IOH> {
@@ -246,6 +244,7 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
         rx: mpsc::Receiver<VscApiMessage>,
         wb: Worterbuch,
         io_handler: IOH,
+        discovery: DiscoveryApi,
     ) -> Self {
         Self {
             subsys,
@@ -254,6 +253,7 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
             app_id,
             vsc_api: None,
             io_handler,
+            discovery,
         }
     }
 
@@ -372,7 +372,6 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
                 .wrap_err_with(|| format!("Could not autostart sender {}", id))
             {
                 error!("{e}");
-                eprintln!("{e:?}");
             }
         }
 
@@ -409,7 +408,6 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
                 .wrap_err_with(|| format!("Could not autostart receiver {}", id))
             {
                 error!("{e}");
-                eprintln!("{e:?}");
             }
         };
         Ok(())
@@ -466,17 +464,7 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
         &mut self,
         session_id: String,
     ) -> ManagementAgentResult<PartialReceiverConfig> {
-        let Some(session_info) = self
-            .wb
-            .get::<SessionInfo>(topic!(
-                self.app_id,
-                "discovery",
-                "sessions",
-                &session_id,
-                "config"
-            ))
-            .await?
-        else {
+        let Some(session_info) = self.discovery.fetch_session_info(session_id).await? else {
             return Err(ManagementAgentError::ConfigError(
                 ConfigError::MissingReceiverConfig,
             ));
@@ -579,8 +567,11 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
         match &self.vsc_api {
             None => return Err(VscApiError::NotRunning.into()),
             Some(vsc_api) => {
-                let res = vsc_api.destroy_sender(id).await;
+                // Stop the JACK client (buffer producer) first, then destroy the sender
+                // core (buffer consumer). This ensures the JACK callback can't access
+                // the buffer after the consumer is destroyed.
                 self.io_handler.sender_deleted(id).await?;
+                let res = vsc_api.destroy_sender(id).await;
                 if let Err(e) = res {
                     self.wb
                         .pdelete_async(topic!(self.app_id, "tx", id, "#"), true)
@@ -603,8 +594,11 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
         match &self.vsc_api {
             None => return Err(VscApiError::NotRunning.into()),
             Some(vsc_api) => {
-                let res = vsc_api.destroy_receiver(id).await;
+                // Stop the JACK client (buffer consumer) first, then destroy the receiver
+                // core (buffer producer). This ensures the JACK callback can't access
+                // the buffer after the producer is destroyed.
                 self.io_handler.receiver_deleted(id).await?;
+                let res = vsc_api.destroy_receiver(id).await;
                 if let Err(e) = res {
                     self.wb
                         .pdelete_async(topic!(self.app_id, "rx", id, "#"), true)
@@ -1083,19 +1077,6 @@ pub async fn init_management_agent(
     .await
     .ok();
 
-    let wbc = wb.clone();
-    let wbd = wb.clone();
-    let id = app_id.clone();
-    subsys.spawn("discovery", async |s| {
-        let instance_name = id.clone();
-        s.spawn("state-transformers", async |s| {
-            state_transformers::start(s, id, wbc).await
-        });
-        s.spawn("sap", |s| start_sap_discovery(instance_name, wbd, s));
-        s.shutdown_requested().await;
-        Ok::<(), ManagementAgentError>(())
-    });
-
     Aes67VscRestApi::new(subsys, config, worterbuch, io_handler).await?;
 
     Ok(())
@@ -1135,7 +1116,6 @@ impl Aes67VscRestApi {
                 .wrap_err("Could not start AES67-VSC REST API")
             {
                 error!("{e}");
-                eprintln!("{e:?}");
             };
         }
 

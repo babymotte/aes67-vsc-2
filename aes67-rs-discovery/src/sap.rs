@@ -8,7 +8,7 @@ use worterbuch_client::{Worterbuch, topic};
 
 use crate::{Session, error::DiscoveryResult};
 
-pub async fn start_sap_discovery(
+pub async fn start_discovery(
     instance_name: String,
     worterbuch_client: Worterbuch,
     subsys: SubsystemHandle,

@@ -1,6 +1,7 @@
 use std::io;
 
 use aes67_rs::error::{ClockError, ConfigError, VscApiError};
+use aes67_rs_discovery::error::DiscoveryError;
 use axum::{http::StatusCode, response::IntoResponse};
 use miette::{Diagnostic, Report};
 use thiserror::Error;
@@ -36,6 +37,8 @@ pub enum ManagementAgentError {
     ConfigError(#[from] ConfigError),
     #[error("I/O Handler error: {0}")]
     IoHandlerError(#[from] IoHandlerError),
+    #[error("Discovery error: {0}")]
+    DiscoveryError(#[from] DiscoveryError),
 }
 
 impl From<oneshot::error::RecvError> for ManagementAgentError {
@@ -95,6 +98,9 @@ impl From<ManagementAgentError> for (StatusCode, String) {
             ManagementAgentError::IoHandlerError(e) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
             }
+            ManagementAgentError::DiscoveryError(e) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+            }
         }
     }
 }
@@ -112,7 +118,6 @@ where
             Ok(_) => {}
             Err(e) => {
                 tracing::error!("{}: {}", context, e);
-                eprintln!("{e:?}")
             }
         }
         self

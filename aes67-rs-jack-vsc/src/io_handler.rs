@@ -16,27 +16,28 @@ use tosub::SubsystemHandle;
 use tracing::{error, info, warn};
 
 pub struct JackIoHandlerActor {
-    clients: HashMap<u32, SubsystemHandle>,
-}
-
-impl Default for JackIoHandlerActor {
-    fn default() -> Self {
-        Self::new()
-    }
+    subsys: SubsystemHandle,
+    tx_clients: HashMap<u32, SubsystemHandle>,
+    rx_clients: HashMap<u32, SubsystemHandle>,
+    rx: mpsc::Receiver<JackIoHandlerMessage>,
 }
 
 impl JackIoHandlerActor {
-    pub fn new() -> Self {
+    pub(crate) fn new(subsys: SubsystemHandle, rx: mpsc::Receiver<JackIoHandlerMessage>) -> Self {
         Self {
-            clients: HashMap::new(),
+            subsys,
+            tx_clients: HashMap::new(),
+            rx_clients: HashMap::new(),
+            rx,
         }
     }
 
-    async fn run(mut self, mut rx: mpsc::Receiver<JackIoHandlerMessage>) {
+    async fn run(mut self) {
         info!("JACK I/O handler actor started.");
         loop {
             select! {
-                Some(msg) = rx.recv() => self.process_message(msg).await,
+                Some(msg) = self.rx.recv() => self.process_message(msg).await,
+                _ = self.subsys.shutdown_requested() => break,
                 else => break,
             }
         }
@@ -103,7 +104,7 @@ impl JackIoHandlerActor {
     ) -> IoHandlerResult<()> {
         let id = config.id;
         let recording = start_recording(app_id, subsys, sender, config, clock, monitoring).await?;
-        self.clients.insert(id, recording);
+        self.tx_clients.insert(id, recording);
         Ok(())
     }
 
@@ -112,11 +113,15 @@ impl JackIoHandlerActor {
     }
 
     async fn sender_deleted(&mut self, id: u32) -> IoHandlerResult<()> {
-        let Some(recording) = self.clients.remove(&id) else {
+        let Some(recording) = self.tx_clients.remove(&id) else {
             error!("No recording found for sender id {}", id);
             return Ok(());
         };
         recording.request_local_shutdown();
+        // Wait for the JACK client to be fully deactivated before returning.
+        // This prevents the sender's resources from being destroyed while
+        // the JACK callback is still running.
+        recording.join().await;
         Ok(())
     }
 
@@ -131,7 +136,7 @@ impl JackIoHandlerActor {
     ) -> IoHandlerResult<()> {
         let id = config.id;
         let playout = start_playout(app_id, subsys, receiver, config, clock, monitoring).await?;
-        self.clients.insert(id, playout);
+        self.rx_clients.insert(id, playout);
         Ok(())
     }
 
@@ -140,25 +145,32 @@ impl JackIoHandlerActor {
     }
 
     async fn receiver_deleted(&mut self, id: u32) -> IoHandlerResult<()> {
-        let Some(playout) = self.clients.remove(&id) else {
+        let Some(playout) = self.rx_clients.remove(&id) else {
             error!("No playout found for receiver id {}", id);
             return Ok(());
         };
         playout.request_local_shutdown();
+        // Wait for the JACK client to be fully deactivated before returning.
+        // This prevents the receiver's resources from being destroyed while
+        // the JACK callback is still running.
+        playout.join().await;
         Ok(())
     }
 }
 
 impl Drop for JackIoHandlerActor {
     fn drop(&mut self) {
-        warn!("JACK I/O handler dropped. Shutting down all playout SubsystemHandles …");
-        for (_, playout) in self.clients.drain() {
+        warn!("JACK I/O handler dropped. Shutting down all JACK client SubsystemHandles …");
+        for (_, playout) in self.rx_clients.drain() {
             playout.request_local_shutdown();
+        }
+        for (_, recording) in self.tx_clients.drain() {
+            recording.request_local_shutdown();
         }
     }
 }
 
-enum JackIoHandlerMessage {
+pub(crate) enum JackIoHandlerMessage {
     SenderCreated(
         String,
         SubsystemHandle,
@@ -188,19 +200,15 @@ pub struct JackIoHandler {
     tx: mpsc::Sender<JackIoHandlerMessage>,
 }
 
-impl Default for JackIoHandler {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl JackIoHandler {
-    pub fn new() -> Self {
+    pub fn new(subsys: &SubsystemHandle) -> Self {
         let (tx, rx) = mpsc::channel(1);
-        let actor = JackIoHandlerActor::new();
-        tokio::spawn(async move {
-            actor.run(rx).await;
+
+        subsys.spawn("jack_io_handler", |s| async {
+            JackIoHandlerActor::new(s, rx).run().await;
+            Ok::<(), miette::Error>(())
         });
+
         Self { tx }
     }
 }

@@ -67,7 +67,7 @@ pub async fn start_playout(
         ports,
         receiver,
         clock: JackClock::new(clock),
-        config,
+        config: config.clone(),
         muted: false,
         monitoring,
         subsys: subsys.clone(),
@@ -80,7 +80,13 @@ pub async fn start_playout(
         .activate_async(notification_handler, process_handler)
         .into_diagnostic()?;
 
-    let session_manager = start_session_manager(&subsys, active_client, notifications, app_id);
+    let session_manager = start_session_manager(
+        &subsys,
+        active_client,
+        notifications,
+        app_id,
+        format!("rx/{}", config.id),
+    );
 
     Ok(session_manager)
 }
@@ -92,6 +98,13 @@ fn buffer_change(_: &mut State, client: &Client, buffer_len: jack::Frames) -> Co
 }
 
 fn process(state: &mut State, _: &Client, ps: &ProcessScope) -> Control {
+    // Check for shutdown early to avoid accessing resources during teardown
+    // and prevent logging races that can cause RefCell panics
+    if state.subsys.is_shut_down() {
+        muted(state, ps);
+        return Control::Quit;
+    }
+
     let start = Instant::now();
 
     let playout_time = match state.clock.update_clock(ps) {

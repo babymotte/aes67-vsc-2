@@ -47,7 +47,7 @@ async fn main() -> miette::Result<()> {
 async fn run(subsys: SubsystemHandle, id: String) -> miette::Result<()> {
     info!("Starting {} …", id);
 
-    init_management_agent(&subsys, id, JackIoHandler::new()).await?;
+    init_management_agent(&subsys, id, JackIoHandler::new(&subsys)).await?;
 
     subsys.shutdown_requested().await;
 

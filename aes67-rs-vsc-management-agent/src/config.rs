@@ -59,7 +59,6 @@ impl AppConfig {
             .wrap_err("Could not persist config")
         {
             error!("{e}");
-            eprintln!("{e:?}");
         }
     }
 

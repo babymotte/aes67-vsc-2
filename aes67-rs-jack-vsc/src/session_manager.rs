@@ -109,12 +109,13 @@ pub fn start_session_manager<N, P>(
     client: AsyncClient<N, P>,
     notifications: mpsc::Receiver<Notification>,
     app_id: String,
+    transceiver_id: String,
 ) -> SubsystemHandle
 where
     N: 'static + Send + Sync + NotificationHandler,
     P: 'static + Send + ProcessHandler,
 {
-    subsys.spawn("session_manager", async |s| {
+    subsys.spawn(format!("session_manager/{transceiver_id}"), async |s| {
         run(s, client, notifications, app_id).await
     })
 }
@@ -144,8 +145,7 @@ where
         .into_diagnostic()
         .wrap_err("Could not deactivate JACK client")
     {
-        error!("{e}");
-        eprintln!("{e:?}");
+        error!("{e:?}");
     }
 
     Ok(())

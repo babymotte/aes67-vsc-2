@@ -28,6 +28,7 @@ struct State {
     #[deprecated = "derive buffer position from media time"]
     send_buf_pos: usize,
     sample_rate: u32,
+    subsys: SubsystemHandle,
 }
 
 pub async fn start_recording(
@@ -78,6 +79,7 @@ pub async fn start_recording(
         send_buffer,
         send_buf_pos: 0,
         sample_rate: config.audio_format.sample_rate,
+        subsys: subsys.clone(),
     };
     let process_handler =
         ClosureProcessHandler::with_state(process_handler_state, process, buffer_change);
@@ -85,7 +87,13 @@ pub async fn start_recording(
     let active_client = client
         .activate_async(notification_handler, process_handler)
         .into_diagnostic()?;
-    let session_manager = start_session_manager(&subsys, active_client, notifications, app_id);
+    let session_manager = start_session_manager(
+        &subsys,
+        active_client,
+        notifications,
+        app_id,
+        format!("tx/{}", config.id),
+    );
 
     Ok(session_manager)
 }
@@ -97,6 +105,12 @@ fn buffer_change(_: &mut State, client: &Client, buffer_len: jack::Frames) -> Co
 }
 
 fn process(state: &mut State, _: &Client, ps: &ProcessScope) -> Control {
+    // Check for shutdown early to avoid accessing resources during teardown
+    // and prevent logging races that can cause RefCell panics
+    if state.subsys.is_shut_down() {
+        return Control::Quit;
+    }
+
     let start = Instant::now();
 
     let ingress_time = match state.clock.update_clock(ps) {
