@@ -41,7 +41,6 @@ dependencies = [
  "regex",
  "reqwest",
  "rtp-rs",
- "sap-rs 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "sdp",
  "serde",
  "serde_json",
@@ -86,7 +85,7 @@ dependencies = [
  "aes67-rs",
  "aes67-rs-sdp",
  "miette",
- "sap-rs 0.4.0",
+ "sap-rs",
  "sdp",
  "serde",
  "thiserror 2.0.18",
@@ -3206,7 +3205,9 @@ dependencies = [
 
 [[package]]
 name = "sap-rs"
-version = "0.4.0"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "63b40806c727e6ded0c7ce24efb4a4b2a6a1f11457fc932586db81110e26bc25"
 dependencies = [
  "lazy_static",
  "miette",
@@ -3216,21 +3217,6 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tosub",
- "tracing",
-]
-
-[[package]]
-name = "sap-rs"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b3fa2eae7121f64d94866804ad1ffad0960624b93784d82faab4c233b4852eaa"
-dependencies = [
- "lazy_static",
- "murmur3",
- "sdp",
- "socket2 0.6.2",
- "thiserror 2.0.18",
- "tokio",
  "tracing",
 ]
 

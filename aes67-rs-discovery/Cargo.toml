@@ -7,7 +7,7 @@ edition = "2024"
 aes67-rs = { version = "0.1.0", path = "../aes67-rs" }
 aes67-rs-sdp = { version = "0.1.0", path = "../aes67-rs-sdp" }
 miette = "7.6.0"
-sap-rs = { path = "../../sap-rs" }
+sap-rs = "0.5.0"
 sdp = "0.10.0"
 serde = "1.0.228"
 thiserror = "2.0.17"
