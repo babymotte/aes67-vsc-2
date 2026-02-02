@@ -22,6 +22,7 @@ use aes67_rs::{
         ConfigError, ConfigResult, GetErrorCode, ReceiverApiResult, ReceiverInternalResult,
         ToBoxedResult, VscApiResult, VscInternalError, VscInternalResult,
     },
+    formats::SessionId,
     nic::find_nic_with_name,
     receiver::{api::ReceiverApi, config::ReceiverConfig},
     time::get_clock,
@@ -40,7 +41,7 @@ use crate::{AES_VSC_ERROR_RECEIVER_NOT_FOUND, AES_VSC_OK, Aes67VscReceiverConfig
 lazy_static! {
     static ref VIRTUAL_SOUND_CARD: Arc<VirtualSoundCardApi> =
         init_vsc().expect("failed to initialized AES67 virtual sound card");
-    static ref RECEIVERS: DashMap<u32, ReceiverApi> = DashMap::new();
+    static ref RECEIVERS: DashMap<SessionId, ReceiverApi> = DashMap::new();
 }
 
 fn init_vsc() -> VscApiResult<Arc<VirtualSoundCardApi>> {
@@ -134,7 +135,7 @@ pub fn try_create_receiver(config: &Aes67VscReceiverConfig) -> ReceiverInternalR
 }
 
 pub fn try_receive<'a>(
-    receiver_id: u32,
+    receiver_id: SessionId,
     _playout_time: u64,
     _buffer_ptr: c_slice::Mut<'a, f32>,
 ) -> ReceiverApiResult<u8> {
@@ -156,7 +157,7 @@ pub fn try_receive<'a>(
     Ok(AES_VSC_OK)
 }
 
-pub fn try_destroy_receiver(id: u32) -> VscApiResult<u8> {
+pub fn try_destroy_receiver(id: SessionId) -> VscApiResult<u8> {
     block_on(VIRTUAL_SOUND_CARD.destroy_receiver(id))?;
     Ok(AES_VSC_OK)
 }

@@ -21,7 +21,7 @@ use crate::{
     time::{MICROS_PER_SEC, MILLIS_PER_SEC_F},
 };
 use serde::{Deserialize, Serialize};
-use std::{str::FromStr, time::Duration};
+use std::{fmt, str::FromStr, time::Duration};
 
 pub type Seconds = u32;
 pub type MilliSeconds = f32;
@@ -30,6 +30,14 @@ pub type Frames = u64;
 pub type FramesPerSecond = u32;
 pub type BitDepth = u8;
 pub type PayloadType = u8;
+pub type SessionId = u64;
+pub type SessionVersion = u64;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Session {
+    pub id: u64,
+    pub version: u64,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
 pub struct BufferFormat {
@@ -124,6 +132,15 @@ impl FrameFormat {
 pub enum SampleFormat {
     L16,
     L24,
+}
+
+impl fmt::Display for SampleFormat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SampleFormat::L16 => write!(f, "L16"),
+            SampleFormat::L24 => write!(f, "L24"),
+        }
+    }
 }
 
 impl FromStr for SampleFormat {

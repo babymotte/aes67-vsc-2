@@ -15,12 +15,12 @@ use crate::{
 use aes67_rs::{
     config::{Config, adjust_labels_for_channel_count},
     error::{ConfigError, VscApiError, VscApiResult},
-    formats::{AudioFormat, FrameFormat, Seconds},
+    formats::{AudioFormat, FrameFormat, Seconds, Session, SessionId},
     monitoring::Monitoring,
     nic::find_nic_with_name,
     receiver::{
         api::ReceiverApi,
-        config::{PartialReceiverConfig, ReceiverConfig},
+        config::{PartialReceiverConfig, ReceiverConfig, RefClk, SessionInfo},
     },
     sender::{
         api::SenderApi,
@@ -33,9 +33,14 @@ use aes67_rs_discovery::{DiscoveryApi, start_discovery};
 use axum::routing::{get, post};
 use axum_server::Handle;
 use miette::{Context, IntoDiagnostic, Result};
+use pnet::datalink::NetworkInterface;
 use serde::de::DeserializeOwned;
 use serde_json::json;
-use std::{io, net::SocketAddr, time::Duration};
+use std::{
+    io,
+    net::{IpAddr, SocketAddr},
+    time::Duration,
+};
 use tokio::{
     select,
     sync::{mpsc, oneshot},
@@ -48,15 +53,17 @@ use worterbuch::{
 };
 use worterbuch_client::{Key, KeyValuePair, Worterbuch, topic};
 
+const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
+
 enum VscApiMessage {
     StartVsc(oneshot::Sender<ManagementAgentResult<()>>),
     StopVsc(oneshot::Sender<ManagementAgentResult<()>>),
-    CreateSender(u32, oneshot::Sender<ManagementAgentResult<()>>),
-    CreateReceiver(u32, oneshot::Sender<ManagementAgentResult<()>>),
-    UpdateSender(u32, oneshot::Sender<ManagementAgentResult<()>>),
-    UpdateReceiver(u32, oneshot::Sender<ManagementAgentResult<()>>),
-    DeleteSender(u32, oneshot::Sender<ManagementAgentResult<()>>),
-    DeleteReceiver(u32, oneshot::Sender<ManagementAgentResult<()>>),
+    CreateSender(SessionId, oneshot::Sender<ManagementAgentResult<()>>),
+    CreateReceiver(SessionId, oneshot::Sender<ManagementAgentResult<()>>),
+    UpdateSender(SessionId, oneshot::Sender<ManagementAgentResult<()>>),
+    UpdateReceiver(SessionId, oneshot::Sender<ManagementAgentResult<()>>),
+    DeleteSender(SessionId, oneshot::Sender<ManagementAgentResult<()>>),
+    DeleteReceiver(SessionId, oneshot::Sender<ManagementAgentResult<()>>),
     Exit,
     CreateSenderConfig(oneshot::Sender<ManagementAgentResult<()>>),
     CreateReceiverConfig(Option<Sdp>, oneshot::Sender<ManagementAgentResult<()>>),
@@ -148,7 +155,7 @@ impl ManagementAgentApi {
         Ok(())
     }
 
-    pub async fn create_sender(&self, id: u32) -> ManagementAgentResult<()> {
+    pub async fn create_sender(&self, id: SessionId) -> ManagementAgentResult<()> {
         info!("Instantiating sender {id} …");
         let (tx, rx) = oneshot::channel();
         self.api_tx
@@ -160,7 +167,7 @@ impl ManagementAgentApi {
         Ok(())
     }
 
-    pub async fn create_receiver(&self, id: u32) -> ManagementAgentResult<()> {
+    pub async fn create_receiver(&self, id: SessionId) -> ManagementAgentResult<()> {
         info!("Instantiating receiver {id} …");
         let (tx, rx) = oneshot::channel();
         self.api_tx
@@ -172,7 +179,7 @@ impl ManagementAgentApi {
         Ok(())
     }
 
-    pub async fn update_sender(&self, id: u32) -> ManagementAgentResult<()> {
+    pub async fn update_sender(&self, id: SessionId) -> ManagementAgentResult<()> {
         info!("Updating sender {id} …");
         let (tx, rx) = oneshot::channel();
         self.api_tx
@@ -184,7 +191,7 @@ impl ManagementAgentApi {
         Ok(())
     }
 
-    pub async fn update_receiver(&self, id: u32) -> ManagementAgentResult<()> {
+    pub async fn update_receiver(&self, id: SessionId) -> ManagementAgentResult<()> {
         info!("Updating receiver {id} …");
         let (tx, rx) = oneshot::channel();
         self.api_tx
@@ -196,7 +203,7 @@ impl ManagementAgentApi {
         Ok(())
     }
 
-    pub async fn delete_sender(&self, id: u32) -> ManagementAgentResult<()> {
+    pub async fn delete_sender(&self, id: SessionId) -> ManagementAgentResult<()> {
         info!("Deleting sender {id} …");
         let (tx, rx) = oneshot::channel();
         self.api_tx
@@ -208,7 +215,7 @@ impl ManagementAgentApi {
         Ok(())
     }
 
-    pub async fn delete_receiver(&self, id: u32) -> ManagementAgentResult<()> {
+    pub async fn delete_receiver(&self, id: SessionId) -> ManagementAgentResult<()> {
         info!("Deleting receiver {id} …");
         let (tx, rx) = oneshot::channel();
         self.api_tx
@@ -346,14 +353,7 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
         info!("Autostarting senders …");
         let senders = self
             .wb
-            .pget::<bool>(topic!(
-                self.app_id,
-                "config",
-                "tx",
-                "senders",
-                "?",
-                "autostart"
-            ))
+            .pget::<bool>(topic!(self.app_id, "config", "tx", "?", "autostart"))
             .await?;
 
         let senders_to_autostart = senders
@@ -361,7 +361,7 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
             .filter_map(|kvp| if kvp.value { Some(kvp.key) } else { None });
 
         for sender in senders_to_autostart {
-            let Some(id) = sender.split('/').nth(4).and_then(|id| id.parse().ok()) else {
+            let Some(id) = sender.split('/').nth(3).and_then(|id| id.parse().ok()) else {
                 warn!("Could not parse sender id from key {}", sender);
                 continue;
             };
@@ -382,14 +382,7 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
         info!("Autostarting receivers …");
         let receivers = self
             .wb
-            .pget::<bool>(topic!(
-                self.app_id,
-                "config",
-                "rx",
-                "receivers",
-                "?",
-                "autostart"
-            ))
+            .pget::<bool>(topic!(self.app_id, "config", "rx", "?", "autostart"))
             .await?;
 
         let receivers_to_autostart = receivers
@@ -397,7 +390,7 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
             .filter_map(|kvp| if kvp.value { Some(kvp.key) } else { None });
 
         let _: () = for receiver in receivers_to_autostart {
-            let Some(id) = receiver.split('/').nth(4).and_then(|id| id.parse().ok()) else {
+            let Some(id) = receiver.split('/').nth(3).and_then(|id| id.parse().ok()) else {
                 warn!("Could not parse receiver id from key {}", receiver);
                 continue;
             };
@@ -427,9 +420,7 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
     async fn create_sender_config(&mut self) -> ManagementAgentResult<()> {
         let config = PartialSenderConfig::default();
 
-        let id = self
-            .next_id(topic!(self.app_id, "config", "tx", "next-id"))
-            .await?;
+        let id = self.next_id();
 
         self.publish_sender_config(id, &config).await?;
 
@@ -451,9 +442,7 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
             None => PartialReceiverConfig::default(),
         };
 
-        let id = self
-            .next_id(topic!(self.app_id, "config", "rx", "next-id"))
-            .await?;
+        let id = self.next_id();
 
         self.publish_receiver_config(id, &config).await?;
 
@@ -472,17 +461,11 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
         Ok(PartialReceiverConfig::from_session_info(&session_info))
     }
 
-    async fn next_id(&self, key: String) -> ManagementAgentResult<u32> {
-        self.wb
-            .locked(key.clone(), || async {
-                let id = self.wb.get(key.clone()).await?.unwrap_or(1);
-                self.wb.set_async(key, id + 1).await?;
-                Ok(id)
-            })
-            .await?
+    fn next_id(&self) -> SessionId {
+        rand::random_range(100_000_000_000..MAX_SAFE_INTEGER)
     }
 
-    async fn create_sender(&mut self, id: u32) -> ManagementAgentResult<()> {
+    async fn create_sender(&mut self, id: SessionId) -> ManagementAgentResult<()> {
         match &self.vsc_api {
             None => return Err(VscApiError::NotRunning.into()),
             Some(vsc_api) => {
@@ -494,7 +477,7 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
                         self.app_id.clone(),
                         self.subsys.clone(),
                         api,
-                        config,
+                        config.clone(),
                         clock,
                         monitoring,
                     )
@@ -503,6 +486,8 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
                     error!("Could not create I/O handler for sender '{}': {}", id, e);
                     vsc_api.destroy_sender(id).await?;
                     return Err(e.into());
+                } else {
+                    self.announce_session(config).await?;
                 }
             }
         }
@@ -510,7 +495,23 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
         Ok(())
     }
 
-    async fn create_receiver(&mut self, id: u32) -> ManagementAgentResult<()> {
+    async fn announce_session(&mut self, config: SenderConfig) -> Result<(), ManagementAgentError> {
+        Ok(match self.session_info_from_sender_config(&config).await {
+            Ok(info) => {
+                self.discovery.announce_session(info).await?;
+            }
+            Err(e) => {
+                warn!("Could not create session info from sender config: {}", e);
+            }
+        })
+    }
+
+    async fn revoke_session(&self, id: SessionId) -> Result<(), ManagementAgentError> {
+        self.discovery.revoke_session(id).await?;
+        Ok(())
+    }
+
+    async fn create_receiver(&mut self, id: SessionId) -> ManagementAgentResult<()> {
         match &self.vsc_api {
             None => return Err(VscApiError::NotRunning.into()),
             Some(vsc_api) => {
@@ -537,7 +538,7 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
         Ok(())
     }
 
-    async fn update_sender(&mut self, id: u32) -> ManagementAgentResult<()> {
+    async fn update_sender(&mut self, id: SessionId) -> ManagementAgentResult<()> {
         match &self.vsc_api {
             None => return Err(VscApiError::NotRunning.into()),
             Some(vsc_api) => {
@@ -550,7 +551,7 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
         Ok(())
     }
 
-    async fn update_receiver(&mut self, id: u32) -> ManagementAgentResult<()> {
+    async fn update_receiver(&mut self, id: SessionId) -> ManagementAgentResult<()> {
         match &self.vsc_api {
             None => return Err(VscApiError::NotRunning.into()),
             Some(vsc_api) => {
@@ -563,7 +564,7 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
         Ok(())
     }
 
-    async fn delete_sender(&mut self, id: u32) -> ManagementAgentResult<()> {
+    async fn delete_sender(&mut self, id: SessionId) -> ManagementAgentResult<()> {
         match &self.vsc_api {
             None => return Err(VscApiError::NotRunning.into()),
             Some(vsc_api) => {
@@ -571,16 +572,14 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
                 // core (buffer consumer). This ensures the JACK callback can't access
                 // the buffer after the consumer is destroyed.
                 self.io_handler.sender_deleted(id).await?;
+                self.revoke_session(id).await?;
                 let res = vsc_api.destroy_sender(id).await;
                 if let Err(e) = res {
                     self.wb
                         .pdelete_async(topic!(self.app_id, "tx", id, "#"), true)
                         .await?;
                     self.wb
-                        .set_async(
-                            topic!(self.app_id, "config", "tx", "senders", id, "autostart"),
-                            false,
-                        )
+                        .set_async(topic!(self.app_id, "config", "tx", id, "autostart"), false)
                         .await?;
                     return Err(e.into());
                 }
@@ -590,7 +589,7 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
         Ok(())
     }
 
-    async fn delete_receiver(&mut self, id: u32) -> ManagementAgentResult<()> {
+    async fn delete_receiver(&mut self, id: SessionId) -> ManagementAgentResult<()> {
         match &self.vsc_api {
             None => return Err(VscApiError::NotRunning.into()),
             Some(vsc_api) => {
@@ -604,10 +603,7 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
                         .pdelete_async(topic!(self.app_id, "rx", id, "#"), true)
                         .await?;
                     self.wb
-                        .set_async(
-                            topic!(self.app_id, "config", "rx", "receivers", id, "autostart"),
-                            false,
-                        )
+                        .set_async(topic!(self.app_id, "config", "rx", id, "autostart"), false)
                         .await?;
                     return Err(e.into());
                 }
@@ -619,35 +615,29 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
 
     async fn publish_sender_config(
         &self,
-        id: u32,
+        id: SessionId,
         config: &PartialSenderConfig,
     ) -> VscApiResult<()> {
         self.wb
-            .set_async(
-                topic!(self.app_id, "config", "tx", "senders", id, "autostart"),
-                false,
-            )
+            .set_async(topic!(self.app_id, "config", "tx", id, "autostart"), false)
             .await?;
 
         if let Some(label) = &config.label {
             self.wb
-                .set_async(
-                    topic!(self.app_id, "config", "tx", "senders", id, "name"),
-                    label,
-                )
+                .set_async(topic!(self.app_id, "config", "tx", id, "name"), label)
                 .await?;
         }
 
         if let Some(audio_format) = &config.audio_format {
             self.wb
                 .set_async(
-                    topic!(self.app_id, "config", "tx", "senders", id, "channels"),
+                    topic!(self.app_id, "config", "tx", id, "channels"),
                     audio_format.frame_format.channels,
                 )
                 .await?;
             self.wb
                 .set_async(
-                    topic!(self.app_id, "config", "tx", "senders", id, "sampleFormat"),
+                    topic!(self.app_id, "config", "tx", id, "sampleFormat"),
                     audio_format.frame_format.sample_format,
                 )
                 .await?;
@@ -655,20 +645,13 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
         if let Some(target) = &config.target {
             self.wb
                 .set_async(
-                    topic!(self.app_id, "config", "tx", "senders", id, "destinationIP"),
+                    topic!(self.app_id, "config", "tx", id, "destinationIP"),
                     target.ip().to_string(),
                 )
                 .await?;
             self.wb
                 .set_async(
-                    topic!(
-                        self.app_id,
-                        "config",
-                        "tx",
-                        "senders",
-                        id,
-                        "destinationPort"
-                    ),
+                    topic!(self.app_id, "config", "tx", id, "destinationPort"),
                     target.port(),
                 )
                 .await?;
@@ -676,7 +659,7 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
         if let Some(packet_time) = &config.packet_time {
             self.wb
                 .set_async(
-                    topic!(self.app_id, "config", "tx", "senders", id, "packetTime"),
+                    topic!(self.app_id, "config", "tx", id, "packetTime"),
                     packet_time,
                 )
                 .await?;
@@ -684,24 +667,30 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
         if let Some(payload_type) = &config.payload_type {
             self.wb
                 .set_async(
-                    topic!(self.app_id, "config", "tx", "senders", id, "payloadType"),
+                    topic!(self.app_id, "config", "tx", id, "payloadType"),
                     payload_type,
                 )
                 .await?;
         }
         self.wb
             .set_async(
-                topic!(self.app_id, "config", "tx", "senders", id, "channelLabels"),
+                topic!(self.app_id, "config", "tx", id, "channelLabels"),
                 &config.channel_labels,
+            )
+            .await?;
+        self.wb
+            .set_async(
+                topic!(self.app_id, "config", "tx", id, "session", "version"),
+                &config.version,
             )
             .await?;
         Ok(())
     }
 
-    async fn fetch_sender_config(&self, id: u32) -> VscApiResult<SenderConfig> {
+    async fn fetch_sender_config(&self, id: SessionId) -> VscApiResult<SenderConfig> {
         let label = self
             .config_param(
-                topic!(self.app_id, "config", "tx", "senders", id, "name"),
+                topic!(self.app_id, "config", "tx", id, "name"),
                 "sender name not configured",
             )
             .await
@@ -709,21 +698,14 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
 
         let channels = self
             .config_param(
-                topic!(self.app_id, "config", "tx", "senders", id, "channels"),
+                dbg!(topic!(self.app_id, "config", "tx", id, "channels")),
                 "sender channels not configured",
             )
             .await?;
 
         let mut channel_labels = self
             .wb
-            .get(topic!(
-                self.app_id,
-                "config",
-                "tx",
-                "senders",
-                id,
-                "channelLabels"
-            ))
+            .get(topic!(self.app_id, "config", "tx", id, "channelLabels"))
             .await?
             .unwrap_or_else(|| Vec::with_capacity(channels));
         adjust_labels_for_channel_count(channels, &mut channel_labels);
@@ -736,7 +718,7 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
             .await?;
         let sample_format = self
             .config_param(
-                topic!(self.app_id, "config", "tx", "senders", id, "sampleFormat"),
+                topic!(self.app_id, "config", "tx", id, "sampleFormat"),
                 "sender sample format not configured",
             )
             .await?;
@@ -751,34 +733,27 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
         };
         let target_ip = self
             .config_param::<String>(
-                topic!(self.app_id, "config", "tx", "senders", id, "destinationIP"),
+                topic!(self.app_id, "config", "tx", id, "destinationIP"),
                 "sender destination IP not configured",
             )
             .await?
             .parse()?;
         let target_port = self
             .config_param(
-                topic!(
-                    self.app_id,
-                    "config",
-                    "tx",
-                    "senders",
-                    id,
-                    "destinationPort"
-                ),
+                topic!(self.app_id, "config", "tx", id, "destinationPort"),
                 "sender destination port not configured",
             )
             .await?;
         let target = SocketAddr::new(target_ip, target_port);
         let payload_type = self
             .config_param(
-                topic!(self.app_id, "config", "tx", "senders", id, "payloadType"),
+                topic!(self.app_id, "config", "tx", id, "payloadType"),
                 "sender payload type not configured",
             )
             .await?;
         let packet_time = self
             .config_param(
-                topic!(self.app_id, "config", "tx", "senders", id, "packetTime"),
+                topic!(self.app_id, "config", "tx", id, "packetTime"),
                 "sender packet time not configured",
             )
             .await?;
@@ -796,35 +771,29 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
 
     async fn publish_receiver_config(
         &self,
-        id: u32,
+        id: SessionId,
         config: &PartialReceiverConfig,
     ) -> VscApiResult<()> {
         self.wb
-            .set_async(
-                topic!(self.app_id, "config", "rx", "receivers", id, "autostart"),
-                false,
-            )
+            .set_async(topic!(self.app_id, "config", "rx", id, "autostart"), false)
             .await?;
 
         if let Some(label) = &config.label {
             self.wb
-                .set_async(
-                    topic!(self.app_id, "config", "rx", "receivers", id, "name"),
-                    label,
-                )
+                .set_async(topic!(self.app_id, "config", "rx", id, "name"), label)
                 .await?;
         }
 
         if let Some(audio_format) = &config.audio_format {
             self.wb
                 .set_async(
-                    topic!(self.app_id, "config", "rx", "receivers", id, "channels"),
+                    topic!(self.app_id, "config", "rx", id, "channels"),
                     audio_format.frame_format.channels,
                 )
                 .await?;
             self.wb
                 .set_async(
-                    topic!(self.app_id, "config", "rx", "receivers", id, "sampleFormat"),
+                    topic!(self.app_id, "config", "rx", id, "sampleFormat"),
                     audio_format.frame_format.sample_format,
                 )
                 .await?;
@@ -832,13 +801,13 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
         if let Some(source) = &config.source {
             self.wb
                 .set_async(
-                    topic!(self.app_id, "config", "rx", "receivers", id, "sourceIP"),
+                    topic!(self.app_id, "config", "rx", id, "sourceIP"),
                     source.ip().to_string(),
                 )
                 .await?;
             self.wb
                 .set_async(
-                    topic!(self.app_id, "config", "rx", "receivers", id, "sourcePort"),
+                    topic!(self.app_id, "config", "rx", id, "sourcePort"),
                     source.port(),
                 )
                 .await?;
@@ -846,7 +815,7 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
         if let Some(origin_ip) = &config.origin_ip {
             self.wb
                 .set_async(
-                    topic!(self.app_id, "config", "rx", "receivers", id, "originIP"),
+                    topic!(self.app_id, "config", "rx", id, "originIP"),
                     origin_ip.to_string(),
                 )
                 .await?;
@@ -854,7 +823,7 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
         if let Some(link_offset) = &config.link_offset {
             self.wb
                 .set_async(
-                    topic!(self.app_id, "config", "rx", "receivers", id, "linkOffset"),
+                    topic!(self.app_id, "config", "rx", id, "linkOffset"),
                     link_offset,
                 )
                 .await?;
@@ -862,31 +831,24 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
         if let Some(rtp_offset) = &config.rtp_offset {
             self.wb
                 .set_async(
-                    topic!(self.app_id, "config", "rx", "receivers", id, "rtpOffset"),
+                    topic!(self.app_id, "config", "rx", id, "rtpOffset"),
                     rtp_offset,
                 )
                 .await?;
         }
         self.wb
             .set_async(
-                topic!(
-                    self.app_id,
-                    "config",
-                    "rx",
-                    "receivers",
-                    id,
-                    "channelLabels"
-                ),
+                topic!(self.app_id, "config", "rx", id, "channelLabels"),
                 &config.channel_labels,
             )
             .await?;
         Ok(())
     }
 
-    async fn fetch_receiver_config(&self, id: u32) -> VscApiResult<ReceiverConfig> {
+    async fn fetch_receiver_config(&self, id: SessionId) -> VscApiResult<ReceiverConfig> {
         let label = self
             .config_param(
-                topic!(self.app_id, "config", "rx", "receivers", id, "name"),
+                topic!(self.app_id, "config", "rx", id, "name"),
                 "receiver name not configured",
             )
             .await
@@ -894,7 +856,7 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
 
         let channels = self
             .config_param(
-                topic!(self.app_id, "config", "rx", "receivers", id, "channels"),
+                topic!(self.app_id, "config", "rx", id, "channels"),
                 "receiver channels not configured",
             )
             .await?;
@@ -906,7 +868,7 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
             .await?;
         let sample_format = self
             .config_param(
-                topic!(self.app_id, "config", "rx", "receivers", id, "sampleFormat"),
+                topic!(self.app_id, "config", "rx", id, "sampleFormat"),
                 "receiver sample format not configured",
             )
             .await?;
@@ -921,28 +883,21 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
         };
         let source_ip = self
             .config_param::<String>(
-                topic!(self.app_id, "config", "rx", "receivers", id, "sourceIP"),
+                topic!(self.app_id, "config", "rx", id, "sourceIP"),
                 "receiver source IP not configured",
             )
             .await?
             .parse()?;
         let source_port = self
             .config_param(
-                topic!(self.app_id, "config", "rx", "receivers", id, "sourcePort"),
+                topic!(self.app_id, "config", "rx", id, "sourcePort"),
                 "receiver source port not configured",
             )
             .await?;
         let source = SocketAddr::new(source_ip, source_port);
         let channel_labels = self
             .config_param(
-                topic!(
-                    self.app_id,
-                    "config",
-                    "rx",
-                    "receivers",
-                    id,
-                    "channelLabels"
-                ),
+                topic!(self.app_id, "config", "rx", id, "channelLabels"),
                 "receiver channel labels not configured",
             )
             .await?;
@@ -954,21 +909,21 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
 
         let link_offset = self
             .config_param(
-                topic!(self.app_id, "config", "rx", "receivers", id, "linkOffset"),
+                topic!(self.app_id, "config", "rx", id, "linkOffset"),
                 "receiver link offset not configured",
             )
             .await?;
 
         let rtp_offset = self
             .config_param(
-                topic!(self.app_id, "config", "rx", "receivers", id, "rtpOffset"),
+                topic!(self.app_id, "config", "rx", id, "rtpOffset"),
                 "receiver rtp offset not configured",
             )
             .await?;
 
         let origin_ip = self
             .config_param::<String>(
-                topic!(self.app_id, "config", "rx", "receivers", id, "originIP"),
+                topic!(self.app_id, "config", "rx", id, "originIP"),
                 "receiver origin IP not configured",
             )
             .await?
@@ -1000,6 +955,95 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
             .ok_or(VscApiError::SenderConfigIncomplete(msg))?;
         Ok(value)
     }
+
+    async fn session_info_from_sender_config(
+        &self,
+        config: &SenderConfig,
+    ) -> ManagementAgentResult<SessionInfo> {
+        let id = config.id;
+        let version = self.session_version(config.id).await?.unwrap_or(1);
+
+        let iface_name = self
+            .wb
+            .get::<String>(topic!(self.app_id, "config", "audio", "nic"))
+            .await?
+            .ok_or_else(|| {
+                ConfigError::NoSuchNIC("no multicast audio network interface configured".to_owned())
+            })?;
+        let iface = find_nic_with_name(iface_name)?;
+
+        let id = Session { id, version };
+        let name = config.label.clone();
+        let destination_ip = config.target.ip();
+        let destination_port = config.target.port();
+        let channels = config.audio_format.frame_format.channels;
+        let sample_format = config.audio_format.frame_format.sample_format;
+        let sample_rate = config.audio_format.sample_rate;
+        let packet_time = config.packet_time;
+        let origin_ip = self.local_ip(&iface).await?;
+        let channel_labels = config.channel_labels.clone();
+        let rtp_offset = 0;
+        let payload_type = config.payload_type;
+        let refclk = self.refclock().await?;
+
+        Ok(SessionInfo {
+            id,
+            name,
+            destination_ip,
+            destination_port,
+            channels,
+            sample_format,
+            sample_rate,
+            packet_time,
+            origin_ip,
+            channel_labels,
+            rtp_offset,
+            payload_type,
+            refclk,
+        })
+    }
+
+    async fn session_version(&self, id: SessionId) -> ManagementAgentResult<Option<u64>> {
+        let key = topic!(self.app_id, "config", "tx", id, "session", "version");
+        let version = self.wb.get(key).await?;
+        Ok(version)
+    }
+
+    async fn local_ip(&self, iface: &NetworkInterface) -> ManagementAgentResult<IpAddr> {
+        // TODO how does this work with unicast streams?
+
+        let ip = iface
+            .ips
+            .iter()
+            .filter(|a| a.is_ipv4())
+            .next()
+            .or_else(|| iface.ips.first())
+            .map(|a| a.ip())
+            .ok_or_else(|| {
+                ConfigError::NoSuchNIC(format!(
+                    "could not find IP address for network interface '{}'",
+                    iface.name
+                ))
+            })?;
+
+        Ok(ip)
+    }
+
+    async fn refclock(&self) -> ManagementAgentResult<RefClk> {
+        let standard = "IEEE1588-2008".to_owned();
+
+        // TODO get mac of grandmaster
+        let mac = "00-1D-C1-FF-FE-0F-FA-D0".to_owned();
+
+        // TODO get from config
+        let domain = 0;
+
+        Ok(RefClk {
+            standard,
+            mac,
+            domain,
+        })
+    }
 }
 
 pub trait IoHandler: Clone + Send + Sync + 'static {
@@ -1013,9 +1057,9 @@ pub trait IoHandler: Clone + Send + Sync + 'static {
         monitoring: Monitoring,
     ) -> impl Future<Output = IoHandlerResult<()>> + Send;
 
-    fn sender_updated(&self, id: u32) -> impl Future<Output = IoHandlerResult<()>> + Send;
+    fn sender_updated(&self, id: SessionId) -> impl Future<Output = IoHandlerResult<()>> + Send;
 
-    fn sender_deleted(&self, id: u32) -> impl Future<Output = IoHandlerResult<()>> + Send;
+    fn sender_deleted(&self, id: SessionId) -> impl Future<Output = IoHandlerResult<()>> + Send;
 
     fn receiver_created(
         &self,
@@ -1027,9 +1071,15 @@ pub trait IoHandler: Clone + Send + Sync + 'static {
         monitoring: Monitoring,
     ) -> impl Future<Output = IoHandlerResult<()>> + Send;
 
-    fn receiver_updated(&mut self, id: u32) -> impl Future<Output = IoHandlerResult<()>> + Send;
+    fn receiver_updated(
+        &mut self,
+        id: SessionId,
+    ) -> impl Future<Output = IoHandlerResult<()>> + Send;
 
-    fn receiver_deleted(&mut self, id: u32) -> impl Future<Output = IoHandlerResult<()>> + Send;
+    fn receiver_deleted(
+        &mut self,
+        id: SessionId,
+    ) -> impl Future<Output = IoHandlerResult<()>> + Send;
 }
 
 pub async fn init_management_agent(

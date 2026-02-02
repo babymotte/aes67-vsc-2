@@ -5,6 +5,8 @@ pub mod state_transformers;
 use crate::error::{DiscoveryError, DiscoveryResult};
 use aes67_rs::receiver::config::SessionInfo;
 use aes67_rs_sdp::SdpWrapper;
+use sap_rs::Sap;
+use sdp::SessionDescription;
 use serde::{Deserialize, Serialize};
 use std::{hash::Hash, time::SystemTime};
 use tokio::{
@@ -12,6 +14,7 @@ use tokio::{
     sync::{mpsc, oneshot},
 };
 use tosub::SubsystemHandle;
+use tracing::info;
 use worterbuch_client::{Worterbuch, topic};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,6 +58,16 @@ enum DiscoveryApiMessage {
         session_id: String,
         tx: oneshot::Sender<DiscoveryResult<Option<SessionInfo>>>,
     },
+
+    AnnounceSession {
+        session_info: SessionInfo,
+        tx: oneshot::Sender<DiscoveryResult<()>>,
+    },
+
+    RevokeSession {
+        session_id: u64,
+        tx: oneshot::Sender<DiscoveryResult<()>>,
+    },
 }
 
 #[derive(Clone)]
@@ -74,6 +87,24 @@ impl DiscoveryApi {
             .ok();
         rx.await?
     }
+
+    pub async fn announce_session(&self, session_info: SessionInfo) -> DiscoveryResult<()> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(DiscoveryApiMessage::AnnounceSession { session_info, tx })
+            .await
+            .ok();
+        rx.await?
+    }
+
+    pub async fn revoke_session(&self, session_id: u64) -> DiscoveryResult<()> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(DiscoveryApiMessage::RevokeSession { session_id, tx })
+            .await
+            .ok();
+        rx.await?
+    }
 }
 
 struct ApiActor {
@@ -81,13 +112,12 @@ struct ApiActor {
     api_rx: mpsc::Receiver<DiscoveryApiMessage>,
     app_id: String,
     wb: Worterbuch,
+    sap: Sap,
 }
 
 pub fn start_discovery(subsys: &SubsystemHandle, app_id: String, wb: Worterbuch) -> DiscoveryApi {
     let (api_tx, api_rx) = mpsc::channel(1024);
-
     subsys.spawn("discovery", |s| discovery(s, app_id, wb, api_rx));
-
     DiscoveryApi { tx: api_tx }
 }
 
@@ -96,29 +126,23 @@ async fn discovery(
     app_id: String,
     wb: Worterbuch,
     api_rx: mpsc::Receiver<DiscoveryApiMessage>,
-) -> Result<(), DiscoveryError> {
-    start_api_actor(&subsys, api_rx, app_id.clone(), wb.clone());
+) -> DiscoveryResult<()> {
     start_state_transformers(&subsys, app_id.clone(), wb.clone());
-    start_sap_discovery(&subsys, app_id.clone(), wb.clone());
-    Ok::<(), DiscoveryError>(())
-}
+    let sap = start_sap_discovery(&subsys, app_id.clone(), wb.clone()).await?;
 
-fn start_api_actor(
-    subsys: &SubsystemHandle,
-    api_rx: mpsc::Receiver<DiscoveryApiMessage>,
-    app_id: String,
-    wb: Worterbuch,
-) {
     subsys.spawn("api-actor", |s| async {
         ApiActor {
             subsys: s,
             api_rx,
             app_id,
             wb,
+            sap,
         }
         .run()
         .await
     });
+
+    Ok(())
 }
 
 fn start_state_transformers(subsys: &SubsystemHandle, app_idc: String, wbc: Worterbuch) {
@@ -127,10 +151,12 @@ fn start_state_transformers(subsys: &SubsystemHandle, app_idc: String, wbc: Wort
     });
 }
 
-fn start_sap_discovery(subsys: &SubsystemHandle, app_id: String, wb: Worterbuch) {
-    subsys.spawn("sap", |s| async {
-        sap::start_discovery(app_id, wb, s).await
-    });
+async fn start_sap_discovery(
+    subsys: &SubsystemHandle,
+    app_id: String,
+    wb: Worterbuch,
+) -> DiscoveryResult<Sap> {
+    sap::start_discovery(subsys, app_id, wb).await
 }
 
 impl ApiActor {
@@ -150,6 +176,12 @@ impl ApiActor {
             DiscoveryApiMessage::FetchSessionInfo { session_id, tx } => {
                 tx.send(self.fetch_session_info(session_id).await).ok();
             }
+            DiscoveryApiMessage::AnnounceSession { session_info, tx } => {
+                tx.send(self.announce_session(session_info).await).ok();
+            }
+            DiscoveryApiMessage::RevokeSession { session_id, tx } => {
+                tx.send(self.revoke_session(session_id).await).ok();
+            }
         }
         Ok(())
     }
@@ -158,5 +190,24 @@ impl ApiActor {
         let key = topic!(self.app_id, "discovery", "sessions", &session_id, "config");
         let res = self.wb.get(key).await?;
         Ok(res)
+    }
+
+    async fn announce_session(&self, session_info: SessionInfo) -> Result<(), DiscoveryError> {
+        info!(
+            "Announcing session: {} with version {}",
+            session_info.id.id, session_info.id.version
+        );
+
+        let sd = SessionDescription::from(&session_info);
+
+        self.sap.announce_session(sd).await?;
+        Ok(())
+    }
+
+    async fn revoke_session(&self, session_id: u64) -> Result<(), DiscoveryError> {
+        info!("Revoking session {}", session_id);
+
+        self.sap.delete_session(session_id).await?;
+        Ok(())
     }
 }

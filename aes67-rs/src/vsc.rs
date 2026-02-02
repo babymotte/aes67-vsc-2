@@ -16,6 +16,7 @@
  */
 
 use crate::error::{SenderInternalError, SenderInternalResult};
+use crate::formats::SessionId;
 use crate::monitoring::{Monitoring, VscState, start_monitoring_service};
 use crate::sender::config::SenderConfig;
 use crate::sender::start_sender;
@@ -47,7 +48,7 @@ enum VscApiMessage {
         SenderConfig,
         oneshot::Sender<SenderInternalResult<SenderApi>>,
     ),
-    DestroySenderById(u32, oneshot::Sender<SenderInternalResult<()>>),
+    DestroySenderById(SessionId, oneshot::Sender<SenderInternalResult<()>>),
     CreateReceiver(
         ReceiverConfig,
         oneshot::Sender<ReceiverInternalResult<(ReceiverApi, Monitoring, Clock)>>,
@@ -56,7 +57,7 @@ enum VscApiMessage {
         ReceiverConfig,
         oneshot::Sender<ReceiverInternalResult<ReceiverApi>>,
     ),
-    DestroyReceiverById(u32, oneshot::Sender<ReceiverInternalResult<()>>),
+    DestroyReceiverById(SessionId, oneshot::Sender<ReceiverInternalResult<()>>),
     Stop(oneshot::Sender<()>),
 }
 
@@ -100,12 +101,12 @@ impl VirtualSoundCardApi {
         clock: Clock,
         audio_nic: NetworkInterface,
     ) -> VscInternalResult<ApiMessageSender> {
-        let SubsystemHandle_name = name.clone();
+        let subsystem_name = name.clone();
         let (api_tx, api_rx) = mpsc::channel(1024);
         #[cfg(feature = "tokio-metrics")]
         let wb = worterbuch_client.clone();
 
-        subsys.spawn(SubsystemHandle_name.clone(), |s| async move {
+        subsys.spawn(subsystem_name.clone(), |s| async move {
             VirtualSoundCard::new(name, api_rx, s, worterbuch_client, clock, audio_nic)?
                 .run()
                 .await;
@@ -136,7 +137,7 @@ impl VirtualSoundCardApi {
         Ok(rx.await.map_err(SenderInternalError::from)??)
     }
 
-    pub async fn destroy_sender(&self, id: u32) -> VscApiResult<()> {
+    pub async fn destroy_sender(&self, id: SessionId) -> VscApiResult<()> {
         let (tx, rx) = oneshot::channel();
         self.api_tx
             .send(VscApiMessage::DestroySenderById(id, tx))
@@ -166,7 +167,7 @@ impl VirtualSoundCardApi {
         Ok(rx.await.map_err(ReceiverInternalError::from)??)
     }
 
-    pub async fn destroy_receiver(&self, id: u32) -> VscApiResult<()> {
+    pub async fn destroy_receiver(&self, id: SessionId) -> VscApiResult<()> {
         let (tx, rx) = oneshot::channel();
         self.api_tx
             .send(VscApiMessage::DestroyReceiverById(id, tx))
@@ -187,8 +188,8 @@ struct VirtualSoundCard {
     clock: Clock,
     audio_nic: NetworkInterface,
     api_rx: mpsc::Receiver<VscApiMessage>,
-    txs: HashMap<u32, SenderApi>,
-    rxs: HashMap<u32, ReceiverApi>,
+    txs: HashMap<SessionId, SenderApi>,
+    rxs: HashMap<SessionId, ReceiverApi>,
     // tx_names: HashMap<u32, String>,
     // rx_names: HashMap<u32, String>,
     monitoring: Monitoring,
@@ -305,7 +306,7 @@ impl VirtualSoundCard {
         todo!()
     }
 
-    async fn destroy_sender(&mut self, id: u32) -> SenderInternalResult<()> {
+    async fn destroy_sender(&mut self, id: SessionId) -> SenderInternalResult<()> {
         info!("Destroying sender '{id}' …");
 
         let Some(api) = self.txs.remove(&id) else {
@@ -359,7 +360,7 @@ impl VirtualSoundCard {
         todo!()
     }
 
-    async fn destroy_receiver(&mut self, id: u32) -> ReceiverInternalResult<()> {
+    async fn destroy_receiver(&mut self, id: SessionId) -> ReceiverInternalResult<()> {
         info!("Destroying receiver '{id}' …");
 
         let Some(api) = self.rxs.remove(&id) else {

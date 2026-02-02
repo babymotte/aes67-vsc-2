@@ -15,7 +15,9 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::formats::{AudioFormat, FrameFormat, MilliSeconds, PayloadType, SampleFormat};
+use crate::formats::{
+    AudioFormat, FrameFormat, MilliSeconds, PayloadType, SampleFormat, SessionId, SessionVersion,
+};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 
@@ -28,6 +30,7 @@ pub struct PartialSenderConfig {
     pub payload_type: Option<PayloadType>,
     pub channel_labels: Vec<String>,
     pub packet_time: Option<MilliSeconds>,
+    pub version: Option<SessionVersion>,
 }
 
 impl Default for PartialSenderConfig {
@@ -45,6 +48,7 @@ impl Default for PartialSenderConfig {
             payload_type: Some(98),
             channel_labels: vec!["Left".to_owned(), "Right".to_owned()],
             packet_time: Some(1.0),
+            version: Some(1),
         }
     }
 }
@@ -52,7 +56,7 @@ impl Default for PartialSenderConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SenderConfig {
-    pub id: u32,
+    pub id: SessionId,
     pub label: String,
     pub audio_format: AudioFormat,
     pub target: SocketAddr,

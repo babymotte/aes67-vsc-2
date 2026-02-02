@@ -17,40 +17,40 @@ import { createSender, deleteSender } from "../../api";
 
 export default function Editor(props: { sender: [string, string] }) {
   const [name, setName] = createWbSignal<string, string>(
-    `/config/tx/senders/${transceiverID(props.sender)}/name`,
+    `/config/tx/${transceiverID(props.sender)}/name`,
     props.sender[1],
   );
 
   const [channels, setChannels] = createWbSignal<string, number>(
-    `/config/tx/senders/${transceiverID(props.sender)}/channels`,
+    `/config/tx/${transceiverID(props.sender)}/channels`,
     "0",
     [(s) => parseInt(s, 10) || 0, (n) => n.toString()],
   );
 
   const [sampleFormat, setSampleFormat] = createWbSignal<string, string>(
-    `/config/tx/senders/${transceiverID(props.sender)}/sampleFormat`,
+    `/config/tx/${transceiverID(props.sender)}/sampleFormat`,
     "L24",
   );
 
   const [packetTime, setPacketTime] = createWbSignal<string, number>(
-    `/config/tx/senders/${transceiverID(props.sender)}/packetTime`,
+    `/config/tx/${transceiverID(props.sender)}/packetTime`,
     "1",
     [(s) => parseFloat(s) || 1, (n) => n.toString()],
   );
 
   const [destinationIP, setDestinationIP] = createWbSignal<string, string>(
-    `/config/tx/senders/${transceiverID(props.sender)}/destinationIP`,
+    `/config/tx/${transceiverID(props.sender)}/destinationIP`,
     "",
   );
 
   const [destinationPort, setDestinationPort] = createWbSignal<string, number>(
-    `/config/tx/senders/${transceiverID(props.sender)}/destinationPort`,
+    `/config/tx/${transceiverID(props.sender)}/destinationPort`,
     "0",
     [(s) => parseInt(s, 10) || 0, (n) => n.toString()],
   );
 
   const [channelLabels, setChannelLabels] = createWbSignal<string, string[]>(
-    `/config/tx/senders/${transceiverID(props.sender)}/channelLabels`,
+    `/config/tx/${transceiverID(props.sender)}/channelLabels`,
     "0",
     [(s) => s.split(",").map((str) => str.trim()), (n) => n.join(", ")],
   );
@@ -118,7 +118,7 @@ export default function Editor(props: { sender: [string, string] }) {
   const start = () => {
     console.log(`Starting sender ${transceiverID(props.sender)}...`);
     set(
-      `${appName()}/config/tx/senders/${transceiverID(props.sender)}/autostart`,
+      `${appName()}/config/tx/${transceiverID(props.sender)}/autostart`,
       true,
     );
 
@@ -131,7 +131,7 @@ export default function Editor(props: { sender: [string, string] }) {
   const stop = () => {
     console.log(`Stopping sender ${transceiverID(props.sender)}...`);
     set(
-      `${appName()}/config/tx/senders/${transceiverID(props.sender)}/autostart`,
+      `${appName()}/config/tx/${transceiverID(props.sender)}/autostart`,
       false,
     );
 
@@ -152,7 +152,7 @@ export default function Editor(props: { sender: [string, string] }) {
   const deleteSenderConfig = () => {
     // TODO show confirmation dialog
     // TODO invoke delete API and only remove config if successful
-    pDelete(`${appName()}/config/tx/senders/${transceiverID(props.sender)}/#`);
+    pDelete(`${appName()}/config/tx/${transceiverID(props.sender)}/#`);
   };
 
   return (

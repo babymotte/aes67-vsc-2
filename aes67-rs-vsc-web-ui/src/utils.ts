@@ -22,7 +22,7 @@ export function transceiverLabel([key, name]: string[]): string {
 }
 
 export function transceiverID([key]: string[]): string {
-  return key.split("/")[4];
+  return key.split("/")[3];
 }
 
 export function sortSenders(

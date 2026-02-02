@@ -27,12 +27,12 @@ export default function Senders(props: {
   const [pending, start] = useTransition();
   const [senders, setSenders] = createSignal<Map<string, string>>(new Map());
   const [sortedSenders, setSortedSenders] = createSignal<[string, string][]>(
-    []
+    [],
   );
   const updateTab = (index: number) => () => start(() => setTab(index));
 
   createEffect(() => {
-    pSubscribe(`${appName()}/config/tx/senders/?/name`, setSenders);
+    pSubscribe(`${appName()}/config/tx/?/name`, setSenders);
   });
 
   createEffect(() => {
@@ -51,7 +51,7 @@ export default function Senders(props: {
   }) {
     const [running] = createWbSignal(
       `/tx/${transceiverID(props.sender)}/running`,
-      false
+      false,
     );
     return (
       <li

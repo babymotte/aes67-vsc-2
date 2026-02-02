@@ -41,7 +41,7 @@ dependencies = [
  "regex",
  "reqwest",
  "rtp-rs",
- "sap-rs",
+ "sap-rs 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "sdp",
  "serde",
  "serde_json",
@@ -86,7 +86,8 @@ dependencies = [
  "aes67-rs",
  "aes67-rs-sdp",
  "miette",
- "sap-rs",
+ "sap-rs 0.4.0",
+ "sdp",
  "serde",
  "thiserror 2.0.18",
  "tokio",
@@ -150,6 +151,7 @@ dependencies = [
  "libc",
  "miette",
  "pnet",
+ "rand 0.9.2",
  "scopeguard",
  "sdp",
  "serde",
@@ -3200,6 +3202,21 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "sap-rs"
+version = "0.4.0"
+dependencies = [
+ "lazy_static",
+ "miette",
+ "murmur3",
+ "sdp",
+ "socket2 0.6.2",
+ "thiserror 2.0.18",
+ "tokio",
+ "tosub",
+ "tracing",
 ]
 
 [[package]]

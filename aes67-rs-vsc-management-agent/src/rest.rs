@@ -3,6 +3,7 @@ use crate::{
     error::{LogError, ManagementAgentResult},
     netinf_watcher,
 };
+use aes67_rs::formats::SessionId;
 use axum::{Json, extract::State};
 
 pub(crate) async fn app_name<'a>(State(app_id): State<String>) -> String {
@@ -30,7 +31,7 @@ pub(crate) async fn vsc_stop(State(api): State<ManagementAgentApi>) -> Managemen
 
 #[derive(serde::Deserialize)]
 pub(crate) struct TransceiverSpec {
-    id: u32,
+    id: SessionId,
 }
 
 pub(crate) async fn vsc_tx_config_create(

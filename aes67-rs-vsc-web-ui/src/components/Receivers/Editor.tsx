@@ -18,51 +18,51 @@ import { createReceiver, deleteReceiver } from "../../api";
 
 export default function Editor(props: { receiver: [string, string] }) {
   const [name, setName] = createWbSignal<string, string>(
-    `/config/rx/receivers/${transceiverID(props.receiver)}/name`,
+    `/config/rx/${transceiverID(props.receiver)}/name`,
     props.receiver[1],
   );
 
   const [channels, setChannels] = createWbSignal<string, number>(
-    `/config/rx/receivers/${transceiverID(props.receiver)}/channels`,
+    `/config/rx/${transceiverID(props.receiver)}/channels`,
     "0",
     [(s) => parseInt(s, 10) || 0, (n) => n.toString()],
   );
 
   const [sampleFormat, setSampleFormat] = createWbSignal<string, string>(
-    `/config/rx/receivers/${transceiverID(props.receiver)}/sampleFormat`,
+    `/config/rx/${transceiverID(props.receiver)}/sampleFormat`,
     "L24",
   );
 
   const [sourceIP, setSourceIP] = createWbSignal<string, string>(
-    `/config/rx/receivers/${transceiverID(props.receiver)}/sourceIP`,
+    `/config/rx/${transceiverID(props.receiver)}/sourceIP`,
     "",
   );
 
   const [originIP, setOriginIP] = createWbSignal<string, string>(
-    `/config/rx/receivers/${transceiverID(props.receiver)}/originIP`,
+    `/config/rx/${transceiverID(props.receiver)}/originIP`,
     "",
   );
 
   const [sourcePort, setSourcePort] = createWbSignal<string, number>(
-    `/config/rx/receivers/${transceiverID(props.receiver)}/sourcePort`,
+    `/config/rx/${transceiverID(props.receiver)}/sourcePort`,
     "0",
     [(s) => parseInt(s, 10) || 0, (n) => n.toString()],
   );
 
   const [linkOffset, setLinkOffset] = createWbSignal<string, number>(
-    `/config/rx/receivers/${transceiverID(props.receiver)}/linkOffset`,
+    `/config/rx/${transceiverID(props.receiver)}/linkOffset`,
     "4",
     [(s) => parseInt(s, 10) || 0, (n) => n.toString()],
   );
 
   const [rtpOffset, setRtpOffset] = createWbSignal<string, number>(
-    `/config/rx/receivers/${transceiverID(props.receiver)}/rtpOffset`,
+    `/config/rx/${transceiverID(props.receiver)}/rtpOffset`,
     "0",
     [(s) => parseInt(s, 10) || 0, (n) => n.toString()],
   );
 
   const [channelLabels, setChannelLabels] = createWbSignal<string, string[]>(
-    `/config/rx/receivers/${transceiverID(props.receiver)}/channelLabels`,
+    `/config/rx/${transceiverID(props.receiver)}/channelLabels`,
     "0",
     [(s) => s.split(",").map((str) => str.trim()), (n) => n.join(", ")],
   );
@@ -144,9 +144,7 @@ export default function Editor(props: { receiver: [string, string] }) {
   const start = () => {
     console.log(`Starting receiver ${transceiverID(props.receiver)}...`);
     set(
-      `${appName()}/config/rx/receivers/${transceiverID(
-        props.receiver,
-      )}/autostart`,
+      `${appName()}/config/rx/${transceiverID(props.receiver)}/autostart`,
       true,
     );
 
@@ -181,9 +179,7 @@ export default function Editor(props: { receiver: [string, string] }) {
 
   const deleteReceiverConfig = () => {
     // TODO show confirmation dialog
-    pDelete(
-      `${appName()}/config/rx/receivers/${transceiverID(props.receiver)}/#`,
-    );
+    pDelete(`${appName()}/config/rx/${transceiverID(props.receiver)}/#`);
   };
 
   return (

@@ -21,7 +21,7 @@ mod r#impl;
 
 use crate::r#impl::{try_create_receiver, try_destroy_receiver, try_receive};
 use ::safer_ffi::prelude::*;
-use aes67_rs::error::GetErrorCode;
+use aes67_rs::{error::GetErrorCode, formats::SessionId};
 
 #[cfg(feature = "headers")]
 pub use r#impl::generate_headers;
@@ -75,7 +75,7 @@ fn aes67_vsc_create_receiver<'a>(config: &'a Aes67VscReceiverConfig<'a>) -> i32 
 /// * `buffer_ptr` - pointer to a float[] to which the fetched audio samples will be written
 #[ffi_export]
 fn aes67_vsc_receive<'a>(
-    receiver_id: u32,
+    receiver_id: SessionId,
     playout_time: u64,
     buffer_ptr: c_slice::Mut<'a, f32>,
 ) -> u8 {
@@ -91,7 +91,7 @@ fn aes67_vsc_receive<'a>(
 ///
 /// * `receiver_id` - the ID of the receiver to be destroyed
 #[ffi_export]
-fn aes67_vsc_destroy_receiver(receiver_id: u32) -> u8 {
+fn aes67_vsc_destroy_receiver(receiver_id: SessionId) -> u8 {
     match try_destroy_receiver(receiver_id) {
         Ok(it) => it,
         Err(err) => err.error_code(),

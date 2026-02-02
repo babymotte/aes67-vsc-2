@@ -1,5 +1,6 @@
 use crate::{play::start_playout, record::start_recording};
 use aes67_rs::{
+    formats::SessionId,
     monitoring::Monitoring,
     receiver::{api::ReceiverApi, config::ReceiverConfig},
     sender::{api::SenderApi, config::SenderConfig},
@@ -17,8 +18,8 @@ use tracing::{error, info, warn};
 
 pub struct JackIoHandlerActor {
     subsys: SubsystemHandle,
-    tx_clients: HashMap<u32, SubsystemHandle>,
-    rx_clients: HashMap<u32, SubsystemHandle>,
+    tx_clients: HashMap<SessionId, SubsystemHandle>,
+    rx_clients: HashMap<SessionId, SubsystemHandle>,
     rx: mpsc::Receiver<JackIoHandlerMessage>,
 }
 
@@ -108,11 +109,11 @@ impl JackIoHandlerActor {
         Ok(())
     }
 
-    async fn sender_updated(&mut self, _id: u32) -> IoHandlerResult<()> {
+    async fn sender_updated(&mut self, _id: SessionId) -> IoHandlerResult<()> {
         Err(miette!("not implemented").into())
     }
 
-    async fn sender_deleted(&mut self, id: u32) -> IoHandlerResult<()> {
+    async fn sender_deleted(&mut self, id: SessionId) -> IoHandlerResult<()> {
         let Some(recording) = self.tx_clients.remove(&id) else {
             error!("No recording found for sender id {}", id);
             return Ok(());
@@ -140,11 +141,11 @@ impl JackIoHandlerActor {
         Ok(())
     }
 
-    async fn receiver_updated(&mut self, _id: u32) -> IoHandlerResult<()> {
+    async fn receiver_updated(&mut self, _id: SessionId) -> IoHandlerResult<()> {
         Err(miette!("not implemented").into())
     }
 
-    async fn receiver_deleted(&mut self, id: u32) -> IoHandlerResult<()> {
+    async fn receiver_deleted(&mut self, id: SessionId) -> IoHandlerResult<()> {
         let Some(playout) = self.rx_clients.remove(&id) else {
             error!("No playout found for receiver id {}", id);
             return Ok(());
@@ -180,8 +181,8 @@ pub(crate) enum JackIoHandlerMessage {
         Monitoring,
         oneshot::Sender<IoHandlerResult<()>>,
     ),
-    SenderUpdated(u32, oneshot::Sender<IoHandlerResult<()>>),
-    SenderDeleted(u32, oneshot::Sender<IoHandlerResult<()>>),
+    SenderUpdated(SessionId, oneshot::Sender<IoHandlerResult<()>>),
+    SenderDeleted(SessionId, oneshot::Sender<IoHandlerResult<()>>),
     ReceiverCreated(
         String,
         SubsystemHandle,
@@ -191,8 +192,8 @@ pub(crate) enum JackIoHandlerMessage {
         Monitoring,
         oneshot::Sender<IoHandlerResult<()>>,
     ),
-    ReceiverUpdated(u32, oneshot::Sender<IoHandlerResult<()>>),
-    ReceiverDeleted(u32, oneshot::Sender<IoHandlerResult<()>>),
+    ReceiverUpdated(SessionId, oneshot::Sender<IoHandlerResult<()>>),
+    ReceiverDeleted(SessionId, oneshot::Sender<IoHandlerResult<()>>),
 }
 
 #[derive(Clone)]
@@ -232,7 +233,7 @@ impl IoHandler for JackIoHandler {
         Ok(())
     }
 
-    async fn sender_updated(&self, id: u32) -> IoHandlerResult<()> {
+    async fn sender_updated(&self, id: SessionId) -> IoHandlerResult<()> {
         let (resp_tx, resp_rx) = oneshot::channel();
         let msg = JackIoHandlerMessage::SenderUpdated(id, resp_tx);
         self.tx.send(msg).await.into_diagnostic()?;
@@ -240,7 +241,7 @@ impl IoHandler for JackIoHandler {
         Ok(())
     }
 
-    async fn sender_deleted(&self, id: u32) -> IoHandlerResult<()> {
+    async fn sender_deleted(&self, id: SessionId) -> IoHandlerResult<()> {
         let (resp_tx, resp_rx) = oneshot::channel();
         let msg = JackIoHandlerMessage::SenderDeleted(id, resp_tx);
         self.tx.send(msg).await.into_diagnostic()?;
@@ -266,7 +267,7 @@ impl IoHandler for JackIoHandler {
         Ok(())
     }
 
-    async fn receiver_updated(&mut self, id: u32) -> IoHandlerResult<()> {
+    async fn receiver_updated(&mut self, id: SessionId) -> IoHandlerResult<()> {
         let (resp_tx, resp_rx) = oneshot::channel();
         let msg = JackIoHandlerMessage::ReceiverUpdated(id, resp_tx);
         self.tx.send(msg).await.into_diagnostic()?;
@@ -274,7 +275,7 @@ impl IoHandler for JackIoHandler {
         Ok(())
     }
 
-    async fn receiver_deleted(&mut self, id: u32) -> IoHandlerResult<()> {
+    async fn receiver_deleted(&mut self, id: SessionId) -> IoHandlerResult<()> {
         let (resp_tx, resp_rx) = oneshot::channel();
         let msg = JackIoHandlerMessage::ReceiverDeleted(id, resp_tx);
         self.tx.send(msg).await.into_diagnostic()?;

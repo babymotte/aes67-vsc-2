@@ -20,13 +20,20 @@ use crate::{
     error::ConfigError,
     formats::{
         self, AudioFormat, FrameFormat, Frames, FramesPerSecond, MilliSeconds, SampleFormat,
-        Seconds,
+        Seconds, Session, SessionId,
     },
     time::MICROS_PER_MILLI_F,
 };
 use lazy_static::lazy_static;
 use regex::Regex;
-use sdp::SessionDescription;
+use sdp::{
+    MediaDescription, SessionDescription,
+    description::{
+        common::{Address, Attribute, ConnectionInformation},
+        media::{MediaName, RangedPort},
+        session::{TimeDescription, Timing},
+    },
+};
 use serde::{Deserialize, Serialize};
 use std::{
     net::{IpAddr, SocketAddr},
@@ -44,6 +51,23 @@ lazy_static! {
         Regex::new(r"direct=([0-9]+)").expect("no dynammic input, can't fail");
     static ref CHANNELS_REGEX: Regex =
         Regex::new(r"([0-9]+) channels: (.+)").expect("no dynammic input, can't fail");
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RefClk {
+    pub standard: String,
+    pub mac: String,
+    pub domain: u32,
+}
+
+impl From<(String, String, u32)> for RefClk {
+    fn from(value: (String, String, u32)) -> Self {
+        RefClk {
+            standard: value.0,
+            mac: value.1,
+            domain: value.2,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -135,7 +159,7 @@ impl Default for PartialReceiverConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReceiverConfig {
-    pub id: u32,
+    pub id: SessionId,
     pub label: String,
     pub audio_format: AudioFormat,
     pub source: SocketAddr,
@@ -153,18 +177,12 @@ impl ReceiverConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct SessionId {
-    pub id: u64,
-    pub version: u64,
-}
-
-impl<T: AsRef<(u64, u64)>> From<T> for SessionId {
+impl<T: AsRef<(u64, u64)>> From<T> for Session {
     fn from(value: T) -> Self {
         let r = value.as_ref();
         let id = r.0;
         let version = r.1;
-        SessionId { id, version }
+        Session { id, version }
     }
 }
 
@@ -216,7 +234,7 @@ impl ReceiverConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionInfo {
-    pub id: SessionId,
+    pub id: Session,
     pub name: String,
     pub destination_ip: IpAddr,
     pub destination_port: u16,
@@ -227,6 +245,102 @@ pub struct SessionInfo {
     pub origin_ip: IpAddr,
     pub channel_labels: Vec<String>,
     pub rtp_offset: u32,
+    pub payload_type: u8,
+    pub refclk: RefClk,
+}
+
+impl From<&SessionInfo> for SessionDescription {
+    fn from(value: &SessionInfo) -> Self {
+        let mut sd = SessionDescription::default();
+
+        sd.version = 0;
+
+        sd.origin.username = "-".to_owned();
+        sd.origin.session_id = value.id.id;
+        sd.origin.session_version = value.id.version;
+        sd.origin.network_type = "IN".to_owned();
+        sd.origin.address_type = if value.origin_ip.is_ipv4() {
+            "IP4".to_owned()
+        } else {
+            "IP6".to_owned()
+        };
+        sd.origin.unicast_address = value.origin_ip.to_string();
+
+        let name = if value.name.trim().is_empty() {
+            value.id.id.to_string()
+        } else {
+            value.name.clone()
+        };
+        sd.session_name = name;
+
+        sd.session_information = Some(format!(
+            "{} channels: {}",
+            value.channels,
+            value.channel_labels.join(", ")
+        ));
+
+        sd.time_descriptions.push(TimeDescription {
+            timing: Timing {
+                start_time: 0,
+                stop_time: 0,
+            },
+            repeat_times: vec![],
+        });
+
+        sd.attributes
+            .push(Attribute::new("recvonly".to_owned(), None));
+
+        let mut media = MediaDescription::default();
+        media.media_name = MediaName {
+            media: "audio".to_owned(),
+            port: RangedPort {
+                value: value.destination_port as isize,
+                range: None,
+            },
+            protos: vec!["RTP/AVP".to_owned()],
+            formats: vec![value.payload_type.to_string()],
+        };
+        // TODO get correct subnet mask
+        let subnet_mask = 32;
+        media.connection_information = Some(ConnectionInformation {
+            network_type: "IN".to_owned(),
+            address_type: if value.destination_ip.is_ipv4() {
+                "IP4".to_owned()
+            } else {
+                "IP6".to_owned()
+            },
+            address: Some(Address {
+                address: format!("{}/{}", value.destination_ip, subnet_mask),
+                ttl: None,
+                range: None,
+            }),
+        });
+        media.attributes.push(Attribute::new(
+            "rtpmap".to_owned(),
+            Some(format!(
+                "{} {}/{}/{}",
+                value.payload_type, value.sample_format, value.sample_rate, value.channels
+            )),
+        ));
+        media.attributes.push(Attribute::new(
+            "ptime".to_owned(),
+            Some(value.packet_time.to_string()),
+        ));
+        media.attributes.push(Attribute::new(
+            "ts-refclk".to_owned(),
+            Some(format!(
+                "ptp={}:{}:{}",
+                value.refclk.standard, value.refclk.mac, value.refclk.domain
+            )),
+        ));
+        media.attributes.push(Attribute::new(
+            "mediaclk".to_owned(),
+            Some(format!("direct={}", value.rtp_offset)),
+        ));
+        sd.media_descriptions.push(media);
+
+        sd
+    }
 }
 
 impl TryFrom<&SessionDescription> for SessionInfo {
@@ -309,7 +423,7 @@ impl TryFrom<&SessionDescription> for SessionInfo {
             frame_format,
             sample_rate,
         };
-        let session_id = SessionId {
+        let session_id = Session {
             id: session_id,
             version: session_version,
         };
@@ -351,6 +465,27 @@ impl TryFrom<&SessionDescription> for SessionInfo {
 
         let destination_port = media.media_name.port.value.to_owned() as u16;
 
+        let payload_type = payload_type
+            .parse()
+            .map_err(|_| ConfigError::InvalidSdp("invalid payload type".to_owned()))?;
+
+        let refclk = media
+            .attribute("ts-refclk")
+            .and_then(|it| it)
+            .and_then(|refclk| {
+                if let Some(caps) = TS_REFCLK_REGEX.captures(refclk) {
+                    Some((
+                        caps[1].to_owned(),
+                        caps[2].to_owned(),
+                        caps[3].parse().ok()?,
+                    ))
+                } else {
+                    None
+                }
+            })
+            .ok_or_else(|| ConfigError::InvalidSdp("invalid ts-refclk".to_owned()))?
+            .into();
+
         Ok(SessionInfo {
             id: session_id,
             name,
@@ -363,6 +498,8 @@ impl TryFrom<&SessionDescription> for SessionInfo {
             origin_ip,
             channel_labels,
             rtp_offset,
+            payload_type,
+            refclk,
         })
     }
 }

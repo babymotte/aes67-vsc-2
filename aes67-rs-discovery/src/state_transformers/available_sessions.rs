@@ -1,5 +1,4 @@
 use crate::{Session, error::DiscoveryResult};
-use aes67_rs::receiver::config::SessionId;
 use std::{collections::HashMap, time::Duration};
 use tokio::{select, sync::mpsc};
 use tosub::SubsystemHandle;
@@ -52,7 +51,7 @@ impl ProcessLoop {
     async fn start(
         mut self,
         subsys: SubsystemHandle,
-        mut used_sessions: mpsc::UnboundedReceiver<TypedPStateEvent<SessionId>>,
+        mut used_sessions: mpsc::UnboundedReceiver<TypedPStateEvent<Session>>,
         mut all_sessions: mpsc::UnboundedReceiver<TypedPStateEvent<String>>,
     ) -> DiscoveryResult<()> {
         loop {
@@ -69,10 +68,7 @@ impl ProcessLoop {
         Ok(())
     }
 
-    async fn process_used_session(
-        &self,
-        event: TypedPStateEvent<SessionId>,
-    ) -> DiscoveryResult<()> {
+    async fn process_used_session(&self, event: TypedPStateEvent<Session>) -> DiscoveryResult<()> {
         info!("Processing used session event: {:?}", event);
         Ok(())
     }

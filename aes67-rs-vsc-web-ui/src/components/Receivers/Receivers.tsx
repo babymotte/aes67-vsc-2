@@ -26,7 +26,7 @@ export default function Receivers(props: {
   const [tab, setTab] = props.tabSignal;
   const [pending, start] = useTransition();
   const [receivers, setReceivers] = createSignal<Map<string, string>>(
-    new Map()
+    new Map(),
   );
   const [sortedReceivers, setSortedReceivers] = createSignal<
     [string, string][]
@@ -34,7 +34,7 @@ export default function Receivers(props: {
   const updateTab = (index: number) => () => start(() => setTab(index));
 
   createEffect(() => {
-    pSubscribe(`${appName()}/config/rx/receivers/?/name`, setReceivers);
+    pSubscribe(`${appName()}/config/rx/?/name`, setReceivers);
   });
 
   createEffect(() => {
@@ -53,7 +53,7 @@ export default function Receivers(props: {
   }) {
     const [running] = createWbSignal(
       `/rx/${transceiverID(props.receiver)}/running`,
-      false
+      false,
     );
     return (
       <li

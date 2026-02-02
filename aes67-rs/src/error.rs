@@ -28,6 +28,8 @@ use tokio::sync::{oneshot, watch};
 use tracing::error;
 use worterbuch_client::ConnectionError;
 
+use crate::formats::SessionId;
+
 pub enum ErrorCode {
     WorterbuchError = 0x10,
     IoError = 0x11,
@@ -138,7 +140,7 @@ pub enum SenderInternalError {
     #[error("Error in sender: {0}")]
     ChildAppError(#[from] ChildAppError),
     #[error("Sender with ID {0} does not exist.")]
-    NoSuchSender(u32),
+    NoSuchSender(SessionId),
 }
 
 #[derive(Error, Debug, Diagnostic)]
@@ -156,7 +158,7 @@ pub enum ReceiverInternalError {
     #[error("Error in receiver: {0}")]
     ChildAppError(#[from] ChildAppError),
     #[error("Receiver with ID {0} does not exist.")]
-    NoSuchReceiver(u32),
+    NoSuchReceiver(SessionId),
 }
 
 #[derive(Error, Debug, Diagnostic)]
