@@ -1,0 +1,4 @@
+name: aes67-jack-vsc
+webUi:
+  port: 43567
+telemetry: null
