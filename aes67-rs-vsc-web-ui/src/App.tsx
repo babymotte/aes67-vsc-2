@@ -181,8 +181,8 @@ export default function App(props: { tab?: number }) {
         </Switch>
         <div class="spacer"></div>
         <div>
-          <Indicator onLabel="Backend " offLabel="Backend " on={connected} />
-          <Indicator onLabel="VSC " offLabel="VSC " on={running} />
+          <Indicator onLabel="Service" offLabel="Service" on={connected} />
+          <Indicator onLabel="VSC" offLabel="VSC" on={running} />
         </div>
       </div>
       <div class="tab">
