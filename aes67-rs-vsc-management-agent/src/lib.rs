@@ -38,7 +38,7 @@ use serde::de::DeserializeOwned;
 use serde_json::json;
 use std::{
     io,
-    net::{IpAddr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, SocketAddr},
     time::Duration,
 };
 use tokio::{
@@ -417,10 +417,26 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
         Ok(())
     }
 
-    async fn create_sender_config(&mut self) -> ManagementAgentResult<()> {
-        let config = PartialSenderConfig::default();
+    async fn create_sender_config(&self) -> ManagementAgentResult<()> {
+        self.wb
+            .locked(topic!(self.app_id, "config", "tx"), || {
+                self.do_create_sender_config()
+            })
+            .await?
+    }
 
-        let id = self.next_id();
+    async fn do_create_sender_config(&self) -> ManagementAgentResult<()> {
+        let id = self.next_id(true);
+
+        let mut config = PartialSenderConfig::default();
+
+        if let Some(multicast_address) = self.get_free_multicast_address(id).await? {
+            let multicast_address = SocketAddr::new(
+                multicast_address,
+                config.target.map(|a| a.port()).unwrap_or(5004),
+            );
+            config.target = Some(multicast_address);
+        }
 
         self.publish_sender_config(id, &config).await?;
 
@@ -428,6 +444,14 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
     }
 
     async fn create_receiver_config(&mut self, sdp: Option<Sdp>) -> ManagementAgentResult<()> {
+        self.wb
+            .locked(topic!(self.app_id, "config", "rx"), || {
+                self.do_create_receiver_config(sdp)
+            })
+            .await?
+    }
+
+    async fn do_create_receiver_config(&self, sdp: Option<Sdp>) -> ManagementAgentResult<()> {
         let config = match sdp {
             Some(sdp) => match sdp.sdp {
                 Some(SdpSource::Content(content)) => {
@@ -442,7 +466,7 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
             None => PartialReceiverConfig::default(),
         };
 
-        let id = self.next_id();
+        let id = self.next_id(false);
 
         self.publish_receiver_config(id, &config).await?;
 
@@ -450,7 +474,7 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
     }
 
     async fn fetch_config_from_session(
-        &mut self,
+        &self,
         session_id: String,
     ) -> ManagementAgentResult<PartialReceiverConfig> {
         let Some(session_info) = self.discovery.fetch_session_info(session_id).await? else {
@@ -461,7 +485,11 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
         Ok(PartialReceiverConfig::from_session_info(&session_info))
     }
 
-    fn next_id(&self) -> SessionId {
+    fn next_id(&self, _tx: bool) -> SessionId {
+        // TODO make sure this is not used yet
+        // we are already in a locked context here, so anything we do here is atomic,
+        // just don't use async wb API calls here
+        // TODO also make sure that ids are monotonically increasing
         rand::random_range(100_000_000_000..MAX_SAFE_INTEGER)
     }
 
@@ -643,12 +671,7 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
                 .await?;
         }
         if let Some(target) = &config.target {
-            self.wb
-                .set_async(
-                    topic!(self.app_id, "config", "tx", id, "destinationIP"),
-                    target.ip().to_string(),
-                )
-                .await?;
+            // IP was already set while finding a  free multicast address
             self.wb
                 .set_async(
                     topic!(self.app_id, "config", "tx", id, "destinationPort"),
@@ -1043,6 +1066,88 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
             mac,
             domain,
         })
+    }
+
+    async fn get_free_multicast_address(
+        &self,
+        id: SessionId,
+    ) -> ManagementAgentResult<Option<IpAddr>> {
+        let sessions: Vec<IpAddr> = self
+            .wb
+            .pget::<SessionInfo>(topic!(self.app_id, "discovery", "sessions", "?", "config"))
+            .await?
+            .into_iter()
+            .map(|kvp| kvp.value.destination_ip)
+            .collect();
+
+        let assigned_ips: Vec<IpAddr> = self
+            .wb
+            .pget::<String>(topic!(self.app_id, "config", "tx", "?", "destinationIP"))
+            .await?
+            .into_iter()
+            .filter_map(|kvp| kvp.value.parse().ok())
+            .collect();
+
+        for prefix in 67..=255 {
+            if let Some(addr) = self
+                .find_multicast_address_in_prefix(id, &sessions, &assigned_ips, prefix)
+                .await?
+            {
+                return Ok(Some(addr));
+            }
+        }
+        for prefix in 0..67 {
+            if let Some(addr) = self
+                .find_multicast_address_in_prefix(id, &sessions, &assigned_ips, prefix)
+                .await?
+            {
+                return Ok(Some(addr));
+            }
+        }
+
+        Ok(None)
+    }
+
+    async fn find_multicast_address_in_prefix(
+        &self,
+        id: u64,
+        sessions: &Vec<IpAddr>,
+        assigned_ips: &Vec<IpAddr>,
+        prefix: u8,
+    ) -> ManagementAgentResult<Option<IpAddr>> {
+        for j in 1..=255 {
+            let candidate = IpAddr::V4(Ipv4Addr::from([239, 69, prefix, j]));
+            if let Some(addr) = self
+                .try_get_multicast_address(id, candidate, sessions, assigned_ips)
+                .await?
+            {
+                return Ok(Some(addr));
+            }
+        }
+        Ok(None)
+    }
+
+    async fn try_get_multicast_address(
+        &self,
+        id: SessionId,
+        candidate: IpAddr,
+        sessions: &[IpAddr],
+        assigned_ips: &[IpAddr],
+    ) -> ManagementAgentResult<Option<IpAddr>> {
+        if sessions.iter().any(|it| it == &candidate)
+            || assigned_ips.iter().any(|it| it == &candidate)
+        {
+            return Ok(None);
+        }
+
+        self.wb
+            .set(
+                topic!(self.app_id, "config", "tx", id, "destinationIP"),
+                candidate.to_string(),
+            )
+            .await?;
+
+        return Ok::<Option<IpAddr>, ManagementAgentError>(Some(candidate));
     }
 }
 

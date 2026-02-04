@@ -44,7 +44,7 @@ impl Default for PartialSenderConfig {
                     sample_format: SampleFormat::L24,
                 },
             }),
-            target: Some(SocketAddr::from(([239, 255, 0, 1], 5004))),
+            target: Some(SocketAddr::from(([239, 69, 67, 1], 5004))),
             payload_type: Some(98),
             channel_labels: vec!["Left".to_owned(), "Right".to_owned()],
             packet_time: Some(1.0),
