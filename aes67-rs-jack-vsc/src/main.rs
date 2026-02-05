@@ -22,32 +22,48 @@ mod session_manager;
 mod telemetry;
 
 use aes67_rs_jack_vsc::io_handler::JackIoHandler;
-use aes67_rs_vsc_management_agent::{config::AppConfig, init_management_agent};
+use aes67_rs_vsc_management_agent::{
+    config::{AppConfig, Args},
+    init_management_agent,
+};
 use std::time::Duration;
 use tosub::SubsystemHandle;
 use tracing::info;
 
 #[tokio::main]
 async fn main() -> miette::Result<()> {
+    let args = Args::get();
+
     let app_id = "aes67-jack-vsc".to_owned();
-    let config = AppConfig::load(&app_id).await?;
-    let app_id = config.name.clone();
+    let config = AppConfig::load(&args.config).await?;
 
     telemetry::init(&app_id, config.telemetry.as_ref()).await?;
 
     tosub::build_root(app_id.clone())
         .catch_signals()
         .with_timeout(Duration::from_secs(5))
-        .start(|subsys| async move { run(subsys, app_id).await })
+        .start(|subsys| async move { run(subsys, app_id, args, config).await })
         .await?;
 
     Ok(())
 }
 
-async fn run(subsys: SubsystemHandle, id: String) -> miette::Result<()> {
+async fn run(
+    subsys: SubsystemHandle,
+    id: String,
+    args: Args,
+    config: AppConfig,
+) -> miette::Result<()> {
     info!("Starting {} …", id);
 
-    init_management_agent(&subsys, id, JackIoHandler::new(&subsys)).await?;
+    init_management_agent(
+        &subsys,
+        id,
+        config.web_ui.port,
+        args.data_dir,
+        JackIoHandler::new(&subsys),
+    )
+    .await?;
 
     subsys.shutdown_requested().await;
 

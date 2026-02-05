@@ -56,8 +56,8 @@ pub(crate) async fn start_sender(
     let target = config.target;
     let socket = create_tx_socket(target, iface)?;
 
-    let SubsystemHandle_name = id.clone();
-    let SubsystemHandle = async move |s| {
+    let subsystem_name = id.clone();
+    let subsystem = async move |s| {
         Sender {
             id,
             label,
@@ -76,7 +76,7 @@ pub(crate) async fn start_sender(
         .await
     };
 
-    subsys.spawn(SubsystemHandle_name, SubsystemHandle);
+    subsys.spawn(subsystem_name, subsystem);
 
     info!("Sender '{sender_id}' started successfully.");
     Ok(SenderApi::new(api_tx, tx))

@@ -28,7 +28,6 @@ dependencies = [
  "clock-steering",
  "crossbeam",
  "dashmap",
- "dirs",
  "futures-lite",
  "gethostname",
  "hex",
@@ -145,8 +144,7 @@ dependencies = [
  "aes67-rs-discovery",
  "axum 0.8.8",
  "axum-server 0.7.3",
- "directories",
- "dirs",
+ "clap",
  "libc",
  "miette",
  "pnet",
@@ -611,9 +609,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.5.56"
+version = "4.5.57"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a75ca66430e33a14957acc24c5077b503e7d374151b2b4b3a10c83b4ceb4be0e"
+checksum = "6899ea499e3fb9305a65d5ebf6e3d2248c5fab291f300ad0a704fbe142eae31a"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -621,9 +619,9 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.5.56"
+version = "4.5.57"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "793207c7fa6300a0608d1080b858e5fdbe713cdc1c8db9fb17777d8a13e63df0"
+checksum = "7b12c8b680195a62a8364d16b8447b01b6c2c8f9aaf68bee653be34d4245e238"
 dependencies = [
  "anstream",
  "anstyle",
@@ -4948,9 +4946,9 @@ dependencies = [
 
 [[package]]
 name = "worterbuch"
-version = "1.5.0-alpha.2"
+version = "1.5.0-alpha.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d401e91cc8719589565c24ebb83267b9760b4dd134154955b499b23cb722ac23"
+checksum = "1641eaa06fe800488ecaab18332583e378b266f12cb3a6480ef293edfddbb623"
 dependencies = [
  "axum 0.8.8",
  "axum-extra",
@@ -5000,9 +4998,9 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-client"
-version = "1.5.0-alpha.2"
+version = "1.5.0-alpha.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4f128797ef4f794f3d608fdea284bb62ec2dee738d771892deb4a19ffa11452"
+checksum = "c23d90be7c2b91c9138fbbc0a0fe06dc4eee62cd4369853e19b56025d1664cd1"
 dependencies = [
  "async-stream",
  "futures-util",
@@ -5018,9 +5016,9 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-common"
-version = "1.5.0-alpha.2"
+version = "1.5.0-alpha.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "346e79423d814130eb22a217152854a57df115c998b4b46f61c99eb923ffa01c"
+checksum = "b6a19d1e631c0035b2c1e973796ceabd9e4bd9f6cb3da8224c9a12a1fbed0a6a"
 dependencies = [
  "axum 0.8.8",
  "hashbrown 0.16.1",

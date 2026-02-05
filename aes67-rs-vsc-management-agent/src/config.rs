@@ -1,18 +1,31 @@
 use crate::error::ManagementAgentResult;
 use aes67_rs::config::TelemetryConfig;
-use dirs::config_local_dir;
-use miette::{Context, IntoDiagnostic};
+use clap::Parser;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tokio::fs;
-use tracing::error;
 
 pub const DEFAULT_PORT: u16 = 43567;
+
+#[derive(clap::Parser)]
+#[command(version, about, long_about = None)]
+pub struct Args {
+    #[arg(short, long, value_name = "FILE", env = "AES67_VSC_CONFIG")]
+    pub config: PathBuf,
+
+    #[arg(short, long, value_name = "PATH", env = "AES67_VSC_DATA_DIR")]
+    pub data_dir: PathBuf,
+}
+
+impl Args {
+    pub fn get() -> Self {
+        Self::parse()
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppConfig {
-    pub name: String,
     pub web_ui: WebUiConfig,
     pub telemetry: Option<TelemetryConfig>,
 }
@@ -30,9 +43,7 @@ impl Default for WebUiConfig {
 }
 
 impl AppConfig {
-    pub async fn load(id: &str) -> ManagementAgentResult<Self> {
-        let path = config_path(id).await;
-
+    pub async fn load(path: impl AsRef<Path>) -> ManagementAgentResult<Self> {
         match fs::read(path).await {
             Ok(contents) => {
                 let config = serde_yaml::from_slice(&contents)?;
@@ -41,38 +52,11 @@ impl AppConfig {
             Err(e) => {
                 eprintln!("Could not load config: {e}; using default config");
                 let default = AppConfig {
-                    name: id.to_owned(),
                     web_ui: Default::default(),
                     telemetry: Default::default(),
                 };
-                default.store().await;
                 Ok(default)
             }
         }
     }
-
-    pub async fn store(&self) {
-        if let Err(e) = self
-            .try_store()
-            .await
-            .into_diagnostic()
-            .wrap_err("Could not persist config")
-        {
-            error!("{e}");
-        }
-    }
-
-    async fn try_store(&self) -> ManagementAgentResult<()> {
-        let path = config_path(&self.name).await;
-        let contents = serde_yaml::to_string(&self)?;
-        fs::write(path, contents).await?;
-        Ok(())
-    }
-}
-
-async fn config_path(id: &str) -> PathBuf {
-    let config_home = config_local_dir().expect("could not find config dir");
-    let config_dir = config_home.join(id);
-    fs::create_dir_all(&config_dir).await.ok();
-    config_dir.join("config.yaml")
 }

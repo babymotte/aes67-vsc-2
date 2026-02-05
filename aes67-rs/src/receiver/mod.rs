@@ -60,8 +60,8 @@ pub(crate) async fn start_receiver(
     let (tx, rx) = receiver_buffer_channel(config.clone(), monitoring.clone());
     let socket = create_rx_socket(&config, iface)?;
 
-    let SubsystemHandle_name = id.clone();
-    let SubsystemHandle = async move |s| {
+    let subsystem_name = id.clone();
+    let subsystem = async move |s| {
         Receiver {
             id,
             label,
@@ -80,7 +80,7 @@ pub(crate) async fn start_receiver(
         .await
     };
 
-    subsys.spawn(SubsystemHandle_name, SubsystemHandle);
+    subsys.spawn(subsystem_name, subsystem);
 
     info!("Receiver '{receiver_id}' started successfully.");
     Ok(ReceiverApi::new(api_tx, rx))

@@ -29,8 +29,8 @@ tosub = "1.0.0-rc.2"
 tracing = "0.1.41"
 tracing-opentelemetry = "0.32.0"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
-worterbuch = "1.5.0-alpha.2"
-worterbuch-client = "1.5.0-alpha.2"
+worterbuch = "1.5.0-alpha.3"
+worterbuch-client = "1.5.0-alpha.3"
 
 [features]
 tokio-console = ["console-subscriber"]

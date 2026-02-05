@@ -8,8 +8,7 @@ aes67-rs = { version = "0.1.0", path = "../aes67-rs" }
 aes67-rs-discovery = { version = "0.1.0", path = "../aes67-rs-discovery" }
 axum = { version = "0.8.6", features = ["http2", "ws", "macros"] }
 axum-server = "0.7.2"
-directories = "6.0.0"
-dirs = "6.0.0"
+clap = { version = "4.5.57", features = ["derive", "env"] }
 libc = "0.2"
 miette = "7.6.0"
 pnet = "0.35.0"
@@ -23,8 +22,8 @@ thiserror = "2.0.17"
 tokio = "1.47.1"
 tosub = "1.0.0-rc.2"
 tracing = "0.1.41"
-worterbuch = "1.5.0-alpha.2"
-worterbuch-client = "1.5.0-alpha.2"
+worterbuch = "1.5.0-alpha.3"
+worterbuch-client = "1.5.0-alpha.3"
 
 [features]
 tokio-metrics = []

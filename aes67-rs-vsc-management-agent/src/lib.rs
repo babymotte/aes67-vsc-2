@@ -4,7 +4,6 @@ mod netinf_watcher;
 mod rest;
 
 use crate::{
-    config::{AppConfig, DEFAULT_PORT},
     error::{IoHandlerResult, ManagementAgentError, ManagementAgentResult},
     rest::{
         app_name, refresh_netinfs, vsc_rx_config_create, vsc_rx_create, vsc_rx_delete,
@@ -37,8 +36,8 @@ use pnet::datalink::NetworkInterface;
 use serde::de::DeserializeOwned;
 use serde_json::json;
 use std::{
-    io,
     net::{IpAddr, Ipv4Addr, SocketAddr},
+    path::Path,
     time::Duration,
 };
 use tokio::{
@@ -721,7 +720,7 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
 
         let channels = self
             .config_param(
-                dbg!(topic!(self.app_id, "config", "tx", id, "channels")),
+                topic!(self.app_id, "config", "tx", id, "channels"),
                 "sender channels not configured",
             )
             .await?;
@@ -1190,24 +1189,15 @@ pub trait IoHandler: Clone + Send + Sync + 'static {
 pub async fn init_management_agent(
     subsys: &SubsystemHandle,
     app_id: String,
+    port: u16,
+    data_dir: impl AsRef<Path>,
     io_handler: impl IoHandler,
 ) -> Result<()> {
-    let config = AppConfig::load(&app_id).await?;
-
-    let id = config.name.clone();
-
-    let dirs = directories::BaseDirs::new();
-    let data_home = dirs
-        .map(|d| d.data_dir().to_owned())
-        .expect("could not find data dir");
-
-    let data_dir = data_home.join(&id).join("data");
-
-    let mut wb_config = worterbuch::Config::new().await?;
+    let mut wb_config = worterbuch::Config::new(None).await?;
     wb_config.load_env_with_prefix("AES67_VSC")?;
     wb_config.persistence_mode = PersistenceMode::ReDB;
     wb_config.use_persistence = true;
-    wb_config.data_dir = data_dir.display().to_string();
+    wb_config.data_dir = data_dir.as_ref().display().to_string();
     wb_config.ws_endpoint = None;
     wb_config.tcp_endpoint = None;
     wb_config.unix_endpoint = None;
@@ -1217,22 +1207,22 @@ pub async fn init_management_agent(
     let wb = worterbuch_client::local_client_wrapper(worterbuch.clone());
 
     wb.set_grave_goods(&[
-        &topic!(id, "metrics", "#"),
-        &topic!(id, "discovery", "#"),
-        &topic!(id, "tx", "#"),
-        &topic!(id, "rx", "#"),
-        &topic!(id, "networkInterfaces", "#"),
+        &topic!(app_id, "metrics", "#"),
+        &topic!(app_id, "discovery", "#"),
+        &topic!(app_id, "tx", "#"),
+        &topic!(app_id, "rx", "#"),
+        &topic!(app_id, "networkInterfaces", "#"),
     ])
     .await
     .ok();
     wb.set_last_will(&[KeyValuePair {
-        key: topic!(id, "running"),
+        key: topic!(app_id, "running"),
         value: json!(false),
     }])
     .await
     .ok();
 
-    Aes67VscRestApi::new(subsys, config, worterbuch, io_handler).await?;
+    Aes67VscRestApi::new(subsys, app_id, port, worterbuch, io_handler).await?;
 
     Ok(())
 }
@@ -1244,13 +1234,12 @@ pub struct Aes67VscRestApi {}
 impl Aes67VscRestApi {
     pub async fn new<'a>(
         subsys: &SubsystemHandle,
-        persistent_config: AppConfig,
+        app_id: String,
+        port: u16,
         worterbuch: CloneableWbApi,
         io_handler: impl IoHandler,
     ) -> Result<()> {
         let wb = worterbuch_client::local_client_wrapper(worterbuch.clone());
-
-        let app_id = persistent_config.name.clone();
 
         let wbc = wb.clone();
 
@@ -1260,7 +1249,7 @@ impl Aes67VscRestApi {
             .unwrap_or(false);
 
         info!("Starting VSC management agent …");
-        let api = ManagementAgentApi::new(subsys, app_id, wb, io_handler);
+        let api = ManagementAgentApi::new(subsys, app_id.clone(), wb, io_handler);
 
         if autostart {
             info!("Autostarting VSC …");
@@ -1277,8 +1266,8 @@ impl Aes67VscRestApi {
         let name = "aes67-rs-vsc-management-agent".to_owned();
 
         info!("Starting VSC management agent REST API …");
-        subsys.spawn(name, async |s| {
-            run_rest_api(s, persistent_config, worterbuch, wbc, api).await
+        subsys.spawn(name, async move |s: SubsystemHandle| {
+            run_rest_api(s, app_id, port, worterbuch, wbc, api).await
         });
 
         Ok(())
@@ -1287,40 +1276,17 @@ impl Aes67VscRestApi {
 
 async fn run_rest_api(
     subsys: SubsystemHandle,
-    mut persistent_config: AppConfig,
+    app_id: String,
+    port: u16,
     worterbuch: CloneableWbApi,
     wb: Worterbuch,
     api: ManagementAgentApi,
 ) -> ManagementAgentResult<()> {
     info!("Starting AES67-VSC REST API …");
 
-    let netinf_watcher = start_network_interface_watcher(persistent_config.name.clone(), wb).await;
+    let netinf_watcher = start_network_interface_watcher(app_id.clone(), wb).await;
 
-    let mut port = persistent_config.web_ui.port;
-
-    let listener = loop {
-        match tokio::net::TcpListener::bind(format!("127.0.0.1:{port}")).await {
-            Ok(it) => {
-                if port != persistent_config.web_ui.port {
-                    persistent_config.web_ui.port = port;
-                    persistent_config.store().await;
-                }
-                break it;
-            }
-            Err(_) => {
-                if port >= u16::MAX {
-                    port = DEFAULT_PORT;
-                } else {
-                    port += 1;
-                }
-                if port == persistent_config.web_ui.port {
-                    return Err(ManagementAgentError::IoError(io::Error::other(
-                        "could not find a free port",
-                    )));
-                }
-            }
-        }
-    };
+    let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{port}")).await?;
 
     let app = build_worterbuch_router(
         &subsys,
@@ -1333,7 +1299,7 @@ async fn run_rest_api(
     .await?
     .route(
         "/api/v1/backend/app-name",
-        get(app_name).with_state(persistent_config.name.clone()),
+        get(app_name).with_state(app_id.clone()),
     )
     .route(
         "/api/v1/refresh/netinf",

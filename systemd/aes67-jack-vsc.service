@@ -1,17 +1,13 @@
 [Unit]
 Description=AES67 JACK VSC
-After=network.target
 StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 Restart=always
 RestartSec=1
-User=aes67-vsc
-ExecStart=/usr/local/bin/aes67-rs-jack-vsc
-Environment="AES67_VSC_WEBROOT_PATH=/usr/lib/aes67-rs/jack-vsc/static/"
-Environment="AES67_VSC_2_CONFIG=/etc/aes67-jack-vsc/config.yaml"
-Environment="AES67_VSC_2_DATA_DIR=/var/lib/aes67-jack-vsc/data"
+ExecStart=%h/.local/bin/aes67-rs-jack-vsc --config %h/.config/aes67-jack-vsc/config.yaml --data-dir %h/.local/share/aes67-jack-vsc/data
+Environment="AES67_VSC_WEBROOT_PATH=%h/.local/share/aes67-jack-vsc/html"
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target
