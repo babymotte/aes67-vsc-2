@@ -134,9 +134,12 @@ where
 
     loop {
         select! {
-            Some(notification) = notifications.recv() => handle_notification(client.as_client(), notification, &app_id).await?,
+            recv = notifications.recv() => if let Some(notification) = recv {
+                handle_notification(client.as_client(), notification, &app_id).await?;
+            } else {
+                break;
+            },
             _ = subsys.shutdown_requested() => break,
-            else => break,
         }
     }
 

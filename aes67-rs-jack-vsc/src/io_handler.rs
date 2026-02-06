@@ -37,9 +37,12 @@ impl JackIoHandlerActor {
         info!("JACK I/O handler actor started.");
         loop {
             select! {
-                Some(msg) = self.rx.recv() => self.process_message(msg).await,
+                recv = self.rx.recv() => if let Some(msg) = recv {
+                    self.process_message(msg).await;
+                } else {
+                    break;
+                },
                 _ = self.subsys.shutdown_requested() => break,
-                else => break,
             }
         }
         info!("JACK I/O handler actor stopped.");

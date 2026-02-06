@@ -41,6 +41,7 @@ use std::{
     time::Duration,
 };
 use tokio::{
+    net::TcpListener,
     select,
     sync::{mpsc, oneshot},
 };
@@ -266,9 +267,10 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
     async fn run(mut self) -> Result<()> {
         loop {
             select! {
-                Some(msg) = self.rx.recv() => self.process_api_message(msg).await?,
+                recv = self.rx.recv() => if let Some(msg) = recv {
+                    self.process_api_message(msg).await?;
+                },
                 _ = self.subsys.shutdown_requested() => break,
-                else => break,
             }
         }
 
@@ -599,6 +601,7 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
                 // core (buffer consumer). This ensures the JACK callback can't access
                 // the buffer after the consumer is destroyed.
                 self.io_handler.sender_deleted(id).await?;
+                // TODO this needs to happen automatically whenever the sender stops, no matter what caused it (e.g. vsc shutdown)
                 self.revoke_session(id).await?;
                 let res = vsc_api.destroy_sender(id).await;
                 if let Err(e) = res {
@@ -1284,9 +1287,10 @@ async fn run_rest_api(
 ) -> ManagementAgentResult<()> {
     info!("Starting AES67-VSC REST API …");
 
-    let netinf_watcher = start_network_interface_watcher(app_id.clone(), wb).await;
+    let netinf_watcher =
+        netinf_watcher::start(&subsys, app_id.clone(), Duration::from_secs(3), wb).await;
 
-    let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{port}")).await?;
+    let listener = TcpListener::bind(format!("127.0.0.1:{port}")).await?;
 
     let app = build_worterbuch_router(
         &subsys,
@@ -1367,11 +1371,4 @@ async fn run_rest_api(
     info!("AES67-VSC REST API stopped.");
 
     Ok(())
-}
-
-async fn start_network_interface_watcher(
-    app_id: String,
-    wb: worterbuch_client::Worterbuch,
-) -> netinf_watcher::Handle {
-    netinf_watcher::start(app_id, Duration::from_secs(3), wb).await
 }

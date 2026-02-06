@@ -52,9 +52,12 @@ impl ProcessLoop {
     ) -> DiscoveryResult<()> {
         loop {
             select! {
+                recv = all_sessions.recv() => if let Some(event) = recv {
+                    self.process_session(event).await?;
+                } else {
+                    break;
+                },
                 _ = subsys.shutdown_requested() => break,
-                Some(event) = all_sessions.recv() => self.process_session(event).await?,
-                else => break,
             }
         }
 

@@ -112,18 +112,23 @@ impl Receiver {
 
         loop {
             select! {
-                Some(api_msg) = self.api_rx.recv() => {
+                recv = self.api_rx.recv() => if let Some(api_msg) = recv {
                     self.handle_api_message(api_msg).await?;
+                } else {
+                    warn!("API channel closed, shutting down receiver '{}'.", self.id);
+                    break;
                 },
-                Ok((len, addr)) = self.socket.recv_from(&mut receive_buffer) => {
+                recv = self.socket.recv_from(&mut receive_buffer) => if let Ok((len, addr)) = recv {
                     let time = self.clock.current_media_time()?;
                     self.rtp_data_received(&receive_buffer[..len], addr, time).await?;
+                } else {
+                    warn!("Socket receive error, shutting down receiver '{}'.", self.id);
+                    break;
                 },
                 _ = self.subsys.shutdown_requested() => {
                     info!("Shutdown of receiver '{}' requested.", self.id);
                     break;
                 },
-                else => break,
             }
         }
 

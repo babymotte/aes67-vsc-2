@@ -1,7 +1,10 @@
 use pnet::datalink::{self, NetworkInterface};
 use std::{mem, time::Duration};
-use tokio::{select, spawn, sync::mpsc, time::interval};
+use tokio::{select, sync::mpsc, time::interval};
+use tosub::SubsystemHandle;
 use worterbuch_client::{Worterbuch, topic};
+
+use crate::error::ManagementAgentResult;
 
 // Linux ethtool constants for hardware timestamping queries
 const ETHTOOL_GET_TS_INFO: u32 = 0x00000041;
@@ -31,46 +34,50 @@ impl Handle {
     pub async fn refresh(&self) {
         self.0.send(Some(())).await.ok();
     }
-
-    pub async fn close(self) {
-        self.0.send(None).await.ok();
-    }
-
-    pub async fn closed(&self) {
-        self.0.closed().await;
-    }
 }
 
-pub async fn start(app_id: String, scan_period: Duration, wb: Worterbuch) -> Handle {
+pub async fn start(
+    subsys: &SubsystemHandle,
+    app_id: String,
+    scan_period: Duration,
+    wb: Worterbuch,
+) -> Handle {
     let interval = interval(scan_period);
 
     let (tx, rx) = mpsc::channel(1);
 
-    spawn(watch(app_id, wb, interval, rx));
+    subsys.spawn("network-interface-watcher", |s| {
+        watch(s, app_id, wb, interval, rx)
+    });
 
     Handle(tx)
 }
 
 async fn watch(
+    subsys: SubsystemHandle,
     app_id: String,
     wb: Worterbuch,
     mut interval: tokio::time::Interval,
     mut rx: mpsc::Receiver<Option<()>>,
-) {
+) -> ManagementAgentResult<()> {
     let mut known_interfaces = vec![];
 
     loop {
         select! {
             _ = interval.tick() => refresh(&app_id, &mut known_interfaces,  &wb).await,
-            Some(thing) = rx.recv() => {
+            recv = rx.recv() => if let Some(thing) = recv {
                 match thing {
                     Some(()) => refresh(&app_id, &mut known_interfaces,  &wb).await,
                     None => break,
                 }
+            } else {
+                break;
             },
-            else => break,
+            _ = subsys.shutdown_requested() => break,
         }
     }
+
+    Ok(())
 }
 
 struct InfWrapper(NetworkInterface);

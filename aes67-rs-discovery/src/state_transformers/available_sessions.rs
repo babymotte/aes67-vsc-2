@@ -56,10 +56,17 @@ impl ProcessLoop {
     ) -> DiscoveryResult<()> {
         loop {
             select! {
+                recv = used_sessions.recv() => if let Some(event) = recv {
+                    self.process_used_session(event).await?;
+                } else {
+                    break;
+                },
+                recv = all_sessions.recv() => if let Some(event) = recv {
+                    self.process_session(event).await?;
+                } else {
+                    break;
+                },
                 _ = subsys.shutdown_requested() => break,
-                Some(event) = used_sessions.recv() => self.process_used_session(event).await?,
-                Some(event) = all_sessions.recv() => self.process_session(event).await?,
-                else => break,
             }
         }
 

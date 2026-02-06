@@ -19,6 +19,7 @@ pub async fn start_discovery(
 
     let (sap, mut events) = Sap::new(subsys).await?;
 
+    let sapc = sap.clone();
     subsys.spawn("sap", |s| async move {
         // TODO fetch current discovery entries
         // TODO track session age and remove old ones
@@ -32,6 +33,11 @@ pub async fn start_discovery(
                 }
             }
         }
+
+        sapc.delete_all_sessions().await?;
+
+        info!("SAP discovery stopped.");
+
         Ok::<(), DiscoveryError>(())
     });
 

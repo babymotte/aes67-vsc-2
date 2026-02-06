@@ -106,12 +106,17 @@ impl Sender {
 
         loop {
             select! {
-                Some(api_msg) = self.api_rx.recv() => {
+                recv = self.api_rx.recv() => if let Some(api_msg) = recv {
                     self.handle_api_message(api_msg).await?;
+                } else {
+                    break;
                 },
-                Ok(recv) = self.rx.read(&self.subsys) => self.send(recv.0, recv.1, recv.2).await?,
+                recv = self.rx.read(&self.subsys) => if let Ok(recv) = recv {
+                    self.send(recv.0, recv.1, recv.2).await?;
+                } else {
+                    break;
+                },
                 _ = self.subsys.shutdown_requested() => break,
-                else => break,
             }
         }
 
