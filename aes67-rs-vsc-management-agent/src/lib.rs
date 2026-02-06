@@ -1351,7 +1351,7 @@ async fn run_rest_api(
 
     let handle = Handle::new();
 
-    let mut server = axum_server::from_tcp(listener.into_std()?);
+    let mut server = axum_server::from_tcp(listener.into_std()?)?;
     server.http_builder().http2().enable_connect_protocol();
 
     let mut serve = Box::pin(
