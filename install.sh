@@ -34,4 +34,4 @@ sudo setcap 'cap_net_bind_service+eip cap_sys_nice+eip' "$BIN_DIR/aes67-rs-jack-
 systemctl --user daemon-reload || exit $?
 systemctl --user enable --now aes67-jack-vsc.service || exit $?
 
-chromium http://localhost:43567 || echo "Open http://localhost:43567 in your browser to web ui!"
+echo "Open http://localhost:43567 in your browser"
