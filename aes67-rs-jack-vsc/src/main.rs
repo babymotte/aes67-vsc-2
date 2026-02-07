@@ -15,10 +15,6 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-mod common;
-mod play;
-mod record;
-mod session_manager;
 mod telemetry;
 
 use aes67_rs_jack_vsc::io_handler::JackIoHandler;
@@ -39,11 +35,17 @@ async fn main() -> miette::Result<()> {
 
     telemetry::init(&app_id, config.telemetry.as_ref()).await?;
 
+    info!("Starting {} …", app_id);
+
+    let app_idc = app_id.clone();
+
     tosub::build_root(app_id.clone())
         .catch_signals()
         .with_timeout(Duration::from_secs(5))
-        .start(|subsys| async move { run(subsys, app_id, args, config).await })
+        .start(|subsys| async move { run(subsys, app_idc, args, config).await })
         .await?;
+
+    info!("{} stopped.", app_id);
 
     Ok(())
 }
@@ -54,16 +56,9 @@ async fn run(
     args: Args,
     config: AppConfig,
 ) -> miette::Result<()> {
-    info!("Starting {} …", id);
+    let io_handler = JackIoHandler::new(&subsys);
 
-    init_management_agent(
-        &subsys,
-        id,
-        config.web_ui.port,
-        args.data_dir,
-        JackIoHandler::new(&subsys),
-    )
-    .await?;
+    init_management_agent(&subsys, id, config.web_ui.port, args.data_dir, io_handler).await?;
 
     subsys.shutdown_requested().await;
 
