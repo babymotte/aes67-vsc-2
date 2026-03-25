@@ -525,14 +525,15 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
     }
 
     async fn announce_session(&mut self, config: SenderConfig) -> Result<(), ManagementAgentError> {
-        Ok(match self.session_info_from_sender_config(&config).await {
+        match self.session_info_from_sender_config(&config).await {
             Ok(info) => {
                 self.discovery.announce_session(info).await?;
             }
             Err(e) => {
                 warn!("Could not create session info from sender config: {}", e);
             }
-        })
+        }
+        Ok(())
     }
 
     async fn revoke_session(&self, id: SessionId) -> Result<(), ManagementAgentError> {
@@ -1040,8 +1041,7 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
         let ip = iface
             .ips
             .iter()
-            .filter(|a| a.is_ipv4())
-            .next()
+            .find(|a| a.is_ipv4())
             .or_else(|| iface.ips.first())
             .map(|a| a.ip())
             .ok_or_else(|| {
@@ -1113,8 +1113,8 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
     async fn find_multicast_address_in_prefix(
         &self,
         id: u64,
-        sessions: &Vec<IpAddr>,
-        assigned_ips: &Vec<IpAddr>,
+        sessions: &[IpAddr],
+        assigned_ips: &[IpAddr],
         prefix: u8,
     ) -> ManagementAgentResult<Option<IpAddr>> {
         for j in 1..=255 {
@@ -1149,7 +1149,7 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
             )
             .await?;
 
-        return Ok::<Option<IpAddr>, ManagementAgentError>(Some(candidate));
+        Ok(Some(candidate))
     }
 }
 
@@ -1225,7 +1225,7 @@ pub async fn init_management_agent(
     .await
     .ok();
 
-    Aes67VscRestApi::new(subsys, app_id, port, worterbuch, io_handler).await?;
+    Aes67VscRestApi::create(subsys, app_id, port, worterbuch, io_handler).await?;
 
     Ok(())
 }
@@ -1235,7 +1235,7 @@ pub async fn init_management_agent(
 pub struct Aes67VscRestApi {}
 
 impl Aes67VscRestApi {
-    pub async fn new<'a>(
+    pub async fn create(
         subsys: &SubsystemHandle,
         app_id: String,
         port: u16,

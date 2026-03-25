@@ -43,7 +43,7 @@ impl Eq for Session {}
 
 impl PartialOrd for Session {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(other.timestamp.cmp(&self.timestamp))
+        Some(self.cmp(other))
     }
 }
 

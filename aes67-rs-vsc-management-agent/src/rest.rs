@@ -6,7 +6,7 @@ use crate::{
 use aes67_rs::formats::SessionId;
 use axum::{Json, extract::State};
 
-pub(crate) async fn app_name<'a>(State(app_id): State<String>) -> String {
+pub(crate) async fn app_name(State(app_id): State<String>) -> String {
     app_id.clone()
 }
 
