@@ -65,10 +65,10 @@ impl ReceiverStats {
                 self.buffer_address = Some(buffer_address);
             }
             RxStats::BufferUnderrun => {
-                // TODO
+                // TODO: no ReceiverStatsReport variant exists yet
             }
             RxStats::InconsistentTimestamp => {
-                // TODO
+                // TODO: no ReceiverStatsReport variant exists yet
             }
             RxStats::PacketReceived {
                 seq,
@@ -154,12 +154,16 @@ impl ReceiverStats {
 
     async fn process_packet_reception(
         &mut self,
-        _seq: Seq,
+        seq: Seq,
         payload_len: usize,
         ingress_time: Frames,
         media_time_at_reception: Frames,
     ) {
-        // TODO detect and monitor late packets
+        if ingress_time > media_time_at_reception {
+            let delay = ingress_time - media_time_at_reception;
+            self.process_late_packet(seq, media_time_at_reception, delay)
+                .await;
+        }
 
         let Some(desc) = &self.config else {
             return;

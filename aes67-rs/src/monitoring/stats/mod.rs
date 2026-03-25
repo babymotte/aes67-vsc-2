@@ -132,8 +132,16 @@ impl StatsActor {
         // TODO
     }
 
-    async fn process_sender_state(&mut self, _s: &SenderState) {
-        // TODO
+    async fn process_sender_state(&mut self, s: &SenderState) {
+        match s {
+            SenderState::Created { .. } => (),
+            SenderState::Renamed { .. } => (),
+            SenderState::Destroyed { id } => {
+                // TODO
+                warn!("sender destroyed: {id}");
+                self.senders.remove(id);
+            }
+        }
     }
 
     async fn process_receiver_state(&mut self, s: &ReceiverState) {
@@ -152,6 +160,7 @@ impl StatsActor {
             ReceiverState::Destroyed { id } => {
                 warn!("receiver destroyed: {id}");
                 // TODO
+                self.receivers.remove(id);
             }
         }
     }
