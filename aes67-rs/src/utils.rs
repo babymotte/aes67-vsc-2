@@ -16,7 +16,8 @@
  */
 
 use miette::IntoDiagnostic;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::{
     any::Any,
     fmt::Debug,
@@ -136,5 +137,22 @@ async fn publish_individual_values(wb: &Worterbuch, key: String, object: Value) 
         }
     } else {
         wb.set_async(key, object).await.ok();
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AtomicF32(AtomicU32);
+
+impl AtomicF32 {
+    pub fn new(val: f32) -> Self {
+        Self(AtomicU32::new(val.to_bits()))
+    }
+
+    pub fn load(&self, ordering: Ordering) -> f32 {
+        f32::from_bits(self.0.load(ordering))
+    }
+
+    pub fn store(&self, val: f32, ordering: Ordering) {
+        self.0.store(val.to_bits(), ordering);
     }
 }

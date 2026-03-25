@@ -97,7 +97,7 @@ pub struct UnixMediaClock {
 }
 
 impl UnixMediaClock {
-    fn system_clock(sample_rate: FramesPerSecond) -> Self {
+    pub fn system_clock(sample_rate: FramesPerSecond) -> Self {
         UnixMediaClock {
             unix_clock: UnixClock::CLOCK_TAI,
             sample_rate,

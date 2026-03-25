@@ -1,0 +1,63 @@
+Next steps:
+ - implement ptime bufffer in JACK senders/decouple ptime from JACK buffer size
+ - move senders (and probably receivers) to their own single-threaded runtime with realtime thread prioriy
+
+Backlog:
+- check if configured receiver sample rates are consistent with VSC sample rate before starting receiver
+- detect and dynamically react to ptime changes in receivers
+- allow dynamic link offset changes in receivers
+- make sure senders cannot be created in a way that allows MTU to be exceeded
+- make origin IP optional
+
+- stopping a receiver crashes the application when receiver is not actually receiving data (potentially because jack is blocked waiting for data indefinitely)
+- if one receiver does not receive data it blocks other receivers (very because jack is blocked waiting for data indefinitely)
+- stopping a receiver sometimes blocks other receivers (maybe also because jack is blocked waiting for data indefinitely)
+    -> requesting data from the receiver should probably not block. Question is how do we then stop JACK from freewheeling?
+     - Maybe we should "block" by repeatedly requesting data in a loop if none is available and after each attampt check if the receiver has been closed in the meantime
+       -> busy spinning probably takes up unnecesarily much CPU time
+     - alternatively limit blocking to a certain amount of time
+       -> looping and re-requesting still necessary if no data was available, but less CPU intensive
+
+
+High level receiver buffer API:
+- one buffer per receiver is created for specific audio format (sample rate, bit depth, channel number)
+- buffer internally stores f32 data
+- buffer is a ring buffer, writing data to the buffer overwrites old data
+- buffer must be large enough that it can contain the link offset multiple times -> what happens if link offset changes?
+- writing to the buffer must never block
+- reading from the buffer can be done in a blocking way (wait for data to be available) or non-blocking (method reports number of written samples per channel)
+- buffer internally deinterlaces channels so data can be queried for individual single channels
+
+// IMPORTANT:
+// send buffer is JACK/ALSA SPECIFIC. It must be re-usable but it must NOT be used in lower level applications like a DSP
+// the general sender API MUST NOT rely on it! To the sender API the buffer must act like a regular producer
+High level sender buffer API:
+- one buffer per sender is created for specific audio format (sample rate, bit depth, channel number)
+- buffer internally stores f32 data
+- buffer is a ring buffer, writing data to the buffer overwrites old data
+- buffer must be large enough that it can contain the send offset multiple times -> what happens if send offset changes?
+- egress time is the time of samples leaving the buffer, not the underlying producer!
+- writing to the buffer never blocks
+- writing to the buffer triggers push of data to sender, which may block
+- data takes and stores deinterlaced data, does the sender accept deinterlaced or only interlaced data?
+
+
+
+
+
+SenderBuffer:
+  fn new(ptime: Milliseconds, audio_format: AudioFormat);
+Producer-facing API:
+  fn provide_data(channel: u32, data: &[u8], egress_time: Frames);
+Consumer-facing API:
+  async fn on_data() -> (Frames, &[u8]); // Triggered in a fixed interval with a timeout
+Config-facing API:
+  async fn set_ptime(ptime: Milliseconds);
+
+
+ReceiverBuffer:
+  fn new(audio_format: AudioFormat)
+Producer-facing API:
+  fn provide_data(channel: u32, data: &[u8], egress_time: Frames);
+Consumer-facing API:
+  fn fetch_data(egress_time: Frames, &mut [u8]) -> usize;

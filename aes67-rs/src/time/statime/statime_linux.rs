@@ -244,7 +244,10 @@ async fn run(
             .send(true)
             .expect("Bmca notification failed");
 
-        let mut bmca_port = main_task_receiver.recv().await.unwrap();
+        let mut bmca_port = main_task_receiver
+            .recv()
+            .await
+            .expect("BMCA port channel closed unexpectedly");
         let mut mut_bmca_ports = vec![&mut bmca_port];
 
         // have all ports so deassert stop
@@ -270,7 +273,10 @@ async fn run(
 
         drop(mut_bmca_ports);
 
-        main_task_sender.send(bmca_port).await.unwrap();
+        main_task_sender
+            .send(bmca_port)
+            .await
+            .expect("Failed to return port after BMCA");
     }
 }
 
@@ -308,7 +314,10 @@ async fn port_task<A: NetworkAddress + PtpTargetAddress>(
     };
 
     loop {
-        let port_in_bmca = port_task_receiver.recv().await.unwrap();
+        let port_in_bmca = port_task_receiver
+            .recv()
+            .await
+            .expect("Port task receiver channel closed unexpectedly");
 
         // handle post-bmca actions
         let (mut port, actions) = port_in_bmca.end_bmca();
@@ -400,7 +409,10 @@ async fn port_task<A: NetworkAddress + PtpTargetAddress>(
         }
 
         let port_in_bmca = port.start_bmca();
-        port_task_sender.send(port_in_bmca).await.unwrap();
+        port_task_sender
+            .send(port_in_bmca)
+            .await
+            .expect("Failed to return port after running");
     }
 }
 
@@ -428,7 +440,10 @@ async fn ethernet_port_task(
     };
 
     loop {
-        let port_in_bmca = port_task_receiver.recv().await.unwrap();
+        let port_in_bmca = port_task_receiver
+            .recv()
+            .await
+            .expect("Port task receiver channel closed unexpectedly");
 
         // Clear out old tlvs if we are not in the master state, so we don't keep em too
         // long.
@@ -517,7 +532,10 @@ async fn ethernet_port_task(
         }
 
         let port_in_bmca = port.start_bmca();
-        port_task_sender.send(port_in_bmca).await.unwrap();
+        port_task_sender
+            .send(port_in_bmca)
+            .await
+            .expect("Failed to return port after running");
     }
 }
 

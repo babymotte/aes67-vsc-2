@@ -19,8 +19,8 @@ use crate::{
     config::adjust_labels_for_channel_count,
     error::ConfigError,
     formats::{
-        self, AudioFormat, FrameFormat, Frames, FramesPerSecond, MilliSeconds, SampleFormat,
-        Seconds, Session, SessionId,
+        self, AudioFormat, FrameFormat, Frames, FramesPerSecond, LinkOffset, MilliSeconds,
+        SampleFormat, Seconds, Session, SessionId,
     },
     time::MICROS_PER_MILLI_F,
 };
@@ -85,9 +85,9 @@ pub struct PartialReceiverConfig {
 impl PartialReceiverConfig {
     pub fn with_sample_rate(sample_rate: FramesPerSecond) -> Self {
         let mut it = Self::default();
-        it.audio_format
-            .as_mut()
-            .map(|af| af.sample_rate = sample_rate);
+        if let Some(af) = it.audio_format.as_mut() {
+            af.sample_rate = sample_rate;
+        }
         it
     }
 
@@ -166,14 +166,14 @@ pub struct ReceiverConfig {
     pub origin_ip: IpAddr,
     pub rtp_offset: u32,
     pub channel_labels: Vec<String>,
-    pub link_offset: MilliSeconds,
+    pub link_offset: LinkOffset,
     #[serde(default)]
     pub delay_calculation_interval: Option<Seconds>,
 }
 
 impl ReceiverConfig {
     pub fn buffer_time(&self) -> MilliSeconds {
-        (self.link_offset * 20.0).max(20.0)
+        (self.link_offset.get() * 20.0).max(20.0)
     }
 }
 
@@ -201,10 +201,9 @@ impl ReceiverConfig {
         )
     }
 
-    #[deprecated = "link offset is a configuration that may change during playout, it is not acceptable to read this from a static object"]
     pub fn frames_in_link_offset(&self) -> usize {
         formats::duration_to_frames(
-            Duration::from_micros((self.link_offset * MICROS_PER_MILLI_F).round() as u64),
+            Duration::from_micros((self.link_offset.get() * MICROS_PER_MILLI_F).round() as u64),
             self.audio_format.sample_rate,
         )
         .round() as usize
@@ -251,9 +250,10 @@ pub struct SessionInfo {
 
 impl From<&SessionInfo> for SessionDescription {
     fn from(value: &SessionInfo) -> Self {
-        let mut sd = SessionDescription::default();
-
-        sd.version = 0;
+        let mut sd = SessionDescription {
+            version: 0,
+            ..Default::default()
+        };
 
         sd.origin.username = "-".to_owned();
         sd.origin.session_id = value.id.id;

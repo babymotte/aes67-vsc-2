@@ -44,6 +44,7 @@ use tracing::{debug, info, instrument, warn};
 use worterbuch_client::Worterbuch;
 
 #[instrument(skip(clock, monitoring, subsys, wb))]
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn start_receiver(
     app_id: String,
     id: String,

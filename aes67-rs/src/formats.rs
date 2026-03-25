@@ -19,9 +19,15 @@ use crate::{
     error::ConfigError,
     receiver::config::ReceiverConfig,
     time::{MICROS_PER_SEC, MILLIS_PER_SEC_F},
+    utils::AtomicF32,
 };
-use serde::{Deserialize, Serialize};
-use std::{fmt, str::FromStr, time::Duration};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::{
+    fmt::{self, Debug},
+    str::FromStr,
+    sync::Arc,
+    time::Duration,
+};
 
 pub type Seconds = u32;
 pub type MilliSeconds = f32;
@@ -32,6 +38,40 @@ pub type BitDepth = u8;
 pub type PayloadType = u8;
 pub type SessionId = u64;
 pub type SessionVersion = u64;
+
+#[derive(Clone)]
+pub struct LinkOffset(pub Arc<AtomicF32>);
+
+impl Debug for LinkOffset {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.get().fmt(f)
+    }
+}
+
+impl From<&LinkOffset> for MilliSeconds {
+    fn from(value: &LinkOffset) -> Self {
+        value.get()
+    }
+}
+
+impl LinkOffset {
+    pub fn get(&self) -> f32 {
+        self.0.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+impl Serialize for LinkOffset {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_f32(self.0.load(std::sync::atomic::Ordering::Relaxed))
+    }
+}
+
+impl<'de> Deserialize<'de> for LinkOffset {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = f32::deserialize(deserializer)?;
+        Ok(LinkOffset(Arc::new(AtomicF32::new(value))))
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Session {

@@ -30,7 +30,7 @@ use tracing::{debug, warn};
 pub struct ReceiverStats {
     id: String,
     tx: mpsc::Sender<Report>,
-    desc: Option<ReceiverConfig>,
+    config: Option<ReceiverConfig>,
     delay_buffer: AverageCalculationBuffer<i64>,
     measured_link_offset: AverageCalculationBuffer<Frames>,
     timestamp_offset: Option<u64>,
@@ -46,7 +46,7 @@ impl ReceiverStats {
         Self {
             id,
             tx,
-            desc: None,
+            config: None,
             buffer_address: None,
             measured_link_offset: AverageCalculationBuffer::new(vec![0; 1000].into()),
             delay_buffer: AverageCalculationBuffer::new(vec![0; 1000].into()),
@@ -61,7 +61,7 @@ impl ReceiverStats {
     pub(crate) async fn process(&mut self, stats: RxStats) {
         match stats {
             RxStats::Started(rx_descriptor, buffer_address) => {
-                self.desc = Some(rx_descriptor);
+                self.config = Some(rx_descriptor);
                 self.buffer_address = Some(buffer_address);
             }
             RxStats::BufferUnderrun => {
@@ -138,7 +138,7 @@ impl ReceiverStats {
         ingress_time: u64,
         media_time_at_reception: u64,
     ) {
-        let Some(desc) = &self.desc else {
+        let Some(desc) = &self.config else {
             return;
         };
         let diff = ingress_time - media_time_at_reception;
@@ -161,7 +161,7 @@ impl ReceiverStats {
     ) {
         // TODO detect and monitor late packets
 
-        let Some(desc) = &self.desc else {
+        let Some(desc) = &self.config else {
             return;
         };
 
@@ -202,7 +202,7 @@ impl ReceiverStats {
     }
 
     async fn process_playout(&mut self, ingress_time: Frames, latest_received_frame: Frames) {
-        let Some(desc) = &self.desc else {
+        let Some(config) = &self.config else {
             return;
         };
 
@@ -214,9 +214,9 @@ impl ReceiverStats {
 
         if let Some(measured_link_offset) = self.measured_link_offset.update(data_ready_since) {
             let link_offset_ms = measured_link_offset as f32 * MILLIS_PER_SEC_F
-                / desc.audio_format.sample_rate as f32;
+                / config.audio_format.sample_rate as f32;
 
-            if link_offset_ms < desc.link_offset {
+            if link_offset_ms < config.link_offset.get() {
                 debug!(
                     "Measured link offset: {measured_link_offset} frames / {link_offset_ms:.1} ms (ok)"
                 );
@@ -306,7 +306,7 @@ impl ReceiverStats {
     }
 
     async fn process_packet_from_wrong_sender(&self, ip: IpAddr) {
-        let Some(desc) = &self.desc else {
+        let Some(desc) = &self.config else {
             return;
         };
         warn!(
@@ -335,7 +335,7 @@ impl ReceiverStats {
     }
 
     async fn process_late_packet(&mut self, seq: Seq, timestamp: u64, delay: Frames) {
-        let Some(desc) = &self.desc else {
+        let Some(desc) = &self.config else {
             return;
         };
 
