@@ -247,24 +247,21 @@ impl Monitoring {
         self.parent.child(id)
     }
 
-    pub async fn vsc_state(&self, state: VscState) {
+    pub fn vsc_state(&self, state: VscState) {
         self.tx
-            .send(MonitoringEvent::State(StateEvent::Vsc(state)))
-            .await
+            .try_send(MonitoringEvent::State(StateEvent::Vsc(state)))
             .ok();
     }
 
-    pub async fn sender_state(&self, state: SenderState) {
+    pub fn sender_state(&self, state: SenderState) {
         self.tx
-            .send(MonitoringEvent::State(StateEvent::Sender(state)))
-            .await
+            .try_send(MonitoringEvent::State(StateEvent::Sender(state)))
             .ok();
     }
 
-    pub async fn receiver_state(&self, state: ReceiverState) {
+    pub fn receiver_state(&self, state: ReceiverState) {
         self.tx
-            .send(MonitoringEvent::State(StateEvent::Receiver(state)))
-            .await
+            .try_send(MonitoringEvent::State(StateEvent::Receiver(state)))
             .ok();
     }
 

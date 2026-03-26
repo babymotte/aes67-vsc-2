@@ -30,7 +30,6 @@ use std::{
     num::NonZeroU32,
     time::Duration,
 };
-use tokio::net::UdpSocket;
 use tracing::{info, instrument};
 
 #[instrument]
@@ -69,14 +68,14 @@ pub fn init_tcp_socket(bind_addr: IpAddr, port: u16, config: SocketConfig) -> Re
 pub fn create_rx_socket(
     config: &ReceiverConfig,
     iface: NetworkInterface,
-) -> ReceiverInternalResult<UdpSocket> {
+) -> ReceiverInternalResult<std::net::UdpSocket> {
     Ok(try_create_rx_socket(config, iface)?)
 }
 
 fn try_create_rx_socket(
     config: &ReceiverConfig,
     iface: NetworkInterface,
-) -> ConfigResult<UdpSocket> {
+) -> ConfigResult<std::net::UdpSocket> {
     // TODO for unicast addresses check if the IP exists on this machine and reject otherwise
     // TODO for IPv4 check if the TTL allows packets to reach this machine and reject otherwise
 
@@ -85,16 +84,16 @@ fn try_create_rx_socket(
         SocketAddr::V6(addr) => create_ipv6_rx_socket(*addr.ip(), iface, addr.port())?,
     };
 
-    socket.set_nonblocking(true)?;
+    socket.set_read_timeout(Some(Duration::from_millis(100)))?;
 
-    Ok(UdpSocket::from_std(socket.into())?)
+    Ok(socket.into())
 }
 
 #[instrument]
 pub fn create_tx_socket(
     target: SocketAddr,
     iface: NetworkInterface,
-) -> SenderInternalResult<UdpSocket> {
+) -> SenderInternalResult<tokio::net::UdpSocket> {
     let has_v4_address = iface.ips.iter().any(|it| it.ip().is_ipv4());
 
     let socket = if has_v4_address {
@@ -110,7 +109,7 @@ pub fn create_tx_socket(
     socket.set_reuse_address(true)?;
     socket.set_nonblocking(true)?;
 
-    Ok(UdpSocket::from_std(socket.into())?)
+    Ok(tokio::net::UdpSocket::from_std(socket.into())?)
 }
 
 #[instrument]

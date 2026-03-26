@@ -281,7 +281,7 @@ pub struct ReceiverBufferConsumer {
 impl ReceiverBufferProducer {
     /// Deinterlace and write audio data into the shared buffer. The buffer is partitioned into equally sized strips,
     /// one for each channel, so that audio data can be retrieved individually per channel.
-    pub async fn write(&mut self, payload: &[u8], ingress_time: Frames) {
+    pub fn write(&mut self, payload: &[u8], ingress_time: Frames) {
         let buf = &mut self.buffer[..];
         let sample_format = &self.config.audio_format.frame_format.sample_format;
         let channels = self.config.audio_format.frame_format.channels;

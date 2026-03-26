@@ -228,7 +228,7 @@ impl VirtualSoundCard {
     async fn run(mut self) {
         let vsc_id = self.name.clone();
 
-        self.monitoring.vsc_state(VscState::VscCreated).await;
+        self.monitoring.vsc_state(VscState::VscCreated);
 
         loop {
             select! {

@@ -1,11 +1,13 @@
-use aes67_rs::time::{MediaClock, UnixMediaClock};
+use aes67_rs::{
+    time::{MediaClock, UnixMediaClock},
+    utils::set_realtime_priority,
+};
 use miette::IntoDiagnostic;
 use std::time::Duration;
-use thread_priority::{ThreadPriority, set_current_thread_priority};
 use timerfd::{SetTimeFlags, TimerFd, TimerState};
 
 pub fn main() -> miette::Result<()> {
-    set_current_thread_priority(ThreadPriority::Max).into_diagnostic()?;
+    set_realtime_priority();
 
     let sr = 48_000;
     let ptime_micros = 125;

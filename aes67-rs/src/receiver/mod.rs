@@ -32,12 +32,22 @@ use crate::{
     },
     socket::create_rx_socket,
     time::{Clock, MediaClock},
-    utils::U32_WRAP,
+    utils::{U32_WRAP, set_realtime_priority},
 };
 use pnet::datalink::NetworkInterface;
 use rtp_rs::{RtpReader, Seq};
-use std::net::SocketAddr;
-use tokio::{net::UdpSocket, select, sync::mpsc};
+use std::{
+    net::{SocketAddr, UdpSocket},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    thread,
+};
+use tokio::{
+    select,
+    sync::{mpsc, oneshot},
+};
 use tosub::SubsystemHandle;
 use tracing::{debug, info, instrument, warn};
 #[cfg(feature = "tokio-metrics")]
@@ -62,11 +72,11 @@ pub(crate) async fn start_receiver(
     let socket = create_rx_socket(&config, iface)?;
 
     let subsystem_name = id.clone();
-    let subsystem = async move |s| {
-        Receiver {
+    let subsystem = async move |s: SubsystemHandle| {
+        let receiver = Receiver {
             id,
             label,
-            subsys: s,
+            subsys: s.clone(),
             config,
             clock,
             api_rx,
@@ -76,14 +86,37 @@ pub(crate) async fn start_receiver(
             socket,
             monitoring,
             tx,
+        };
+
+        let (tx, rx) = oneshot::channel();
+        let exit = Arc::new(AtomicBool::new(false));
+        let exit_clone = exit.clone();
+        let rid = receiver_id.clone();
+
+        thread::spawn(move || {
+            set_realtime_priority();
+            let res = receiver.run(exit_clone);
+            tx.send(res).ok();
+            info!("Receiver thread for '{}' stopped.", rid);
+        });
+
+        select! {
+            _ = s.shutdown_requested() => {
+                info!("Shutdown of receiver '{}' requested via subsystem shutdown.", receiver_id);
+                exit.store(true, Ordering::SeqCst);
+                Ok(())
+            }
+            res = rx => {
+                s.request_local_shutdown();
+                res?
+            }
         }
-        .run()
-        .await
     };
 
-    subsys.spawn(subsystem_name, subsystem);
+    subsys.spawn(subsystem_name.clone(), subsystem);
 
-    info!("Receiver '{receiver_id}' started successfully.");
+    info!("Receiver '{subsystem_name}' started successfully.");
+
     Ok(ReceiverApi::new(api_tx, rx))
 }
 
@@ -103,47 +136,63 @@ struct Receiver {
 }
 
 impl Receiver {
-    async fn run(mut self) -> ReceiverInternalResult<()> {
+    fn run(mut self, exit: Arc<AtomicBool>) -> ReceiverInternalResult<()> {
         let mut receive_buffer = [0; 65_535];
 
         info!("Receiver '{}' started.", self.id);
 
-        self.report_receiver_created(AudioBufferPointer::from_slice(&receive_buffer))
-            .await;
+        self.report_receiver_created(AudioBufferPointer::from_slice(&receive_buffer));
 
-        loop {
-            select! {
-                recv = self.api_rx.recv() => if let Some(api_msg) = recv {
-                    self.handle_api_message(api_msg).await?;
-                } else {
+        while !exit.load(Ordering::SeqCst) {
+            // receive data from socket
+
+            let recv = self.socket.recv_from(&mut receive_buffer);
+
+            match recv {
+                Ok((len, addr)) => {
+                    let time = self.clock.current_media_time()?;
+                    self.rtp_data_received(&receive_buffer[..len], addr, time)?;
+                }
+                Err(e) => {
+                    match e.kind() {
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => {
+                            // this is expected if no one is actually sending data to this multicast group
+                        }
+                        _ => {
+                            warn!(
+                                "Socket receive error: {e:?}, shutting down receiver '{}'.",
+                                self.id
+                            );
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // check for API messages and shutdown requests
+
+            match self.api_rx.try_recv() {
+                Ok(api_msg) => {
+                    self.handle_api_message(api_msg)?;
+                }
+                Err(mpsc::error::TryRecvError::Empty) => {
+                    // no API message, continue
+                }
+                Err(mpsc::error::TryRecvError::Disconnected) => {
                     warn!("API channel closed, shutting down receiver '{}'.", self.id);
                     break;
-                },
-                recv = self.socket.recv_from(&mut receive_buffer) => if let Ok((len, addr)) = recv {
-                    let time = self.clock.current_media_time()?;
-                    self.rtp_data_received(&receive_buffer[..len], addr, time).await?;
-                } else {
-                    warn!("Socket receive error, shutting down receiver '{}'.", self.id);
-                    break;
-                },
-                _ = self.subsys.shutdown_requested() => {
-                    info!("Shutdown of receiver '{}' requested.", self.id);
-                    break;
-                },
+                }
             }
         }
 
-        self.report_receiver_destroyed().await;
+        self.report_receiver_destroyed();
 
         info!("Receiver '{}' stopped.", self.id);
 
         Ok(())
     }
 
-    async fn handle_api_message(
-        &mut self,
-        api_msg: ReceiverApiMessage,
-    ) -> ReceiverInternalResult<()> {
+    fn handle_api_message(&mut self, api_msg: ReceiverApiMessage) -> ReceiverInternalResult<()> {
         match api_msg {
             ReceiverApiMessage::Stop(tx) => {
                 self.subsys.request_local_shutdown();
@@ -153,7 +202,7 @@ impl Receiver {
         Ok(())
     }
 
-    async fn rtp_data_received(
+    fn rtp_data_received(
         &mut self,
         data: &[u8],
         addr: SocketAddr,
@@ -214,12 +263,12 @@ impl Receiver {
         }
 
         if seq_wrapped || self.timestamp_offset.is_none() {
-            self.calibrate_timestamp_offset(ts).await?;
+            self.calibrate_timestamp_offset(ts)?;
         }
 
         if ts_wrapped {
             debug!("RTP timestamp wrapped");
-            self.calibrate_timestamp_offset(ts).await?;
+            self.calibrate_timestamp_offset(ts)?;
         }
 
         self.last_sequence_number = Some(seq);
@@ -233,12 +282,12 @@ impl Receiver {
 
         if ingress_time > media_time_at_reception {
             self.report_time_travelling_packet(media_time_at_reception, &rtp, ingress_time);
-            self.calibrate_timestamp_offset(ts).await?;
+            self.calibrate_timestamp_offset(ts)?;
             // TODO check how far packet is off and if it is save to insert into the buffer
             // return Ok(());
         }
 
-        self.tx.write(rtp.payload(), ingress_time).await;
+        self.tx.write(rtp.payload(), ingress_time);
 
         Ok(())
     }
@@ -249,10 +298,7 @@ impl Receiver {
     }
 
     #[instrument(skip(self))]
-    async fn calibrate_timestamp_offset(
-        &mut self,
-        rtp_timestamp: u32,
-    ) -> ReceiverInternalResult<()> {
+    fn calibrate_timestamp_offset(&mut self, rtp_timestamp: u32) -> ReceiverInternalResult<()> {
         let media_time = self.clock.current_media_time()?;
 
         let local_wrapped_timestamp = (media_time % U32_WRAP) as u32;
@@ -288,15 +334,13 @@ mod monitoring {
     use super::*;
 
     impl Receiver {
-        pub(crate) async fn report_receiver_created(&mut self, buffer: AudioBufferPointer) {
-            self.monitoring
-                .receiver_state(ReceiverState::Created {
-                    id: self.id.clone(),
-                    label: self.label.clone(),
-                    config: self.config.clone(),
-                    address: buffer,
-                })
-                .await;
+        pub(crate) fn report_receiver_created(&mut self, buffer: AudioBufferPointer) {
+            self.monitoring.receiver_state(ReceiverState::Created {
+                id: self.id.clone(),
+                label: self.label.clone(),
+                config: self.config.clone(),
+                address: buffer,
+            });
         }
 
         pub(crate) fn report_packet_received(
@@ -366,12 +410,10 @@ mod monitoring {
                 });
         }
 
-        pub(crate) async fn report_receiver_destroyed(&mut self) {
-            self.monitoring
-                .receiver_state(ReceiverState::Destroyed {
-                    id: self.id.clone(),
-                })
-                .await;
+        pub(crate) fn report_receiver_destroyed(&mut self) {
+            self.monitoring.receiver_state(ReceiverState::Destroyed {
+                id: self.id.clone(),
+            });
         }
     }
 }

@@ -186,14 +186,12 @@ mod monitoring {
 
     impl Sender {
         pub(crate) async fn report_sender_created(&self, buffer: AudioBufferPointer) {
-            self.monitoring
-                .sender_state(SenderState::Created {
-                    id: self.id.clone(),
-                    label: self.label.clone(),
-                    config: self.config.clone(),
-                    address: buffer,
-                })
-                .await;
+            self.monitoring.sender_state(SenderState::Created {
+                id: self.id.clone(),
+                label: self.label.clone(),
+                config: self.config.clone(),
+                address: buffer,
+            });
         }
 
         pub(crate) async fn report_packet_time(&self, ptime_frames: Frames) {
@@ -207,11 +205,9 @@ mod monitoring {
         }
 
         pub(crate) async fn report_sender_destroyed(&self) {
-            self.monitoring
-                .sender_state(SenderState::Destroyed {
-                    id: self.id.clone(),
-                })
-                .await;
+            self.monitoring.sender_state(SenderState::Destroyed {
+                id: self.id.clone(),
+            });
         }
     }
 }
