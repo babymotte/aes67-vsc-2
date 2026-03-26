@@ -4243,9 +4243,9 @@ dependencies = [
 
 [[package]]
 name = "tosub"
-version = "1.0.0"
+version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e66ae3576a29d23249a3149c53d5ea20153b2a032086401963faf5c466504e5c"
+checksum = "fc230d0dc536bf6fbe5a66fe48ecc8d9d7120761f3dae325efcfee2d9680dc5d"
 dependencies = [
  "miette",
  "thiserror 2.0.18",
@@ -5102,9 +5102,9 @@ dependencies = [
 
 [[package]]
 name = "worterbuch"
-version = "1.5.0-rc.1"
+version = "1.5.0-rc.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc3ca5a73ab86c0f5a34da7b0c3399a254066c50f42a8e10b3c97668b2a5a8ec"
+checksum = "2470459b5be6a8563f04e2df2bc7d988dc32ec1112fa402eadc74b5b91d3532a"
 dependencies = [
  "axum",
  "axum-extra",
@@ -5154,9 +5154,9 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-client"
-version = "1.5.0-rc.1"
+version = "1.5.0-rc.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3dec1e4021219fe9add3ed4de0d9a9e337b93ee653358e6d94f23ce3eb63b20e"
+checksum = "069167bcee86072eb4fc01cddcbd5940e05867ebf28bc7fd5bd5576ba5dc0768"
 dependencies = [
  "async-stream",
  "futures-util",
@@ -5172,9 +5172,9 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-common"
-version = "1.5.0-rc.1"
+version = "1.5.0-rc.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f33452c1c8619b70da90037097cef7384b2c97ce3d0e78e5911b23a9bcb8bcff"
+checksum = "880a3925d0f883da01c38c4db0be9ca4b7cbe0534f234c4f4a5139eff7797b74"
 dependencies = [
  "axum",
  "hashbrown 0.16.1",

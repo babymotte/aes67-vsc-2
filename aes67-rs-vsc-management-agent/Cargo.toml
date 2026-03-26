@@ -22,8 +22,8 @@ thiserror = "2.0.17"
 tokio = "1.47.1"
 tosub = "1.0.0"
 tracing = "0.1.41"
-worterbuch = "1.5.0-rc.1"
-worterbuch-client = "1.5.0-rc.1"
+worterbuch = "1.5.0-rc.3"
+worterbuch-client = "1.5.0-rc.3"
 
 [features]
 tokio-metrics = []
