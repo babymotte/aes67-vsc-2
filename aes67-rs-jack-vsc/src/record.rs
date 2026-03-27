@@ -31,6 +31,13 @@ struct State {
     subsys: SubsystemHandle,
 }
 
+impl Drop for State {
+    fn drop(&mut self) {
+        info!("JACK recording stopped.");
+        self.sender.stop();
+    }
+}
+
 pub async fn start_recording(
     app_id: String,
     subsys: SubsystemHandle,
@@ -141,7 +148,9 @@ fn process(state: &mut State, _: &Client, ps: &ProcessScope) -> Control {
 
     let pre_req = Instant::now();
 
-    block_on(state.sender.send(&state.channel_bufs, ingress_time));
+    if let Err(e) = state.sender.send(&state.channel_bufs, ingress_time) {
+        // TODO send to monitoring
+    }
 
     let post_req = Instant::now();
 

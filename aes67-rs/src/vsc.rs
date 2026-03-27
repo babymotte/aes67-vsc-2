@@ -313,7 +313,7 @@ impl VirtualSoundCard {
             return Err(SenderInternalError::NoSuchSender(id));
         };
 
-        api.stop().await;
+        api.stop();
 
         info!("Sender '{id}' successfully destroyed.");
 

@@ -36,6 +36,7 @@ use pnet::datalink::NetworkInterface;
 use serde::de::DeserializeOwned;
 use serde_json::json;
 use std::{
+    any::type_name_of_val,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     path::Path,
     time::Duration,
@@ -44,6 +45,7 @@ use tokio::{
     net::TcpListener,
     select,
     sync::{mpsc, oneshot},
+    time::sleep,
 };
 use tosub::SubsystemHandle;
 use tracing::{error, info, warn};
@@ -602,8 +604,10 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
                 // core (buffer consumer). This ensures the JACK callback can't access
                 // the buffer after the consumer is destroyed.
                 self.io_handler.sender_deleted(id).await?;
+                info!("Revoking session {} …", id);
                 // TODO this needs to happen automatically whenever the sender stops, no matter what caused it (e.g. vsc shutdown)
                 self.revoke_session(id).await?;
+                info!("Destroying sender {} …", id);
                 let res = vsc_api.destroy_sender(id).await;
                 if let Err(e) = res {
                     self.wb

@@ -17,14 +17,15 @@
 
 use crate::{
     buffer::{AudioBufferPointer, SenderBufferProducer},
+    error::SenderInternalResult,
     formats::Frames,
 };
-use tokio::sync::{mpsc, oneshot};
-use tracing::instrument;
+use tokio::sync::mpsc;
+use tracing::{error, instrument};
 
 #[derive(Debug)]
 pub enum SenderApiMessage {
-    Stop(oneshot::Sender<()>),
+    Stop,
 }
 
 #[derive(Debug, Clone)]
@@ -39,13 +40,17 @@ impl SenderApi {
     }
 
     #[instrument(skip(self))]
-    pub async fn stop(&self) {
-        let (tx, rx) = oneshot::channel();
-        self.api_tx.send(SenderApiMessage::Stop(tx)).await.ok();
-        rx.await.ok();
+    pub fn stop(&self) {
+        if let Err(e) = self.api_tx.try_send(SenderApiMessage::Stop) {
+            error!("Failed to send stop message to sender API: {e}");
+        }
     }
 
-    pub async fn send(&mut self, channel_buffers: &[AudioBufferPointer], ingress_time: Frames) {
-        self.tx.write(channel_buffers, ingress_time).await;
+    pub fn send(
+        &mut self,
+        channel_buffers: &[AudioBufferPointer],
+        ingress_time: Frames,
+    ) -> SenderInternalResult<()> {
+        self.tx.write(channel_buffers, ingress_time)
     }
 }

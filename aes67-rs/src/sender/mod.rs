@@ -28,14 +28,24 @@ use crate::{
         config::SenderConfig,
     },
     socket::create_tx_socket,
-    utils::U32_WRAP,
+    utils::{U32_WRAP, set_realtime_priority},
 };
 use pnet::datalink::NetworkInterface;
 use rtp_rs::{RtpPacketBuilder, Seq};
-use std::net::SocketAddr;
-use tokio::{net::UdpSocket, select, sync::mpsc};
+use std::{
+    net::{SocketAddr, UdpSocket},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    thread,
+};
+use tokio::{
+    select,
+    sync::{mpsc, oneshot},
+};
 use tosub::SubsystemHandle;
-use tracing::{info, instrument};
+use tracing::{info, instrument, warn};
 #[cfg(feature = "tokio-metrics")]
 use worterbuch_client::Worterbuch;
 
@@ -57,11 +67,11 @@ pub(crate) async fn start_sender(
     let socket = create_tx_socket(target, iface)?;
 
     let subsystem_name = id.clone();
-    let subsystem = async move |s| {
-        Sender {
+    let subsystem = async move |s: SubsystemHandle| {
+        let sender = Sender {
             id,
             label,
-            subsys: s,
+            subsys: s.clone(),
             config,
             api_rx,
             sequence_number: Seq::from(rand::random::<u16>()),
@@ -71,14 +81,37 @@ pub(crate) async fn start_sender(
             target_address: target,
             monitoring,
             ssrc: rand::random(),
+        };
+
+        let (tx, rx) = oneshot::channel();
+        let exit = Arc::new(AtomicBool::new(false));
+        let exit_clone = exit.clone();
+        let sid = sender_id.clone();
+
+        thread::spawn(move || {
+            set_realtime_priority();
+            let res = sender.run(exit_clone);
+            tx.send(res).ok();
+            info!("Sender thread for '{}' stopped.", sid);
+        });
+
+        select! {
+            _ = s.shutdown_requested() => {
+                info!("Shutdown of sender '{}' requested via subsystem shutdown.", sender_id);
+                exit.store(true, Ordering::SeqCst);
+                Ok(())
+            }
+            res = rx => {
+                s.request_local_shutdown();
+                res?
+            }
         }
-        .run()
-        .await
     };
 
-    subsys.spawn(subsystem_name, subsystem);
+    subsys.spawn(subsystem_name.clone(), subsystem);
 
-    info!("Sender '{sender_id}' started successfully.");
+    info!("Sender '{subsystem_name}' started successfully.");
+
     Ok(SenderApi::new(api_tx, tx))
 }
 
@@ -98,46 +131,52 @@ struct Sender {
 }
 
 impl Sender {
-    async fn run(mut self) -> SenderInternalResult<()> {
+    fn run(mut self, exit: Arc<AtomicBool>) -> SenderInternalResult<()> {
         info!("Sender '{}' started.", self.id);
 
-        self.report_sender_created(AudioBufferPointer::from_slice(&self.rx.buffer))
-            .await;
+        self.report_sender_created(AudioBufferPointer::from_slice(&self.rx.buffer));
 
-        loop {
-            select! {
-                recv = self.api_rx.recv() => if let Some(api_msg) = recv {
-                    self.handle_api_message(api_msg).await?;
-                } else {
+        while !exit.load(Ordering::SeqCst) {
+            // read packet data
+
+            let recv = self.rx.read();
+            if let Ok(recv) = recv {
+                self.send(recv.0, recv.1, recv.2)?;
+            } else {
+                break;
+            }
+
+            match self.api_rx.try_recv() {
+                Ok(api_msg) => {
+                    self.handle_api_message(api_msg)?;
+                }
+                Err(mpsc::error::TryRecvError::Empty) => {
+                    // no API message, continue
+                }
+                Err(mpsc::error::TryRecvError::Disconnected) => {
+                    warn!("API channel closed, shutting down sender '{}'.", self.id);
                     break;
-                },
-                recv = self.rx.read(&self.subsys) => if let Ok(recv) = recv {
-                    self.send(recv.0, recv.1, recv.2).await?;
-                } else {
-                    break;
-                },
-                _ = self.subsys.shutdown_requested() => break,
+                }
             }
         }
 
-        self.report_sender_destroyed().await;
+        self.report_sender_destroyed();
 
         info!("Sender '{}' stopped.", self.id);
 
         Ok(())
     }
 
-    async fn handle_api_message(&mut self, api_msg: SenderApiMessage) -> SenderInternalResult<()> {
+    fn handle_api_message(&mut self, api_msg: SenderApiMessage) -> SenderInternalResult<()> {
         match api_msg {
-            SenderApiMessage::Stop(tx) => {
+            SenderApiMessage::Stop => {
                 self.subsys.request_local_shutdown();
-                tx.send(()).ok();
             }
         }
         Ok(())
     }
 
-    async fn send(
+    fn send(
         &mut self,
         payload_len: usize,
         ptime_frames: Frames,
@@ -148,7 +187,7 @@ impl Sender {
         self.sequence_number = seq.next();
         let timestamp = (ingress_time % U32_WRAP) as u32;
 
-        self.report_packet_time(ptime_frames).await;
+        self.report_packet_time(ptime_frames);
 
         let payload = &self.rx.buffer[..payload_len];
 
@@ -161,15 +200,14 @@ impl Sender {
             .build_into(&mut self.rtp_buffer)
             .map_err(WrappedRtpPacketBuildError)?;
 
-        self.report_packet_size(len).await;
+        self.report_packet_size(len);
 
         if len > 1500 {
             return Err(SenderInternalError::MaxMTUExceeded(len));
         }
 
         self.socket
-            .send_to(&self.rtp_buffer[..len], self.target_address)
-            .await?;
+            .send_to(&self.rtp_buffer[..len], self.target_address)?;
 
         Ok(())
     }
@@ -185,7 +223,7 @@ mod monitoring {
     use super::*;
 
     impl Sender {
-        pub(crate) async fn report_sender_created(&self, buffer: AudioBufferPointer) {
+        pub(crate) fn report_sender_created(&self, buffer: AudioBufferPointer) {
             self.monitoring.sender_state(SenderState::Created {
                 id: self.id.clone(),
                 label: self.label.clone(),
@@ -194,17 +232,17 @@ mod monitoring {
             });
         }
 
-        pub(crate) async fn report_packet_time(&self, ptime_frames: Frames) {
+        pub(crate) fn report_packet_time(&self, ptime_frames: Frames) {
             self.monitoring
                 .sender_stats(TxStats::PacketTime(ptime_frames));
         }
 
-        pub(crate) async fn report_packet_size(&self, packet_size: usize) {
+        pub(crate) fn report_packet_size(&self, packet_size: usize) {
             self.monitoring
                 .sender_stats(TxStats::PacketSize(packet_size));
         }
 
-        pub(crate) async fn report_sender_destroyed(&self) {
+        pub(crate) fn report_sender_destroyed(&self) {
             self.monitoring.sender_state(SenderState::Destroyed {
                 id: self.id.clone(),
             });

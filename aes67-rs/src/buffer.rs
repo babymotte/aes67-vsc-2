@@ -429,7 +429,11 @@ pub struct SenderBufferConsumer {
 // TODO return proper errors
 // TODO generalize start and end indices/packet time
 impl SenderBufferProducer {
-    pub async fn write(&mut self, channel_buffers: &[AudioBufferPointer], ingress_time: Frames) {
+    pub fn write(
+        &mut self,
+        channel_buffers: &[AudioBufferPointer],
+        ingress_time: Frames,
+    ) -> SenderInternalResult<()> {
         let channels = self.config.audio_format.frame_format.channels;
 
         debug_assert_eq!(
@@ -440,7 +444,6 @@ impl SenderBufferProducer {
             channel_buffers.len()
         );
 
-        // TODO cache that?
         let target_bytes_per_sample = self
             .config
             .audio_format
@@ -450,7 +453,7 @@ impl SenderBufferProducer {
 
         let Some(buffer_len) = channel_buffers.first().map(|it| it.len()) else {
             error!("no buffers provided");
-            return;
+            return SenderInternalResult::Err(SenderInternalError::NoBuffersProvided);
         };
 
         let output_len = buffer_len * channels * target_bytes_per_sample;
@@ -483,22 +486,15 @@ impl SenderBufferProducer {
             }
         }
 
-        self.tx
-            .send((output_len, buffer_len as Frames, ingress_time))
-            .await
-            .ok();
+        Ok(self
+            .tx
+            .try_send((output_len, buffer_len as Frames, ingress_time))?)
     }
 }
 
 impl SenderBufferConsumer {
-    pub async fn read(
-        &mut self,
-        subsys: &SubsystemHandle,
-    ) -> SenderInternalResult<(usize, Frames, Frames)> {
-        let received = select! {
-            it = self.rx.recv() => it,
-            _ = subsys.shutdown_requested() => return Err(SenderInternalError::ShutdownTriggered),
-        };
+    pub fn read(&mut self) -> SenderInternalResult<(usize, Frames, Frames)> {
+        let received = self.rx.blocking_recv();
 
         let Some(data) = received else {
             return Err(SenderInternalError::ProducerClosed);

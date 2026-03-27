@@ -26,7 +26,7 @@ use socket2::{
     Domain, InterfaceIndexOrAddress, Protocol as SockProto, SockAddr, Socket, TcpKeepalive, Type,
 };
 use std::{
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, UdpSocket},
     num::NonZeroU32,
     time::Duration,
 };
@@ -68,14 +68,14 @@ pub fn init_tcp_socket(bind_addr: IpAddr, port: u16, config: SocketConfig) -> Re
 pub fn create_rx_socket(
     config: &ReceiverConfig,
     iface: NetworkInterface,
-) -> ReceiverInternalResult<std::net::UdpSocket> {
+) -> ReceiverInternalResult<UdpSocket> {
     Ok(try_create_rx_socket(config, iface)?)
 }
 
 fn try_create_rx_socket(
     config: &ReceiverConfig,
     iface: NetworkInterface,
-) -> ConfigResult<std::net::UdpSocket> {
+) -> ConfigResult<UdpSocket> {
     // TODO for unicast addresses check if the IP exists on this machine and reject otherwise
     // TODO for IPv4 check if the TTL allows packets to reach this machine and reject otherwise
 
@@ -93,7 +93,7 @@ fn try_create_rx_socket(
 pub fn create_tx_socket(
     target: SocketAddr,
     iface: NetworkInterface,
-) -> SenderInternalResult<tokio::net::UdpSocket> {
+) -> SenderInternalResult<UdpSocket> {
     let has_v4_address = iface.ips.iter().any(|it| it.ip().is_ipv4());
 
     let socket = if has_v4_address {
@@ -109,7 +109,7 @@ pub fn create_tx_socket(
     socket.set_reuse_address(true)?;
     socket.set_nonblocking(true)?;
 
-    Ok(tokio::net::UdpSocket::from_std(socket.into())?)
+    Ok(socket.into())
 }
 
 #[instrument]

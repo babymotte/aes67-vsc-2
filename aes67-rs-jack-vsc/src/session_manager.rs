@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, hash_map::Entry},
     path::PathBuf,
+    thread,
 };
 use tokio::{fs, select, sync::mpsc};
 use tosub::SubsystemHandle;
@@ -143,13 +144,17 @@ where
         }
     }
 
-    if let Err(e) = client
-        .deactivate()
-        .into_diagnostic()
-        .wrap_err("Could not deactivate JACK client")
-    {
-        error!("{e:?}");
-    }
+    thread::spawn(move || {
+        eprintln!("Deaktivating JACK client");
+        if let Err(e) = client
+            .deactivate()
+            .into_diagnostic()
+            .wrap_err("Could not deactivate JACK client")
+        {
+            error!("{e:?}");
+        }
+        eprintln!("JACK client deactivated");
+    });
 
     Ok(())
 }

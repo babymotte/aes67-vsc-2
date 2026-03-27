@@ -24,11 +24,14 @@ use std::{
     net::AddrParseError,
 };
 use thiserror::Error;
-use tokio::sync::{oneshot, watch};
+use tokio::sync::{mpsc, oneshot, watch};
 use tracing::error;
 use worterbuch_client::ConnectionError;
 
-use crate::formats::SessionId;
+use crate::{
+    formats::{Frames, SessionId},
+    sender::api::SenderApiMessage,
+};
 
 pub enum ErrorCode {
     WorterbuchError = 0x10,
@@ -141,6 +144,10 @@ pub enum SenderInternalError {
     ChildAppError(#[from] ChildAppError),
     #[error("Sender with ID {0} does not exist.")]
     NoSuchSender(SessionId),
+    #[error("No buffers provided.")]
+    NoBuffersProvided,
+    #[error("Send error: {0}")]
+    TrySendError(#[from] mpsc::error::TrySendError<(usize, Frames, Frames)>),
 }
 
 #[derive(Error, Debug, Diagnostic)]
