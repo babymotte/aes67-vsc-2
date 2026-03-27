@@ -8,6 +8,7 @@ Restart=always
 RestartSec=1
 ExecStart=%h/.local/bin/aes67-rs-jack-vsc --config %h/.config/aes67-jack-vsc/config.yaml --data-dir %h/.local/share/aes67-jack-vsc/data
 Environment="AES67_VSC_WEBROOT_PATH=%h/.local/share/aes67-jack-vsc/html"
+Environment="AES67_VSC_WS_BIND_ADDRESS=0.0.0.0"
 
 [Install]
 WantedBy=default.target

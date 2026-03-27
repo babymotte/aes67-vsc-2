@@ -21,6 +21,8 @@ mkdir -p "$SYSTEMD_DIR" || exit $?
 # clear old files
 rm -rf "$DATA_DIR/html/*"
 
+systemctl --user stop aes67-jack-vsc.service
+
 # copy files
 cp -r "$WEB_APP"/* "$DATA_DIR/html/" || exit $?
 cp "$BIN" "$BIN_DIR" || exit $?
