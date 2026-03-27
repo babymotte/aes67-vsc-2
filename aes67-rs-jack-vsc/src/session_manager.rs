@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, hash_map::Entry},
     path::PathBuf,
-    thread,
 };
 use tokio::{fs, select, sync::mpsc};
 use tosub::SubsystemHandle;

@@ -17,7 +17,7 @@
 
 use crate::{
     error::{ReceiverInternalResult, SenderInternalError, SenderInternalResult},
-    formats::{BufferFormat, Frames, SampleFormat, SampleReader, SampleWriter, frames_to_duration},
+    formats::{BufferFormat, Frames, SampleReader, SampleWriter, frames_to_duration},
     monitoring::Monitoring,
     receiver::{api::DataState, config::ReceiverConfig},
     sender::config::SenderConfig,
