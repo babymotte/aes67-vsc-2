@@ -40,36 +40,50 @@ pub type SessionId = u64;
 pub type SessionVersion = u64;
 
 #[derive(Clone)]
-pub struct LinkOffset(pub Arc<AtomicF32>);
+pub struct MutableDuration(pub Arc<AtomicF32>);
 
-impl Debug for LinkOffset {
+impl Debug for MutableDuration {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.get().fmt(f)
     }
 }
 
-impl From<&LinkOffset> for MilliSeconds {
-    fn from(value: &LinkOffset) -> Self {
+impl From<&MutableDuration> for MilliSeconds {
+    fn from(value: &MutableDuration) -> Self {
         value.get()
     }
 }
 
-impl LinkOffset {
-    pub fn get(&self) -> f32 {
-        self.0.load(std::sync::atomic::Ordering::Relaxed)
+impl FromStr for MutableDuration {
+    type Err = ConfigError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        s.parse::<f32>()
+            .map_err(|_| ConfigError::InvalidPacketTimeFormat(s.to_owned()))
+            .map(|value| MutableDuration(Arc::new(AtomicF32::new(value))))
     }
 }
 
-impl Serialize for LinkOffset {
+impl MutableDuration {
+    pub fn get(&self) -> f32 {
+        self.0.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub fn frames(&self, sample_rate: FramesPerSecond) -> Frames {
+        frames_in_buffer(self.get(), sample_rate)
+    }
+}
+
+impl Serialize for MutableDuration {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_f32(self.0.load(std::sync::atomic::Ordering::Relaxed))
     }
 }
 
-impl<'de> Deserialize<'de> for LinkOffset {
+impl<'de> Deserialize<'de> for MutableDuration {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let value = f32::deserialize(deserializer)?;
-        Ok(LinkOffset(Arc::new(AtomicF32::new(value))))
+        Ok(MutableDuration(Arc::new(AtomicF32::new(value))))
     }
 }
 
@@ -117,10 +131,10 @@ impl AudioFormat {
     }
 
     pub fn samples_per_link_offset_buffer(&self, link_offset: MilliSeconds) -> usize {
-        self.frame_format.channels * self.frames_in_buffer(link_offset)
+        self.frame_format.channels * self.frames_in_buffer(link_offset) as usize
     }
 
-    pub fn frames_in_buffer(&self, buffer_time: MilliSeconds) -> usize {
+    pub fn frames_in_buffer(&self, buffer_time: MilliSeconds) -> Frames {
         frames_in_buffer(buffer_time, self.sample_rate)
     }
 
@@ -390,8 +404,8 @@ pub fn packets_in_link_offset(link_offset: MilliSeconds, packet_time: MilliSecon
     (link_offset / packet_time).round() as usize
 }
 
-pub fn frames_in_buffer(buffer_time: MilliSeconds, sample_rate: FramesPerSecond) -> usize {
-    ((sample_rate as f32 * buffer_time) / MILLIS_PER_SEC_F).round() as usize
+pub fn frames_in_buffer(buffer_time: MilliSeconds, sample_rate: FramesPerSecond) -> Frames {
+    ((sample_rate as f32 * buffer_time) / MILLIS_PER_SEC_F).round() as Frames
 }
 
 pub fn samples_in_buffer(
@@ -399,7 +413,7 @@ pub fn samples_in_buffer(
     sample_rate: FramesPerSecond,
     channels: usize,
 ) -> usize {
-    frames_in_buffer(buffer_time, sample_rate) * channels
+    frames_in_buffer(buffer_time, sample_rate) as usize * channels
 }
 
 pub fn link_offset_buffer_size(
@@ -417,7 +431,7 @@ pub fn samples_per_link_offset_buffer(
     link_offset: MilliSeconds,
     sample_rate: FramesPerSecond,
 ) -> usize {
-    channels * frames_in_buffer(link_offset, sample_rate)
+    channels * frames_in_buffer(link_offset, sample_rate) as usize
 }
 
 pub fn to_link_offset(samples: usize, sample_rate: FramesPerSecond) -> MilliSeconds {

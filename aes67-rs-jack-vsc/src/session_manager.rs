@@ -144,17 +144,13 @@ where
         }
     }
 
-    thread::spawn(move || {
-        eprintln!("Deaktivating JACK client");
-        if let Err(e) = client
-            .deactivate()
-            .into_diagnostic()
-            .wrap_err("Could not deactivate JACK client")
-        {
-            error!("{e:?}");
-        }
-        eprintln!("JACK client deactivated");
-    });
+    if let Err(e) = client
+        .deactivate()
+        .into_diagnostic()
+        .wrap_err("Could not deactivate JACK client")
+    {
+        error!("{e:?}");
+    }
 
     Ok(())
 }

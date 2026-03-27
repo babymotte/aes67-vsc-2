@@ -17,7 +17,7 @@
 
 use crate::{
     error::{ReceiverInternalResult, SenderInternalError, SenderInternalResult},
-    formats::{BufferFormat, Frames, SampleReader, SampleWriter, frames_to_duration},
+    formats::{BufferFormat, Frames, SampleFormat, SampleReader, SampleWriter, frames_to_duration},
     monitoring::Monitoring,
     receiver::{api::DataState, config::ReceiverConfig},
     sender::config::SenderConfig,
@@ -401,14 +401,18 @@ impl ReceiverBufferConsumer {
 }
 
 pub fn sender_buffer_channel(config: SenderConfig) -> (SenderBufferProducer, SenderBufferConsumer) {
-    let (tx, rx) = mpsc::channel(65536);
-    let buffer = vec![0u8; 65536].into_boxed_slice();
+    let (tx, rx) = mpsc::channel((1_000.0 / config.packet_time.get()).ceil() as usize);
+    let buffer = vec![0u8; config.audio_format.bytes_per_buffer(1_000.0)].into_boxed_slice();
     let buffer_pointer = AudioBufferPointer::from_slice(&buffer);
     (
         SenderBufferProducer {
             buffer_pointer,
             config: config.clone(),
             tx,
+            unsent_frames: 0,
+            received_frames: 0,
+            sent_frames: 0,
+            buffer_len: 0,
         },
         SenderBufferConsumer { buffer, rx },
     )
@@ -418,12 +422,16 @@ pub fn sender_buffer_channel(config: SenderConfig) -> (SenderBufferProducer, Sen
 pub struct SenderBufferProducer {
     buffer_pointer: AudioBufferPointer,
     config: SenderConfig,
-    tx: mpsc::Sender<(usize, Frames, Frames)>,
+    tx: mpsc::Sender<(Frames, usize)>,
+    unsent_frames: usize,
+    received_frames: usize,
+    sent_frames: usize,
+    buffer_len: usize,
 }
 
 pub struct SenderBufferConsumer {
     pub buffer: Box<[u8]>,
-    rx: mpsc::Receiver<(usize, Frames, Frames)>,
+    rx: mpsc::Receiver<(Frames, usize)>,
 }
 
 // TODO return proper errors
@@ -431,7 +439,7 @@ pub struct SenderBufferConsumer {
 impl SenderBufferProducer {
     pub fn write(
         &mut self,
-        channel_buffers: &[AudioBufferPointer],
+        channel_buffers: &[(AudioBufferPointer, Option<AudioBufferPointer>)],
         ingress_time: Frames,
     ) -> SenderInternalResult<()> {
         let channels = self.config.audio_format.frame_format.channels;
@@ -451,49 +459,99 @@ impl SenderBufferProducer {
             .sample_format
             .bytes_per_sample();
 
-        let Some(buffer_len) = channel_buffers.first().map(|it| it.len()) else {
+        let Some(buffer_len_frames) = channel_buffers
+            .first()
+            .map(|(h, t)| h.len() + t.as_ref().map(AudioBufferPointer::len).unwrap_or(0))
+        else {
             error!("no buffers provided");
             return SenderInternalResult::Err(SenderInternalError::NoBuffersProvided);
         };
 
-        let output_len = buffer_len * channels * target_bytes_per_sample;
+        let ptime_frames = self.config.ptime_frames() as usize;
+        let available_frames = buffer_len_frames + self.unsent_frames;
+        let spillover_frames = available_frames % ptime_frames;
+        let packets = available_frames / ptime_frames;
 
         // TODO acquire some kind of lock that prevents from writing to de-allocated memory
 
-        unsafe {
-            let audio_buffer = self.buffer_pointer.buffer_mut::<u8>();
+        let offset = self.sent_frames;
+        let packets_sent = offset / ptime_frames;
 
-            for (ch, buf) in channel_buffers.iter().enumerate() {
-                debug_assert_eq!(
-                    buf.len(),
-                    buffer_len,
-                    "provided channel buffers have inconsistent lengths"
+        for (ch, (buf_head, buf_tail)) in channel_buffers.iter().enumerate() {
+            debug_assert_eq!(
+                buf_head.len() + buf_tail.as_ref().map(AudioBufferPointer::len).unwrap_or(0),
+                buffer_len_frames,
+                "provided channel buffers have inconsistent lengths"
+            );
+
+            let head = buf_head.buffer::<f32>();
+            let tail = buf_tail.as_ref().map(|b| b.buffer::<f32>());
+
+            self.write_samples(head, offset, ch, channels, target_bytes_per_sample);
+            if let Some(tail) = tail {
+                self.write_samples(
+                    tail,
+                    offset + head.len(),
+                    ch,
+                    channels,
+                    target_bytes_per_sample,
                 );
-
-                let buf = buf.buffer::<f32>();
-
-                for (sample_index, source_sample) in buf.iter().enumerate() {
-                    let target_index = sample_index * target_bytes_per_sample * channels
-                        + ch * target_bytes_per_sample;
-                    let dest_buf =
-                        &mut audio_buffer[target_index..target_index + target_bytes_per_sample];
-                    self.config
-                        .audio_format
-                        .frame_format
-                        .sample_format
-                        .write_sample(*source_sample, dest_buf);
-                }
             }
         }
 
-        Ok(self
-            .tx
-            .try_send((output_len, buffer_len as Frames, ingress_time))?)
+        for i in 0..packets {
+            self.tx.try_send((
+                ingress_time + i as Frames * ptime_frames as Frames,
+                packets_sent + i,
+            ))?;
+        }
+
+        let buffer_size_changed = self.buffer_len != 0 && self.buffer_len != buffer_len_frames;
+
+        if spillover_frames == 0 || buffer_size_changed {
+            self.received_frames = 0;
+            self.sent_frames = 0;
+            self.unsent_frames = 0;
+        } else {
+            self.received_frames += buffer_len_frames;
+            self.sent_frames += packets * ptime_frames;
+            self.unsent_frames = spillover_frames;
+        }
+
+        self.buffer_len = buffer_len_frames;
+
+        Ok(())
+    }
+
+    fn write_samples(
+        &mut self,
+        source: &[f32],
+        offset: usize,
+        ch: usize,
+        channels: usize,
+        target_bytes_per_sample: usize,
+    ) {
+        unsafe {
+            let audio_buffer = self.buffer_pointer.buffer_mut::<u8>();
+
+            for (sample_index, source_sample) in source.iter().enumerate() {
+                let start_index = (sample_index + offset) * target_bytes_per_sample * channels
+                    + ch * target_bytes_per_sample;
+                let end_index = start_index + target_bytes_per_sample;
+
+                let dest_buf = &mut audio_buffer[start_index..end_index];
+                self.config
+                    .audio_format
+                    .frame_format
+                    .sample_format
+                    .write_sample(*source_sample, dest_buf);
+            }
+        }
     }
 }
 
 impl SenderBufferConsumer {
-    pub fn read(&mut self) -> SenderInternalResult<(usize, Frames, Frames)> {
+    pub fn read(&mut self) -> SenderInternalResult<(Frames, usize)> {
         let received = self.rx.blocking_recv();
 
         let Some(data) = received else {

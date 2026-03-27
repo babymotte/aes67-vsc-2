@@ -8,7 +8,6 @@ use aes67_rs::{
     sender::{api::SenderApi, config::SenderConfig},
     time::{Clock, MILLIS_PER_SEC_F},
 };
-use futures_lite::future::block_on;
 use jack::{
     AudioIn, Client, ClientOptions, Control, Port, ProcessScope, contrib::ClosureProcessHandler,
 };
@@ -22,11 +21,9 @@ struct State {
     app_id: String,
     sender: SenderApi,
     ports: Vec<Port<AudioIn>>,
-    channel_bufs: Box<[AudioBufferPointer]>,
+    channel_bufs: Box<[(AudioBufferPointer, Option<AudioBufferPointer>)]>,
     clock: JackClock,
     send_buffer: Box<[f32]>,
-    #[deprecated = "derive buffer position from media time"]
-    send_buf_pos: usize,
     sample_rate: u32,
     subsys: SubsystemHandle,
 }
@@ -66,8 +63,7 @@ pub async fn start_recording(
         );
     }
 
-    let send_buffer_len =
-        config.audio_format.sample_rate as usize * config.audio_format.frame_format.channels;
+    let send_buffer_len = config.audio_format.samples_per_link_offset_buffer(1_000.0);
     let send_buffer = vec![0.0; send_buffer_len].into();
 
     let (tx, notifications) = mpsc::channel(1024);
@@ -78,13 +74,12 @@ pub async fn start_recording(
         sender,
         ports,
         channel_bufs: vec![
-            AudioBufferPointer::new(0, 0);
+            (AudioBufferPointer::new(0, 0), None);
             config.audio_format.frame_format.channels
         ]
         .into(),
         clock: JackClock::new(clock),
         send_buffer,
-        send_buf_pos: 0,
         sample_rate: config.audio_format.sample_rate,
         subsys: subsys.clone(),
     };
@@ -137,13 +132,24 @@ fn process(state: &mut State, _: &Client, ps: &ProcessScope) -> Control {
     for (ch, (port, send_buf)) in state.ports.iter().zip(send_buffers).enumerate() {
         let port_buf = port.as_slice(ps);
 
-        let start_index = state.send_buf_pos;
-        let end_index = start_index + ps.n_frames() as usize;
-
-        let send_buf_slice = &mut send_buf[start_index..end_index];
-        send_buf_slice.copy_from_slice(port_buf);
-
-        state.channel_bufs[ch] = AudioBufferPointer::from_slice(send_buf_slice);
+        let start_index = ingress_time as usize % send_buf.len();
+        let mut end_index = start_index + port_buf.len();
+        if end_index > send_buf.len() {
+            end_index %= send_buf.len();
+            let pivot = port_buf.len() - end_index;
+            send_buf[start_index..].copy_from_slice(&port_buf[..pivot]);
+            send_buf[..end_index].copy_from_slice(&port_buf[pivot..]);
+            state.channel_bufs[ch] = (
+                AudioBufferPointer::from_slice(&send_buf[start_index..]),
+                Some(AudioBufferPointer::from_slice(&send_buf[..end_index])),
+            );
+        } else {
+            send_buf[start_index..end_index].copy_from_slice(port_buf);
+            state.channel_bufs[ch] = (
+                AudioBufferPointer::from_slice(&send_buf[start_index..end_index]),
+                None,
+            );
+        }
     }
 
     let pre_req = Instant::now();
@@ -154,16 +160,14 @@ fn process(state: &mut State, _: &Client, ps: &ProcessScope) -> Control {
 
     let post_req = Instant::now();
 
-    state.send_buf_pos = (state.send_buf_pos + ps.n_frames() as usize) % state.sample_rate as usize;
-
     // TODO send to monitoring
 
     let _total = post_req.duration_since(start).as_micros();
     let _req = post_req.duration_since(pre_req).as_micros();
 
-    // if total > 100 {
-    //     eprintln!("latency record req: {req} µs");
-    //     eprintln!("latency record total: {total} µs");
+    // if _total > 100 {
+    //     eprintln!("latency record req: {_req} µs");
+    //     eprintln!("latency record total: {_total} µs");
     // }
 
     Control::Continue

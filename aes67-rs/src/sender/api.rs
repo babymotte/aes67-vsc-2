@@ -48,7 +48,7 @@ impl SenderApi {
 
     pub fn send(
         &mut self,
-        channel_buffers: &[AudioBufferPointer],
+        channel_buffers: &[(AudioBufferPointer, Option<AudioBufferPointer>)],
         ingress_time: Frames,
     ) -> SenderInternalResult<()> {
         self.tx.write(channel_buffers, ingress_time)

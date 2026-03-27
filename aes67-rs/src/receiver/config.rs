@@ -19,7 +19,7 @@ use crate::{
     config::adjust_labels_for_channel_count,
     error::ConfigError,
     formats::{
-        self, AudioFormat, FrameFormat, Frames, FramesPerSecond, LinkOffset, MilliSeconds,
+        self, AudioFormat, FrameFormat, Frames, FramesPerSecond, MilliSeconds, MutableDuration,
         SampleFormat, Seconds, Session, SessionId,
     },
     time::MICROS_PER_MILLI_F,
@@ -166,7 +166,7 @@ pub struct ReceiverConfig {
     pub origin_ip: IpAddr,
     pub rtp_offset: u32,
     pub channel_labels: Vec<String>,
-    pub link_offset: LinkOffset,
+    pub link_offset: MutableDuration,
     #[serde(default)]
     pub delay_calculation_interval: Option<Seconds>,
 }
@@ -240,7 +240,7 @@ pub struct SessionInfo {
     pub channels: usize,
     pub sample_format: SampleFormat,
     pub sample_rate: FramesPerSecond,
-    pub packet_time: MilliSeconds,
+    pub packet_time: MutableDuration,
     pub origin_ip: IpAddr,
     pub channel_labels: Vec<String>,
     pub rtp_offset: u32,
@@ -324,7 +324,7 @@ impl From<&SessionInfo> for SessionDescription {
         ));
         media.attributes.push(Attribute::new(
             "ptime".to_owned(),
-            Some(value.packet_time.to_string()),
+            Some(value.packet_time.get().to_string()),
         ));
         media.attributes.push(Attribute::new(
             "ts-refclk".to_owned(),

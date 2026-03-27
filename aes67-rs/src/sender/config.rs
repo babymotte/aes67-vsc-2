@@ -16,7 +16,8 @@
  */
 
 use crate::formats::{
-    AudioFormat, FrameFormat, MilliSeconds, PayloadType, SampleFormat, SessionId, SessionVersion,
+    AudioFormat, FrameFormat, Frames, MilliSeconds, MutableDuration, PayloadType, SampleFormat,
+    SessionId, SessionVersion,
 };
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
@@ -60,7 +61,17 @@ pub struct SenderConfig {
     pub label: String,
     pub audio_format: AudioFormat,
     pub target: SocketAddr,
-    pub packet_time: MilliSeconds,
+    pub packet_time: MutableDuration,
     pub payload_type: PayloadType,
     pub channel_labels: Vec<String>,
+}
+
+impl SenderConfig {
+    pub fn ptime_frames(&self) -> Frames {
+        self.packet_time.frames(self.audio_format.sample_rate)
+    }
+
+    pub fn send_buffer_len(&self) -> usize {
+        self.audio_format.bytes_per_buffer(self.packet_time.get())
+    }
 }

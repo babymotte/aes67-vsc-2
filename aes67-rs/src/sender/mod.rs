@@ -138,10 +138,9 @@ impl Sender {
 
         while !exit.load(Ordering::SeqCst) {
             // read packet data
-
             let recv = self.rx.read();
-            if let Ok(recv) = recv {
-                self.send(recv.0, recv.1, recv.2)?;
+            if let Ok((ingress_time, slot_index)) = recv {
+                self.send(ingress_time, slot_index)?;
             } else {
                 break;
             }
@@ -176,20 +175,18 @@ impl Sender {
         Ok(())
     }
 
-    fn send(
-        &mut self,
-        payload_len: usize,
-        ptime_frames: Frames,
-        ingress_time: Frames,
-    ) -> SenderInternalResult<()> {
+    fn send(&mut self, ingress_time: Frames, slot_index: usize) -> SenderInternalResult<()> {
+        let payload_len = self.config.send_buffer_len();
         let payload_type = self.config.payload_type;
         let seq = self.sequence_number;
         self.sequence_number = seq.next();
         let timestamp = (ingress_time % U32_WRAP) as u32;
 
-        self.report_packet_time(ptime_frames);
+        self.report_packet_time(self.config.ptime_frames());
 
-        let payload = &self.rx.buffer[..payload_len];
+        let start_index = slot_index * payload_len;
+        let end_index = start_index + payload_len;
+        let payload = &self.rx.buffer[start_index..end_index];
 
         let len = RtpPacketBuilder::new()
             .payload_type(payload_type)

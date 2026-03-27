@@ -2,7 +2,7 @@
 
 systemctl --user stop aes67-jack-vsc.service
 . .env
-pw-metadata -n settings 0 clock.force-quantum 48
+pw-metadata -n settings 0 clock.force-quantum 96
 # RUSTFLAGS="--cfg tokio_unstable" cargo build --package aes67-rs-jack-vsc --features=tokio-console,tokio-metrics || exit $?
 cargo build --package aes67-rs-jack-vsc || exit $?
 sudo setcap 'cap_net_bind_service+eip cap_sys_nice+eip' ./target/debug/aes67-rs-jack-vsc || exit $?

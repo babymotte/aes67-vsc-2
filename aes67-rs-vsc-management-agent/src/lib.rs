@@ -36,7 +36,6 @@ use pnet::datalink::NetworkInterface;
 use serde::de::DeserializeOwned;
 use serde_json::json;
 use std::{
-    any::type_name_of_val,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     path::Path,
     time::Duration,
@@ -45,7 +44,6 @@ use tokio::{
     net::TcpListener,
     select,
     sync::{mpsc, oneshot},
-    time::sleep,
 };
 use tosub::SubsystemHandle;
 use tracing::{error, info, warn};
@@ -1009,7 +1007,7 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
         let channels = config.audio_format.frame_format.channels;
         let sample_format = config.audio_format.frame_format.sample_format;
         let sample_rate = config.audio_format.sample_rate;
-        let packet_time = config.packet_time;
+        let packet_time = config.packet_time.clone();
         let origin_ip = self.local_ip(&iface).await?;
         let channel_labels = config.channel_labels.clone();
         let rtp_offset = 0;

@@ -15,6 +15,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+use crate::formats::{Frames, SessionId};
 use axum::{http::StatusCode, response::IntoResponse};
 use miette::Diagnostic;
 use rtp_rs::{RtpPacketBuildError, RtpReaderError};
@@ -27,11 +28,6 @@ use thiserror::Error;
 use tokio::sync::{mpsc, oneshot, watch};
 use tracing::error;
 use worterbuch_client::ConnectionError;
-
-use crate::{
-    formats::{Frames, SessionId},
-    sender::api::SenderApiMessage,
-};
 
 pub enum ErrorCode {
     WorterbuchError = 0x10,
@@ -147,7 +143,7 @@ pub enum SenderInternalError {
     #[error("No buffers provided.")]
     NoBuffersProvided,
     #[error("Send error: {0}")]
-    TrySendError(#[from] mpsc::error::TrySendError<(usize, Frames, Frames)>),
+    TrySendError(#[from] mpsc::error::TrySendError<(Frames, usize)>),
 }
 
 #[derive(Error, Debug, Diagnostic)]
@@ -198,6 +194,8 @@ pub enum ConfigError {
     ClockError(#[from] ClockError),
     #[error("Backend not configured correctly: {0}")]
     BackendMisconfigured(String),
+    #[error("Invalid packet time: {0}")]
+    InvalidPacketTimeFormat(String),
 }
 
 #[derive(Error, Debug, Diagnostic)]
