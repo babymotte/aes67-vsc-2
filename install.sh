@@ -30,7 +30,19 @@ cp ./config.yaml "$CONFIG_DIR" || exit $?
 cp ./systemd/aes67-jack-vsc.service "$SYSTEMD_DIR" || exit $?
 
 # set permissions
-sudo setcap 'cap_net_bind_service+eip cap_sys_nice+eip' "$BIN_DIR/aes67-rs-jack-vsc" || exit $?
+sudo setcap 'cap_net_bind_service+ep cap_sys_nice+ep cap_sys_time+ep cap_net_admin+ep' "$BIN_DIR/aes67-rs-jack-vsc" || exit $?
+
+# create ptp group
+sudo groupadd -f ptp || exit $?
+
+# add udev rules
+sudo tee /etc/udev/rules.d/99-ptp.rules < ./udev/99-ptp.rules || exit $?
+
+# reload udev rules
+sudo udevadm control --reload-rules && sudo udevadm trigger || exit $?
+
+sudo usermod -aG ptp $USER || exit $?
+sudo usermod -aG audio $USER || exit $?
 
 # enable service
 systemctl --user daemon-reload || exit $?

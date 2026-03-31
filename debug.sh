@@ -8,7 +8,7 @@ systemctl --user stop aes67-jack-vsc.service
 
 # for _ in {1..999}; do
     cargo build --package aes67-rs-jack-vsc || exit $?
-    sudo setcap 'cap_net_bind_service+eip cap_sys_nice+eip' ./target/debug/aes67-rs-jack-vsc || exit $?
+    sudo setcap 'cap_net_bind_service+ep cap_sys_nice+ep cap_sys_time+ep cap_net_admin+ep' ./target/debug/aes67-rs-jack-vsc || exit $?
     RUST_BACKTRACE=1 RUST_LOG="aes67_rs_ui=warn,aes67_rs_jack_vsc=warn,aes67_rs::monitoring=warn,statime=warn,info" ./target/debug/aes67-rs-jack-vsc --config ./config.yaml --data-dir ./data
 # done
 

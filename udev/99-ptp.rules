@@ -1,0 +1,1 @@
+KERNEL=="ptp*", GROUP="ptp", MODE="0660"
