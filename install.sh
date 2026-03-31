@@ -32,17 +32,16 @@ cp ./systemd/aes67-jack-vsc.service "$SYSTEMD_DIR" || exit $?
 # set permissions
 sudo setcap 'cap_net_bind_service+ep cap_sys_nice+ep cap_sys_time+ep cap_net_admin+ep' "$BIN_DIR/aes67-rs-jack-vsc" || exit $?
 
-# create ptp group
+# create ptp and audio groups
 sudo groupadd -f ptp || exit $?
 
 # add udev rules
-sudo tee /etc/udev/rules.d/99-ptp.rules < ./udev/99-ptp.rules || exit $?
+sudo cp ./udev/99-ptp.rules /etc/udev/rules.d/99-ptp.rules || exit $?
 
 # reload udev rules
 sudo udevadm control --reload-rules && sudo udevadm trigger || exit $?
 
 sudo usermod -aG ptp $USER || exit $?
-sudo usermod -aG audio $USER || exit $?
 
 # enable service
 systemctl --user daemon-reload || exit $?
