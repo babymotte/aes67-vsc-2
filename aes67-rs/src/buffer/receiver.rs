@@ -18,16 +18,12 @@
 use crate::{
     buffer::AudioBufferPointer,
     error::ReceiverInternalResult,
-    formats::{Frames, SampleReader, frames_to_duration},
+    formats::{Frames, SampleReader},
     monitoring::Monitoring,
     receiver::config::ReceiverConfig,
 };
-use std::{
-    fmt::Debug,
-    time::{Duration, Instant},
-};
-use tokio::{select, sync::watch};
-use tosub::SubsystemHandle;
+use std::{fmt::Debug, time::Duration};
+use tokio::sync::watch;
 use tracing::{debug, warn};
 
 pub fn receiver_buffer_channel(
@@ -68,6 +64,12 @@ pub struct ReceiverBufferConsumer {
     monitoring: Monitoring,
 }
 
+pub enum ReadResult {
+    Ok(usize),
+    NotReady(usize),
+    TooLate,
+}
+
 impl ReceiverBufferProducer {
     /// Deinterlace and write audio data into the shared buffer. The buffer is partitioned into equally sized strips,
     /// one for each channel, so that audio data can be retrieved individually per channel.
@@ -104,24 +106,13 @@ impl ReceiverBufferProducer {
 }
 
 impl ReceiverBufferConsumer {
-    /// Read data from the shared buffer. This function does not block, but might read less than a full buffer's worth of data if the requested data is not yet available.
-    /// The returned usize indicates how many frames were read.
-    pub fn try_read<'a>(
-        &mut self,
-        buffers: impl Iterator<Item = Option<&'a mut [f32]>>,
-        ingress_time: Frames,
-        subsys: &SubsystemHandle,
-    ) -> ReceiverInternalResult<usize> {
-        todo!()
-    }
-
     /// Read data from the shared buffer. Before reading, this function will block until the requested data is available.
-    pub async fn read<'a>(
+    pub fn read<'a>(
         &mut self,
         buffers: impl Iterator<Item = Option<&'a mut [f32]>>,
         ingress_time: Frames,
-        subsys: &SubsystemHandle,
-    ) -> ReceiverInternalResult<bool> {
+        buffer_size: usize,
+    ) -> ReceiverInternalResult<ReadResult> {
         let buf = self.buffer_pointer.buffer::<f32>();
 
         let mut latest_received_frame = 0;
@@ -131,33 +122,26 @@ impl ReceiverBufferConsumer {
                 continue;
             };
 
+            debug_assert_eq!(
+                buffer_size,
+                output_buffer.len(),
+                "expected buffer of length {}, but got buffer of length {}",
+                buffer_size,
+                output_buffer.len()
+            );
+
             let last_requested_frame = ingress_time + output_buffer.len() as Frames - 1;
             latest_received_frame = *self.rx.borrow();
 
+            // TODO allow partial buffer read?
+
             if latest_received_frame < last_requested_frame {
+                let missing = last_requested_frame - latest_received_frame;
                 debug!(
-                    "Requested frame {} has not been received yet (latest received frame is {}, need to wait for {} frames/{} µs).",
-                    last_requested_frame,
-                    latest_received_frame,
-                    last_requested_frame - latest_received_frame,
-                    frames_to_duration(
-                        last_requested_frame - latest_received_frame,
-                        self.config.audio_format.sample_rate
-                    )
-                    .as_micros()
+                    "Requested frame {} has not been received yet (latest received frame is {}, need to wait for {} frames).",
+                    last_requested_frame, latest_received_frame, missing,
                 );
-                let wait_start = Instant::now();
-
-                select! {
-                    lrf = self.rx.wait_for(|f| f >= &last_requested_frame) => latest_received_frame = *lrf?,
-                    _ = subsys.shutdown_requested() => return Ok(false),
-                }
-
-                let wait_end = Instant::now();
-                debug!(
-                    "Waited for data for {} µs.",
-                    (wait_end - wait_start).as_micros()
-                );
+                return Ok(ReadResult::NotReady(missing as usize));
             }
 
             let oldest_frame_in_buffer =
@@ -170,7 +154,7 @@ impl ReceiverBufferConsumer {
                     oldest_frame_in_buffer,
                     oldest_frame_in_buffer - ingress_time
                 );
-                return Ok(false);
+                return Ok(ReadResult::TooLate);
             }
 
             let channels = self.config.audio_format.frame_format.channels;
@@ -197,7 +181,7 @@ impl ReceiverBufferConsumer {
             self.report_playout(ingress_time, latest_received_frame);
         }
 
-        Ok(true)
+        Ok(ReadResult::Ok(buffer_size))
     }
 }
 

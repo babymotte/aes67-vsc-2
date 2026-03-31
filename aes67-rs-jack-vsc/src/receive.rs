@@ -3,6 +3,8 @@ use crate::{
     session_manager::{SessionManagerNotificationHandler, start_session_manager},
 };
 use aes67_rs::{
+    buffer::receiver::ReadResult,
+    formats::{Frames, frames_to_duration},
     monitoring::Monitoring,
     receiver::{api::ReceiverApi, config::ReceiverConfig},
     time::{Clock, MILLIS_PER_SEC_F},
@@ -11,8 +13,8 @@ use jack::{
     AudioOut, Client, ClientOptions, Control, Port, ProcessScope, contrib::ClosureProcessHandler,
 };
 use miette::IntoDiagnostic;
-use std::time::{Duration, Instant};
-use tokio::{runtime::Handle, sync::mpsc, time::timeout};
+use std::{thread, time::Instant};
+use tokio::sync::mpsc;
 use tosub::SubsystemHandle;
 use tracing::{error, info};
 
@@ -24,7 +26,6 @@ struct State {
     muted: bool,
     monitoring: Monitoring,
     subsys: SubsystemHandle,
-    async_runtime: Handle,
 }
 
 impl State {}
@@ -71,7 +72,6 @@ pub async fn start_playout(
         muted: false,
         monitoring,
         subsys: subsys.clone(),
-        async_runtime: Handle::current(),
     };
     let process_handler =
         ClosureProcessHandler::with_state(process_handler_state, process, buffer_change);
@@ -122,32 +122,45 @@ fn process(state: &mut State, _: &Client, ps: &ProcessScope) -> Control {
     let link_offset_frames = state.config.frames_in_link_offset() as u64;
     let ingress_time = playout_time - link_offset_frames;
 
-    let buffers = state.ports.iter_mut().map(|p| Some(p.as_mut_slice(ps)));
-
     let pre_req = Instant::now();
 
-    match state.async_runtime.block_on(async {
-        timeout(
-            Duration::from_millis(100),
-            state.receiver.receive(buffers, ingress_time, &state.subsys),
-        )
-        .await
-    }) {
-        Ok(Ok(true)) => {
-            unmuted(state);
-        }
-        Ok(Ok(false)) => {
-            muted(state, ps);
-        }
-        Ok(Err(e)) => {
-            error!("Error receiving audio data: {e}");
-            return Control::Quit;
-        }
-        Err(_) => {
-            if !state.muted {
-                error!("Receiving audio data timed out.");
+    loop {
+        let buffers = state.ports.iter_mut().map(|p| Some(p.as_mut_slice(ps)));
+
+        match state
+            .receiver
+            .receive(buffers, ingress_time, ps.n_frames() as usize)
+        {
+            Ok(ReadResult::Ok(_)) => {
+                unmuted(state);
+                break;
             }
-            muted(state, ps);
+            Ok(ReadResult::NotReady(missing)) => {
+                // clock is likely not synced yet
+                if missing > ps.n_frames() as usize {
+                    muted(state, ps);
+                    break;
+                }
+
+                // yield thread and re-try
+
+                thread::sleep(frames_to_duration(
+                    missing as Frames / 10,
+                    state.config.audio_format.sample_rate,
+                ));
+                continue;
+            }
+            Ok(ReadResult::TooLate) => {
+                muted(state, ps);
+                break;
+            }
+            Err(_) => {
+                if !state.muted {
+                    error!("Receiving audio data timed out.");
+                }
+                muted(state, ps);
+                break;
+            }
         }
     }
 

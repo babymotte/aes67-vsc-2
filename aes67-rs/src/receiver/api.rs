@@ -16,10 +16,11 @@
  */
 
 use crate::{
-    buffer::receiver::ReceiverBufferConsumer, error::ReceiverInternalResult, formats::Frames,
+    buffer::receiver::{ReadResult, ReceiverBufferConsumer},
+    error::ReceiverInternalResult,
+    formats::Frames,
 };
 use tokio::sync::{mpsc, oneshot};
-use tosub::SubsystemHandle;
 use tracing::instrument;
 
 #[derive(Debug, PartialEq)]
@@ -55,21 +56,12 @@ impl ReceiverApi {
         rx.await.ok();
     }
 
-    pub async fn receive<'a>(
+    pub fn receive<'a>(
         &mut self,
         buffers: impl Iterator<Item = Option<&'a mut [f32]>>,
         ingress_time: Frames,
-        subsys: &SubsystemHandle,
-    ) -> ReceiverInternalResult<bool> {
-        self.rx.read(buffers, ingress_time, subsys).await
-    }
-
-    pub fn try_receive<'a>(
-        &mut self,
-        buffers: impl Iterator<Item = Option<&'a mut [f32]>>,
-        ingress_time: Frames,
-        subsys: &SubsystemHandle,
-    ) -> ReceiverInternalResult<usize> {
-        self.rx.try_read(buffers, ingress_time, subsys)
+        buffer_size: usize,
+    ) -> ReceiverInternalResult<ReadResult> {
+        self.rx.read(buffers, ingress_time, buffer_size)
     }
 }
