@@ -373,6 +373,7 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
                 .wrap_err_with(|| format!("Could not autostart sender {}", id))
             {
                 error!("{e}");
+                eprintln!("{e:?}");
             }
         }
 
@@ -402,6 +403,7 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
                 .wrap_err_with(|| format!("Could not autostart receiver {}", id))
             {
                 error!("{e}");
+                eprintln!("{e:?}");
             }
         };
         Ok(())
@@ -1265,6 +1267,7 @@ impl Aes67VscRestApi {
                 .wrap_err("Could not start AES67-VSC REST API")
             {
                 error!("{e}");
+                eprintln!("{e:?}");
             };
         }
 
