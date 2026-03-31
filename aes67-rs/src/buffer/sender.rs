@@ -23,7 +23,6 @@ use crate::{
 };
 use std::fmt::Debug;
 use tokio::sync::mpsc;
-use tracing::error;
 
 pub fn sender_buffer_channel(config: SenderConfig) -> (SenderBufferProducer, SenderBufferConsumer) {
     let (tx, rx) = mpsc::channel((1_000.0 / config.packet_time.get()).ceil() as usize);
@@ -37,7 +36,6 @@ pub fn sender_buffer_channel(config: SenderConfig) -> (SenderBufferProducer, Sen
             unsent_frames: 0,
             received_frames: 0,
             sent_frames: 0,
-            buffer_len: 0,
         },
         SenderBufferConsumer { buffer, rx },
     )
@@ -51,7 +49,6 @@ pub struct SenderBufferProducer {
     unsent_frames: usize,
     received_frames: usize,
     sent_frames: usize,
-    buffer_len: usize,
 }
 
 pub struct SenderBufferConsumer {
@@ -60,22 +57,10 @@ pub struct SenderBufferConsumer {
 }
 
 // TODO return proper errors
-// TODO generalize start and end indices/packet time
-impl SenderBufferProducer {
-    pub fn write(
-        &mut self,
-        channel_buffers: &[(AudioBufferPointer, Option<AudioBufferPointer>)],
-        ingress_time: Frames,
-    ) -> SenderInternalResult<()> {
-        let channels = self.config.audio_format.frame_format.channels;
 
-        debug_assert_eq!(
-            channels,
-            channel_buffers.len(),
-            "expected {} buffers, but got {}",
-            channels,
-            channel_buffers.len()
-        );
+impl SenderBufferProducer {
+    pub fn write_channel(&mut self, channel: usize, channel_buffer: &[f32]) {
+        let channels = self.config.audio_format.frame_format.channels;
 
         let target_bytes_per_sample = self
             .config
@@ -84,45 +69,28 @@ impl SenderBufferProducer {
             .sample_format
             .bytes_per_sample();
 
-        let Some(buffer_len_frames) = channel_buffers
-            .first()
-            .map(|(h, t)| h.len() + t.as_ref().map(AudioBufferPointer::len).unwrap_or(0))
-        else {
-            error!("no buffers provided");
-            return SenderInternalResult::Err(SenderInternalError::NoBuffersProvided);
-        };
+        let offset = self.sent_frames;
 
+        self.write_samples(
+            channel_buffer,
+            offset,
+            channel,
+            channels,
+            target_bytes_per_sample,
+        );
+    }
+
+    pub fn send_packets(
+        &mut self,
+        ingress_time: Frames,
+        buffer_len_frames: usize,
+        buffer_size_changed: bool,
+    ) -> SenderInternalResult<()> {
         let ptime_frames = self.config.ptime_frames() as usize;
         let available_frames = buffer_len_frames + self.unsent_frames;
         let spillover_frames = available_frames % ptime_frames;
         let packets = available_frames / ptime_frames;
-
-        // TODO acquire some kind of lock that prevents from writing to de-allocated memory
-
-        let offset = self.sent_frames;
-        let packets_sent = offset / ptime_frames;
-
-        for (ch, (buf_head, buf_tail)) in channel_buffers.iter().enumerate() {
-            debug_assert_eq!(
-                buf_head.len() + buf_tail.as_ref().map(AudioBufferPointer::len).unwrap_or(0),
-                buffer_len_frames,
-                "provided channel buffers have inconsistent lengths"
-            );
-
-            let head = buf_head.buffer::<f32>();
-            let tail = buf_tail.as_ref().map(|b| b.buffer::<f32>());
-
-            self.write_samples(head, offset, ch, channels, target_bytes_per_sample);
-            if let Some(tail) = tail {
-                self.write_samples(
-                    tail,
-                    offset + head.len(),
-                    ch,
-                    channels,
-                    target_bytes_per_sample,
-                );
-            }
-        }
+        let packets_sent = self.sent_frames / ptime_frames;
 
         for i in 0..packets {
             self.tx.try_send((
@@ -130,8 +98,6 @@ impl SenderBufferProducer {
                 packets_sent + i,
             ))?;
         }
-
-        let buffer_size_changed = self.buffer_len != 0 && self.buffer_len != buffer_len_frames;
 
         if spillover_frames == 0 || buffer_size_changed {
             self.received_frames = 0;
@@ -142,8 +108,6 @@ impl SenderBufferProducer {
             self.sent_frames += packets * ptime_frames;
             self.unsent_frames = spillover_frames;
         }
-
-        self.buffer_len = buffer_len_frames;
 
         Ok(())
     }

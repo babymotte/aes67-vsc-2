@@ -3,7 +3,6 @@ use crate::{
     session_manager::{SessionManagerNotificationHandler, start_session_manager},
 };
 use aes67_rs::{
-    buffer::AudioBufferPointer,
     monitoring::Monitoring,
     sender::{api::SenderApi, config::SenderConfig},
     time::{Clock, MILLIS_PER_SEC_F},
@@ -21,10 +20,7 @@ struct State {
     app_id: String,
     sender: SenderApi,
     ports: Vec<Port<AudioIn>>,
-    channel_bufs: Box<[(AudioBufferPointer, Option<AudioBufferPointer>)]>,
     clock: JackClock,
-    send_buffer: Box<[f32]>,
-    sample_rate: u32,
     subsys: SubsystemHandle,
 }
 
@@ -63,9 +59,6 @@ pub async fn start_recording(
         );
     }
 
-    let send_buffer_len = config.audio_format.samples_per_link_offset_buffer(1_000.0);
-    let send_buffer = vec![0.0; send_buffer_len].into();
-
     let (tx, notifications) = mpsc::channel(1024);
     let client_id = config.label.clone();
     let notification_handler = SessionManagerNotificationHandler { client_id, tx };
@@ -73,14 +66,7 @@ pub async fn start_recording(
         app_id: app_id.clone(),
         sender,
         ports,
-        channel_bufs: vec![
-            (AudioBufferPointer::new(0, 0), None);
-            config.audio_format.frame_format.channels
-        ]
-        .into(),
         clock: JackClock::new(clock),
-        send_buffer,
-        sample_rate: config.audio_format.sample_rate,
         subsys: subsys.clone(),
     };
     let process_handler =
@@ -127,34 +113,18 @@ fn process(state: &mut State, _: &Client, ps: &ProcessScope) -> Control {
         }
     };
 
-    let send_buffers = state.send_buffer.chunks_mut(state.sample_rate as usize);
+    state
+        .sender
+        .start_write(ingress_time, ps.n_frames() as usize);
 
-    for (ch, (port, send_buf)) in state.ports.iter().zip(send_buffers).enumerate() {
+    for (ch, port) in state.ports.iter().enumerate() {
         let port_buf = port.as_slice(ps);
-
-        let start_index = ingress_time as usize % send_buf.len();
-        let mut end_index = start_index + port_buf.len();
-        if end_index > send_buf.len() {
-            end_index %= send_buf.len();
-            let pivot = port_buf.len() - end_index;
-            send_buf[start_index..].copy_from_slice(&port_buf[..pivot]);
-            send_buf[..end_index].copy_from_slice(&port_buf[pivot..]);
-            state.channel_bufs[ch] = (
-                AudioBufferPointer::from_slice(&send_buf[start_index..]),
-                Some(AudioBufferPointer::from_slice(&send_buf[..end_index])),
-            );
-        } else {
-            send_buf[start_index..end_index].copy_from_slice(port_buf);
-            state.channel_bufs[ch] = (
-                AudioBufferPointer::from_slice(&send_buf[start_index..end_index]),
-                None,
-            );
-        }
+        state.sender.write_channel(ch, port_buf);
     }
 
     let pre_req = Instant::now();
 
-    if let Err(e) = state.sender.send(&state.channel_bufs, ingress_time) {
+    if let Err(e) = state.sender.end_write() {
         // TODO send to monitoring
     }
 

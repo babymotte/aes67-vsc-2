@@ -2,7 +2,7 @@
 
 systemctl --user stop aes67-jack-vsc.service
 . .env
-pw-metadata -n settings 0 clock.force-quantum 96
+pw-metadata -n settings 0 clock.force-quantum 192
 # RUSTFLAGS="--cfg tokio_unstable" cargo build --package aes67-rs-jack-vsc --features=tokio-console,tokio-metrics || exit $?
 
 for _ in {1..999}; do
