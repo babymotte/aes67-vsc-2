@@ -118,19 +118,18 @@ fn process(state: &mut State, _: &Client, ps: &ProcessScope) -> Control {
         .start_write(ingress_time, ps.n_frames() as usize);
 
     for (ch, port) in state.ports.iter().enumerate() {
-        let port_buf = port.as_slice(ps);
-        state.sender.write_channel(ch, port_buf);
+        state.sender.write_channel(ch, port.as_slice(ps));
     }
 
     let pre_req = Instant::now();
 
     if let Err(e) = state.sender.end_write() {
-        // TODO send to monitoring
+        // TODO sender was not ready; send to monitoring
     }
 
     let post_req = Instant::now();
 
-    // TODO send to monitoring
+    // TODO send timing to monitoring
 
     let _total = post_req.duration_since(start).as_micros();
     let _req = post_req.duration_since(pre_req).as_micros();

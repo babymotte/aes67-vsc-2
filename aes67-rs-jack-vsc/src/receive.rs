@@ -153,7 +153,7 @@ fn process(state: &mut State, _: &Client, ps: &ProcessScope) -> Control {
 
     let post_req = Instant::now();
 
-    // TODO send to monitoring
+    // TODO send timing to monitoring
 
     let _total = post_req.duration_since(start).as_micros();
     let _req = post_req.duration_since(pre_req).as_micros();
