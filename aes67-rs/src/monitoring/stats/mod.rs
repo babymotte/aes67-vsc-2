@@ -138,7 +138,7 @@ impl StatsActor {
             SenderState::Renamed { .. } => (),
             SenderState::Destroyed { id } => {
                 // TODO
-                warn!("sender destroyed: {id}");
+                info!("sender destroyed: {id}");
                 self.senders.remove(id);
             }
         }
@@ -158,7 +158,7 @@ impl StatsActor {
             }
             ReceiverState::Renamed { id: _, label: _ } => (),
             ReceiverState::Destroyed { id } => {
-                warn!("receiver destroyed: {id}");
+                info!("receiver destroyed: {id}");
                 // TODO
                 self.receivers.remove(id);
             }

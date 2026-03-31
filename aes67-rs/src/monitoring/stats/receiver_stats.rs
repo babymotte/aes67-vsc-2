@@ -97,7 +97,8 @@ impl ReceiverStats {
                 .await;
             }
             RxStats::MalformedRtpPacket(e) => {
-                warn!("{}: Received malformed rtp packet: {e}", self.id);
+                debug!("{}: Received malformed rtp packet: {e}", self.id);
+                // TODO publish
             }
             RxStats::TimeTravellingPacket {
                 sequence_number,
@@ -144,7 +145,7 @@ impl ReceiverStats {
         let diff = ingress_time - media_time_at_reception;
         let diff_usec =
             (diff as f64 * MICROS_PER_SEC as f64 / desc.audio_format.sample_rate as f64) as u64;
-        warn!(
+        debug!(
             "{}: Packet {} was received {diff} frames / {diff_usec} µs before it was sent, sender and receiver clocks must be out of sync.",
             self.id,
             u16::from(sequence_number)
@@ -253,7 +254,7 @@ impl ReceiverStats {
 
         if !missed_timestamps.is_empty() {
             missed_timestamps.sort_by(|(ts_a, _), (ts_b, _)| ts_a.cmp(ts_b));
-            warn!(
+            debug!(
                 "{}: Lost packets: {}",
                 self.id,
                 missed_timestamps
@@ -313,7 +314,7 @@ impl ReceiverStats {
         let Some(desc) = &self.config else {
             return;
         };
-        warn!(
+        debug!(
             "{}: Received packet from wrong sender: {} (expected {})",
             self.id,
             ip,
@@ -344,7 +345,7 @@ impl ReceiverStats {
         };
 
         let delay_usec = desc.frames_to_duration(delay).as_micros();
-        warn!(
+        debug!(
             "{}: Late packet: {{seq: {}, ts: {}}} (received {} frames / {} µs after playout time)",
             self.id,
             u16::from(seq),
