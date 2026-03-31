@@ -1,0 +1,13 @@
+[Unit]
+Description=ptp4l on %i
+StartLimitIntervalSec=0
+After=network.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=1
+ExecStart=/usr/bin/ptp4l -f /etc/linuxptp/ptp4l.conf -i %i
+
+[Install]
+WantedBy=default.target
