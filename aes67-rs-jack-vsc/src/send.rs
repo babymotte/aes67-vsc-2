@@ -11,7 +11,6 @@ use jack::{
     AudioIn, Client, ClientOptions, Control, Port, ProcessScope, contrib::ClosureProcessHandler,
 };
 use miette::IntoDiagnostic;
-use std::time::Instant;
 use tokio::sync::mpsc;
 use tosub::SubsystemHandle;
 use tracing::{error, info};
@@ -99,8 +98,6 @@ fn process(state: &mut State, _: &Client, ps: &ProcessScope) -> Control {
         return Control::Quit;
     }
 
-    let start = Instant::now();
-
     let ingress_time = match state.clock.update_clock(ps) {
         Ok(ClockState::Stable(it)) => it,
         Ok(ClockState::Unstable) => {
@@ -121,23 +118,9 @@ fn process(state: &mut State, _: &Client, ps: &ProcessScope) -> Control {
         state.sender.write_channel(ch, port.as_slice(ps));
     }
 
-    let pre_req = Instant::now();
-
     if let Err(e) = state.sender.end_write() {
         // TODO sender was not ready; send to monitoring
     }
-
-    let post_req = Instant::now();
-
-    // TODO send timing to monitoring
-
-    let _total = post_req.duration_since(start).as_micros();
-    let _req = post_req.duration_since(pre_req).as_micros();
-
-    // if _total > 100 {
-    //     eprintln!("latency record req: {_req} µs");
-    //     eprintln!("latency record total: {_total} µs");
-    // }
 
     Control::Continue
 }
