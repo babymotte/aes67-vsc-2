@@ -16,7 +16,7 @@
  */
 
 use crate::{
-    buffer::{AudioBufferPointer, SenderBufferProducer},
+    buffer::{AudioBufferPointer, sender::SenderBufferProducer},
     error::SenderInternalResult,
     formats::Frames,
 };

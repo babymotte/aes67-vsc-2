@@ -19,7 +19,10 @@ pub mod api;
 pub mod config;
 
 use crate::{
-    buffer::{AudioBufferPointer, SenderBufferConsumer, sender_buffer_channel},
+    buffer::{
+        AudioBufferPointer,
+        sender::{SenderBufferConsumer, sender_buffer_channel},
+    },
     error::{SenderInternalError, SenderInternalResult, WrappedRtpPacketBuildError},
     formats::Frames,
     monitoring::Monitoring,

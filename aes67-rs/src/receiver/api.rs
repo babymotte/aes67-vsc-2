@@ -15,7 +15,9 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{buffer::ReceiverBufferConsumer, error::ReceiverInternalResult, formats::Frames};
+use crate::{
+    buffer::receiver::ReceiverBufferConsumer, error::ReceiverInternalResult, formats::Frames,
+};
 use tokio::sync::{mpsc, oneshot};
 use tosub::SubsystemHandle;
 use tracing::instrument;

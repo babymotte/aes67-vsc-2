@@ -23,7 +23,10 @@ pub mod api;
 pub mod config;
 
 use crate::{
-    buffer::{AudioBufferPointer, ReceiverBufferProducer, receiver_buffer_channel},
+    buffer::{
+        AudioBufferPointer,
+        receiver::{ReceiverBufferProducer, receiver_buffer_channel},
+    },
     error::ReceiverInternalResult,
     monitoring::{Monitoring, ReceiverState, RxStats},
     receiver::{
