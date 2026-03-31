@@ -2,7 +2,6 @@ use crate::error::DiscoveryResult;
 use tosub::SubsystemHandle;
 use worterbuch_client::Worterbuch;
 
-mod available_sessions;
 mod sessions;
 
 pub async fn start(
@@ -16,14 +15,7 @@ pub async fn start(
         sessions::start(s, instance_name, wb).await
     });
 
-    let instance_name = id.clone();
-    let wb = worterbuch.clone();
-    let available_sessions = subsys.spawn("available-sessions", async |s| {
-        available_sessions::start(s, instance_name, wb).await
-    });
-
     sessions.join().await;
-    available_sessions.join().await;
 
     Ok(())
 }
