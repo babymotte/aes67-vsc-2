@@ -157,9 +157,7 @@ export default function Editor(props: { receiver: [string, string] }) {
   const stop = () => {
     console.log(`Stopping receiver ${transceiverID(props.receiver)}...`);
     set(
-      `${appName()}/config/rx/receivers/${transceiverID(
-        props.receiver,
-      )}/autostart`,
+      `${appName()}/config/rx/${transceiverID(props.receiver)}/autostart`,
       false,
     );
 
