@@ -30,6 +30,7 @@ cp "$BIN" "$BIN_DIR" || exit $?
 cp ./config.yaml "$CONFIG_DIR" || exit $?
 cp ./systemd/aes67-jack-vsc.service "$SYSTEMD_USER_DIR" || exit $?
 sudo cp ./systemd/ptp4l@.service "$SYSTEMD_DIR" || exit $?
+sudo mkdir -p /etc/linuxptp || exit $?
 sudo cp ./linuxptp/ptp4l.conf /etc/linuxptp/ptp4l.conf || exit $?
 
 # set permissions
