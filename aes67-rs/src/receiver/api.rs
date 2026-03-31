@@ -63,4 +63,13 @@ impl ReceiverApi {
     ) -> ReceiverInternalResult<bool> {
         self.rx.read(buffers, ingress_time, subsys).await
     }
+
+    pub fn try_receive<'a>(
+        &mut self,
+        buffers: impl Iterator<Item = Option<&'a mut [f32]>>,
+        ingress_time: Frames,
+        subsys: &SubsystemHandle,
+    ) -> ReceiverInternalResult<usize> {
+        self.rx.try_read(buffers, ingress_time, subsys)
+    }
 }

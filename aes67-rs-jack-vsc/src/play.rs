@@ -119,7 +119,6 @@ fn process(state: &mut State, _: &Client, ps: &ProcessScope) -> Control {
         }
     };
 
-    // TODO read current link offset from dynamic config
     let link_offset_frames = state.config.frames_in_link_offset() as u64;
     let ingress_time = playout_time - link_offset_frames;
 

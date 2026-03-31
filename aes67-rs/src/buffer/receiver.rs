@@ -104,6 +104,17 @@ impl ReceiverBufferProducer {
 }
 
 impl ReceiverBufferConsumer {
+    /// Read data from the shared buffer. This function does not block, but might read less than a full buffer's worth of data if the requested data is not yet available.
+    /// The returned usize indicates how many frames were read.
+    pub fn try_read<'a>(
+        &mut self,
+        buffers: impl Iterator<Item = Option<&'a mut [f32]>>,
+        ingress_time: Frames,
+        subsys: &SubsystemHandle,
+    ) -> ReceiverInternalResult<usize> {
+        todo!()
+    }
+
     /// Read data from the shared buffer. Before reading, this function will block until the requested data is available.
     pub async fn read<'a>(
         &mut self,
