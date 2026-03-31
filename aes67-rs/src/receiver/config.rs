@@ -24,6 +24,7 @@ use crate::{
     },
     time::MICROS_PER_MILLI_F,
 };
+use core::fmt;
 use lazy_static::lazy_static;
 use regex::Regex;
 use sdp::{
@@ -54,15 +55,31 @@ lazy_static! {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RefClk {
-    pub standard: String,
-    pub mac: String,
-    pub domain: u32,
+pub enum RefClk {
+    Traceable,
+    Master {
+        standard: String,
+        mac: String,
+        domain: u32,
+    },
+}
+
+impl fmt::Display for RefClk {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RefClk::Traceable => "traceable".fmt(f),
+            RefClk::Master {
+                standard,
+                mac,
+                domain,
+            } => write!(f, "{}:{}:{}", standard, mac, domain),
+        }
+    }
 }
 
 impl From<(String, String, u32)> for RefClk {
     fn from(value: (String, String, u32)) -> Self {
-        RefClk {
+        RefClk::Master {
             standard: value.0,
             mac: value.1,
             domain: value.2,
@@ -328,10 +345,7 @@ impl From<&SessionInfo> for SessionDescription {
         ));
         media.attributes.push(Attribute::new(
             "ts-refclk".to_owned(),
-            Some(format!(
-                "ptp={}:{}:{}",
-                value.refclk.standard, value.refclk.mac, value.refclk.domain
-            )),
+            Some(format!("ptp={}", value.refclk)),
         ));
         media.attributes.push(Attribute::new(
             "mediaclk".to_owned(),
@@ -473,18 +487,19 @@ impl TryFrom<&SessionDescription> for SessionInfo {
             .attribute("ts-refclk")
             .and_then(|it| it)
             .and_then(|refclk| {
-                if let Some(caps) = TS_REFCLK_REGEX.captures(refclk) {
-                    Some((
+                if refclk == "ptp=traceable" {
+                    Some(RefClk::Traceable)
+                } else if let Some(caps) = TS_REFCLK_REGEX.captures(refclk) {
+                    Some(RefClk::from((
                         caps[1].to_owned(),
                         caps[2].to_owned(),
                         caps[3].parse().ok()?,
-                    ))
+                    )))
                 } else {
                     None
                 }
             })
-            .ok_or_else(|| ConfigError::InvalidSdp("invalid ts-refclk".to_owned()))?
-            .into();
+            .ok_or_else(|| ConfigError::InvalidSdp("invalid ts-refclk".to_owned()))?;
 
         Ok(SessionInfo {
             id: session_id,

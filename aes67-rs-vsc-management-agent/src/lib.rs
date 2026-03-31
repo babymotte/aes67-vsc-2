@@ -1065,7 +1065,7 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
         // TODO get from config
         let domain = 0;
 
-        Ok(RefClk {
+        Ok(RefClk::Master {
             standard,
             mac,
             domain,
