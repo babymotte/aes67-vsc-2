@@ -1,4 +1,4 @@
-use crate::{play::start_playout, record::start_recording};
+use crate::{receive::start_playout, send::start_recording};
 use aes67_rs::{
     formats::SessionId,
     monitoring::Monitoring,
