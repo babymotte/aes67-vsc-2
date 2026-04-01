@@ -1,0 +1,1 @@
+KERNEL=="cpu_dma_latency", GROUP="audio", MODE="0660"

@@ -38,14 +38,17 @@ sudo setcap 'cap_net_bind_service+ep cap_sys_nice+ep cap_sys_time+ep cap_net_adm
 
 # create ptp and audio groups
 sudo groupadd -f ptp || exit $?
+sudo groupadd -f audio || exit $?
 
 # add udev rules
-sudo cp ./udev/99-ptp.rules /etc/udev/rules.d/99-ptp.rules || exit $?
+sudo cp ./udev/99-ptp.rules /etc/udev/rules.d/ || exit $?
+sudo cp ./udev/99-cpu-dma-latency.rules /etc/udev/rules.d/ || exit $?
 
 # reload udev rules
 sudo udevadm control --reload-rules && sudo udevadm trigger || exit $?
 
 sudo usermod -aG ptp $USER || exit $?
+sudo usermod -aG audio $USER || exit $?
 
 # enable service
 systemctl --user daemon-reload || exit $?

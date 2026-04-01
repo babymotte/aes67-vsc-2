@@ -17,11 +17,13 @@
 
 mod telemetry;
 
-use aes67_rs_jack_vsc::io_handler::JackIoHandler;
+use aes67_rs::utils::prevent_deep_c_state;
+use aes67_rs_jack_vsc::{config::JackConfigManager, io_handler::JackIoHandler};
 use aes67_rs_vsc_management_agent::{
     config::{AppConfig, Args},
     init_management_agent,
 };
+use miette::IntoDiagnostic;
 use std::time::Duration;
 use tosub::SubsystemHandle;
 use tracing::info;
@@ -37,6 +39,8 @@ async fn main() -> miette::Result<()> {
 
     info!("Starting {} …", app_id);
 
+    let _guard = prevent_deep_c_state()?;
+
     let app_idc = app_id.clone();
 
     tosub::build_root(app_id.clone())
@@ -46,6 +50,8 @@ async fn main() -> miette::Result<()> {
         .await?;
 
     info!("{} stopped.", app_id);
+
+    drop(_guard);
 
     Ok(())
 }
@@ -58,7 +64,18 @@ async fn run(
 ) -> miette::Result<()> {
     let io_handler = JackIoHandler::new(&subsys);
 
-    init_management_agent(&subsys, id, config.web_ui.port, args.data_dir, io_handler).await?;
+    let agent = init_management_agent(
+        &subsys,
+        id.clone(),
+        config.web_ui.port,
+        args.data_dir,
+        io_handler,
+    )
+    .await?;
+
+    info!("Registering JACK config manager component …");
+    agent.register_component("jack-config", |s, wb| JackConfigManager::start(s, id, wb));
+    info!("JACK config manager component registered.");
 
     subsys.shutdown_requested().await;
 

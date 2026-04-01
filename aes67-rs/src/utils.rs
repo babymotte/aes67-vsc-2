@@ -15,9 +15,12 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use miette::IntoDiagnostic;
+use miette::{Context, IntoDiagnostic};
 use serde::{Deserialize, Serialize};
+use std::fs::File;
+use std::io::Write;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::Duration;
 use std::{
     any::Any,
     fmt::Debug,
@@ -154,5 +157,43 @@ impl AtomicF32 {
 
     pub fn store(&self, val: f32, ordering: Ordering) {
         self.0.store(val.to_bits(), ordering);
+    }
+}
+
+pub fn prevent_deep_c_state() -> miette::Result<std::fs::File> {
+    let mut f = File::options()
+        .write(true)
+        .open("/dev/cpu_dma_latency")
+        .into_diagnostic()
+        .wrap_err("Could not open /dev/cpu_dma_latency")?;
+    f.write_all(&0u32.to_le_bytes())
+        .into_diagnostic()
+        .wrap_err("Could not write to /dev/cpu_dma_latency")?;
+    // keep f alive for the duration
+    Ok(f)
+}
+
+pub fn sleep_precise(duration: Duration) {
+    let mut now = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut now) };
+
+    let target_ns =
+        now.tv_sec as i64 * 1_000_000_000 + now.tv_nsec as i64 + duration.as_nanos() as i64;
+
+    let target = libc::timespec {
+        tv_sec: (target_ns / 1_000_000_000) as libc::time_t,
+        tv_nsec: (target_ns % 1_000_000_000) as i64,
+    };
+
+    unsafe {
+        libc::clock_nanosleep(
+            libc::CLOCK_MONOTONIC,
+            libc::TIMER_ABSTIME,
+            &target,
+            std::ptr::null_mut(),
+        );
     }
 }

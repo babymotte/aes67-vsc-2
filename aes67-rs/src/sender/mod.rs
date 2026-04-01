@@ -24,14 +24,14 @@ use crate::{
         sender::{SenderBufferConsumer, sender_buffer_channel},
     },
     error::{SenderInternalError, SenderInternalResult, WrappedRtpPacketBuildError},
-    formats::Frames,
+    formats::{Frames, frames_to_duration},
     monitoring::Monitoring,
     sender::{
         api::{SenderApi, SenderApiMessage},
         config::SenderConfig,
     },
     socket::create_tx_socket,
-    utils::{U32_WRAP, set_realtime_priority},
+    utils::{U32_WRAP, set_realtime_priority, sleep_precise},
 };
 use pnet::datalink::NetworkInterface;
 use rtp_rs::{RtpPacketBuilder, Seq};
@@ -42,6 +42,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
     thread,
+    time::Duration,
 };
 use tokio::{
     select,
@@ -160,6 +161,10 @@ impl Sender {
                     break;
                 }
             }
+
+            // packets may come in bursts if the system uses a large buffer, so we sleep to make sure we don't overrun the receiver's buffer
+            let sleep_duration_micros = self.config.packet_time.get() * 900.0;
+            sleep_precise(Duration::from_micros(sleep_duration_micros as u64));
         }
 
         self.report_sender_destroyed();
