@@ -40,7 +40,7 @@ export function sortReceivers(
 export function createWbSignal<T, V extends Value>(
   path: string,
   defaultValue: T,
-  conversion?: [(to: T) => V | undefined, (from: V) => T],
+  conversion?: [(to: T) => V, (from: V) => T],
 ): [Accessor<T>, (newValue: T) => void] {
   const [value, setValue] = createSignal<T>(defaultValue);
 
@@ -61,14 +61,11 @@ export function createWbSignal<T, V extends Value>(
 
   return [
     value,
-    (newValue) => {
-      const v = conversion
-        ? conversion[0](newValue)
-        : (newValue as unknown as V);
-      if (v !== undefined) {
-        set(`${appName()}${path}`, v);
-      }
-    },
+    (newValue) =>
+      set(
+        `${appName()}${path}`,
+        conversion ? conversion[0](newValue) : (newValue as unknown as V),
+      ),
   ] as const;
 }
 
