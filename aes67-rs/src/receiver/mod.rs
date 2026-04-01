@@ -46,6 +46,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
     thread,
+    time::Instant,
 };
 use tokio::{
     select,
@@ -89,6 +90,7 @@ pub(crate) async fn start_receiver(
             socket,
             monitoring,
             tx,
+            last_valid_data: Instant::now(),
         };
 
         let (tx, rx) = oneshot::channel();
@@ -136,6 +138,7 @@ struct Receiver {
     socket: UdpSocket,
     monitoring: Monitoring,
     tx: ReceiverBufferProducer,
+    last_valid_data: Instant,
 }
 
 impl Receiver {
@@ -232,6 +235,13 @@ impl Receiver {
 
         let frames_in_packet = self.config.frames_in_buffer(rtp.payload().len());
 
+        if self.last_valid_data.elapsed().as_secs() >= 1 {
+            warn!(
+                "No valid RTP data received for more than 1 second, resetting sequence tracking."
+            );
+            self.reset_sequence_tracking();
+        }
+
         if let (Some(last_ts), Some(last_seq)) = (self.last_timestamp, self.last_sequence_number) {
             let expected_seq = last_seq.next();
             let expected_ts = last_ts.wrapping_add(frames_in_packet as u32);
@@ -290,6 +300,8 @@ impl Receiver {
             // return Ok(());
         }
 
+        self.last_valid_data = Instant::now();
+
         self.tx.write(rtp.payload(), ingress_time);
 
         Ok(())
@@ -328,6 +340,12 @@ impl Receiver {
         self.timestamp_offset = Some(offset);
 
         Ok(())
+    }
+
+    fn reset_sequence_tracking(&mut self) {
+        self.last_sequence_number = None;
+        self.last_timestamp = None;
+        self.timestamp_offset = None;
     }
 }
 
