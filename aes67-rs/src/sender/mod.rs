@@ -24,13 +24,14 @@ use crate::{
         sender::{SenderBufferConsumer, sender_buffer_channel},
     },
     error::{SenderInternalError, SenderInternalResult, WrappedRtpPacketBuildError},
-    formats::{Frames, frames_to_duration},
+    formats::Frames,
     monitoring::Monitoring,
     sender::{
         api::{SenderApi, SenderApiMessage},
         config::SenderConfig,
     },
     socket::create_tx_socket,
+    time::MICROS_PER_MILLI,
     utils::{U32_WRAP, set_realtime_priority, sleep_precise},
 };
 use pnet::datalink::NetworkInterface;
@@ -42,7 +43,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::{
     select,
@@ -140,6 +141,8 @@ impl Sender {
 
         self.report_sender_created(AudioBufferPointer::from_slice(&self.rx.buffer));
 
+        let last_sent = Instant::now();
+
         while !exit.load(Ordering::SeqCst) {
             // read packet data
             let recv = self.rx.read();
@@ -161,10 +164,14 @@ impl Sender {
                     break;
                 }
             }
+            let ptime_micros = self.config.packet_time.get() * MICROS_PER_MILLI as f32;
+            let micros_since_last_send = last_sent.elapsed().as_micros() as f32;
 
-            // packets may come in bursts if the system uses a large buffer, so we sleep to make sure we don't overrun the receiver's buffer
-            let sleep_duration_micros = self.config.packet_time.get() * 900.0;
-            sleep_precise(Duration::from_micros(sleep_duration_micros as u64));
+            if micros_since_last_send < ptime_micros {
+                // packets may come in bursts if the system uses a large buffer, so we sleep to make sure we don't overrun the receiver's buffer
+                let sleep_duration_micros = ptime_micros * 0.9;
+                sleep_precise(Duration::from_micros(sleep_duration_micros as u64));
+            }
         }
 
         self.report_sender_destroyed();
