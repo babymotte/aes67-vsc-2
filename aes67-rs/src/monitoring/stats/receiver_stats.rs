@@ -16,14 +16,18 @@
  */
 
 use crate::{
-    formats::Frames,
-    monitoring::{ReceiverStatsReport, Report, RxStats, StatsReport},
+    formats::{Frames, MilliSeconds},
+    monitoring::{Delay, ReceiverStatsReport, Report, RxStats, StatsReport},
     receiver::config::ReceiverConfig,
     time::{MICROS_PER_MILLI_F, MICROS_PER_SEC, MILLIS_PER_SEC_F},
     utils::{AverageCalculationBuffer, U16_WRAP},
 };
 use rtp_rs::Seq;
-use std::{collections::HashMap, net::IpAddr, time::SystemTime};
+use std::{
+    collections::{HashMap, VecDeque},
+    net::IpAddr,
+    time::SystemTime,
+};
 use tokio::sync::mpsc;
 use tracing::{debug, warn};
 
@@ -31,7 +35,7 @@ pub struct ReceiverStats {
     id: String,
     tx: mpsc::Sender<Report>,
     config: Option<ReceiverConfig>,
-    delay_buffer: AverageCalculationBuffer<i64>,
+    delay_buffer: AverageCalculationBuffer<Frames>,
     measured_link_offset: AverageCalculationBuffer<Frames>,
     timestamp_offset: Option<u64>,
     skipped_packets: HashMap<Frames, Seq>,
@@ -39,6 +43,8 @@ pub struct ReceiverStats {
     late_packet_counter: usize,
     muted: bool,
     buffer_address: Option<crate::buffer::AudioBufferPointer>,
+    delays: VecDeque<Delay>,
+    packet_counter: u64,
 }
 
 impl ReceiverStats {
@@ -55,6 +61,8 @@ impl ReceiverStats {
             lost_packet_counter: 0,
             late_packet_counter: 0,
             muted: false,
+            delays: VecDeque::new(),
+            packet_counter: 0,
         }
     }
 
@@ -160,32 +168,78 @@ impl ReceiverStats {
         ingress_time: Frames,
         media_time_at_reception: Frames,
     ) {
+        self.packet_counter += 1;
+
         if ingress_time > media_time_at_reception {
             let delay = ingress_time - media_time_at_reception;
             self.process_late_packet(seq, media_time_at_reception, delay)
                 .await;
         }
 
-        let Some(desc) = &self.config else {
+        let Some(config) = &self.config.clone() else {
             return;
         };
 
         // TODO monitor and report packet time
-        let frames_in_packet = desc.frames_in_buffer(payload_len) as i64;
+        let frames_in_packet = config.frames_in_buffer(payload_len);
 
-        let delay = media_time_at_reception as i64 - ingress_time as i64 - frames_in_packet;
+        let delay = media_time_at_reception.saturating_sub(ingress_time);
+        self.update_delay(config, delay).await;
 
-        if delay < frames_in_packet {
-            // TODO report clock sync issue
+        let network_delay = delay.saturating_sub(frames_in_packet);
+        self.evaluate_network_delay(config, frames_in_packet, network_delay)
+            .await;
+
+        self.skipped_packets.remove(&ingress_time);
+    }
+
+    async fn update_delay(&mut self, config: &ReceiverConfig, delay: Frames) {
+        let frames = delay;
+        let delay = Delay {
+            frames,
+            millis: config.frames_to_duration(frames).as_micros() as MilliSeconds
+                / MICROS_PER_MILLI_F,
+        };
+        while self.delays.len() >= 1000 {
+            self.delays.pop_front();
+        }
+        self.delays.push_back(delay);
+        if self.packet_counter % 1000 == 0 {
+            self.evaluate_delays().await;
+        }
+    }
+
+    async fn evaluate_delays(&self) {
+        let average = self.delays.iter().map(ToOwned::to_owned).sum::<Delay>() / self.delays.len();
+        self.tx
+            .send(Report::Stats(StatsReport::Receiver(
+                ReceiverStatsReport::Delay {
+                    receiver: self.id.clone(),
+                    average,
+                    delays: self.delays.clone().into(),
+                },
+            )))
+            .await
+            .ok();
+    }
+
+    async fn evaluate_network_delay(
+        &mut self,
+        config: &ReceiverConfig,
+        frames_in_packet: Frames,
+        network_delay: Frames,
+    ) {
+        if network_delay == 0 {
+            // TODO report potential clock sync issue
         }
 
-        if delay >= 2 * frames_in_packet {
+        if network_delay >= 2 * frames_in_packet {
             // TODO report potential network or clock issue
         }
 
-        if let Some(average) = self.delay_buffer.update(delay) {
-            let delay_duration = desc.frames_to_duration_float(delay as f64);
-            let micros = delay_duration.as_micros();
+        if let Some(average) = self.delay_buffer.update(network_delay) {
+            let delay_duration = config.frames_to_duration_float(network_delay as f64);
+            let micros = delay_duration.as_micros() as u64;
             let packets = average as f32 / frames_in_packet as f32;
             debug!("Network delay: {average} frames / {micros} µs / {packets:.1} packets");
 
@@ -193,17 +247,15 @@ impl ReceiverStats {
                 .send(Report::Stats(StatsReport::Receiver(
                     ReceiverStatsReport::NetworkDelay {
                         receiver: self.id.clone(),
-                        delay_frames: delay,
-                        delay_millis: micros as f32 / MICROS_PER_MILLI_F,
+                        delay: Delay {
+                            frames: network_delay as Frames,
+                            millis: delay_duration.as_micros() as MilliSeconds / MICROS_PER_MILLI_F,
+                        },
                     },
                 )))
                 .await
                 .ok();
         }
-
-        // TODO collect and publish stats on delay ranges and late packets
-
-        self.skipped_packets.remove(&ingress_time);
     }
 
     async fn process_playout(&mut self, ingress_time: Frames, latest_received_frame: Frames) {

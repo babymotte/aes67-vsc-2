@@ -48,13 +48,13 @@ pub fn main() -> miette::Result<()> {
 
     let mut clock = UnixMediaClock::system_clock(sr as u32);
 
-    let start = clock.current_media_time().into_diagnostic()?;
+    let start = clock.current_time().into_diagnostic()?.media_time;
     let mut last_time = start;
 
     loop {
         timer.read();
 
-        let mt = clock.current_media_time().into_diagnostic()?;
+        let mt = clock.current_time().into_diagnostic()?.media_time;
         let diff = mt - last_time;
         last_time = mt;
         tx.send(diff).ok();

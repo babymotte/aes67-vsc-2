@@ -24,14 +24,14 @@ use crate::{
         sender::{SenderBufferConsumer, sender_buffer_channel},
     },
     error::{SenderInternalError, SenderInternalResult, WrappedRtpPacketBuildError},
-    formats::Frames,
+    formats::{Frames, frames_to_duration},
     monitoring::Monitoring,
     sender::{
         api::{SenderApi, SenderApiMessage},
         config::SenderConfig,
     },
     socket::create_tx_socket,
-    time::MICROS_PER_MILLI,
+    time::{Clock, MICROS_PER_MILLI, MediaClock},
     utils::{U32_WRAP, set_realtime_priority, sleep_precise},
 };
 use pnet::datalink::NetworkInterface;
@@ -43,7 +43,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
     thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
 use tokio::{
     select,
@@ -54,7 +54,7 @@ use tracing::{info, instrument, warn};
 #[cfg(feature = "tokio-metrics")]
 use worterbuch_client::Worterbuch;
 
-#[instrument(skip(monitoring, subsys, wb))]
+#[instrument(skip(monitoring, subsys, clock, wb))]
 pub(crate) async fn start_sender(
     app_id: String,
     id: String,
@@ -63,6 +63,7 @@ pub(crate) async fn start_sender(
     config: SenderConfig,
     monitoring: Monitoring,
     subsys: &SubsystemHandle,
+    clock: Clock,
     #[cfg(feature = "tokio-metrics")] wb: Worterbuch,
 ) -> SenderInternalResult<SenderApi> {
     let sender_id = id.clone();
@@ -86,6 +87,7 @@ pub(crate) async fn start_sender(
             target_address: target,
             monitoring,
             ssrc: rand::random(),
+            clock,
         };
 
         let (tx, rx) = oneshot::channel();
@@ -133,6 +135,7 @@ struct Sender {
     target_address: SocketAddr,
     monitoring: Monitoring,
     ssrc: u32,
+    clock: Clock,
 }
 
 impl Sender {
@@ -141,12 +144,22 @@ impl Sender {
 
         self.report_sender_created(AudioBufferPointer::from_slice(&self.rx.buffer));
 
-        let last_sent = Instant::now();
-
         while !exit.load(Ordering::SeqCst) {
             // read packet data
             let recv = self.rx.read();
             if let Ok((ingress_time, slot_index)) = recv {
+                // packets may come in bursts if the system uses a large buffer, so we sleep to make sure we don't overrun the receiver's buffer
+                let ptime_frames = self.config.ptime_frames() as Frames;
+                let current_time = self.clock.current_time()?;
+                let frames_to_packet = ingress_time as i64 - current_time.media_time as i64;
+                if frames_to_packet > 10 * ptime_frames as i64 {
+                    let frames_to_sleep = frames_to_packet as Frames - ptime_frames;
+                    sleep_precise(
+                        frames_to_duration(frames_to_sleep, self.config.audio_format.sample_rate),
+                        current_time.system_time,
+                    );
+                }
+
                 self.send(ingress_time, slot_index)?;
             } else {
                 break;
@@ -163,14 +176,6 @@ impl Sender {
                     warn!("API channel closed, shutting down sender '{}'.", self.id);
                     break;
                 }
-            }
-            let ptime_micros = self.config.packet_time.get() * MICROS_PER_MILLI as f32;
-            let micros_since_last_send = last_sent.elapsed().as_micros() as f32;
-
-            if micros_since_last_send < ptime_micros {
-                // packets may come in bursts if the system uses a large buffer, so we sleep to make sure we don't overrun the receiver's buffer
-                let sleep_duration_micros = ptime_micros * 0.9;
-                sleep_precise(Duration::from_micros(sleep_duration_micros as u64));
             }
         }
 
@@ -197,8 +202,6 @@ impl Sender {
         self.sequence_number = seq.next();
         let timestamp = (ingress_time % U32_WRAP) as u32;
 
-        self.report_packet_time(self.config.ptime_frames());
-
         let start_index = slot_index * payload_len;
         let end_index = start_index + payload_len;
         let payload = &self.rx.buffer[start_index..end_index];
@@ -212,14 +215,25 @@ impl Sender {
             .build_into(&mut self.rtp_buffer)
             .map_err(WrappedRtpPacketBuildError)?;
 
-        self.report_packet_size(len);
-
         if len > 1500 {
             return Err(SenderInternalError::MaxMTUExceeded(len));
         }
 
+        let pre_send = self.clock.current_time()?;
+
         self.socket
             .send_to(&self.rtp_buffer[..len], self.target_address)?;
+
+        let post_send = self.clock.current_time()?;
+
+        self.report_packet_sent(
+            self.config.ptime_frames(),
+            len,
+            ingress_time,
+            seq,
+            pre_send,
+            post_send,
+        );
 
         Ok(())
     }
@@ -230,6 +244,7 @@ mod monitoring {
         buffer::AudioBufferPointer,
         formats::Frames,
         monitoring::{SenderState, TxStats},
+        time::Time,
     };
 
     use super::*;
@@ -244,14 +259,23 @@ mod monitoring {
             });
         }
 
-        pub(crate) fn report_packet_time(&self, ptime_frames: Frames) {
-            self.monitoring
-                .sender_stats(TxStats::PacketTime(ptime_frames));
-        }
-
-        pub(crate) fn report_packet_size(&self, packet_size: usize) {
-            self.monitoring
-                .sender_stats(TxStats::PacketSize(packet_size));
+        pub(crate) fn report_packet_sent(
+            &self,
+            ptime_frames: Frames,
+            packet_size: usize,
+            ingress_time: Frames,
+            seq: Seq,
+            pre_send: Time,
+            post_send: Time,
+        ) {
+            self.monitoring.sender_stats(TxStats::PacketSent {
+                ptime_frames,
+                packet_size,
+                ingress_time,
+                seq,
+                pre_send,
+                post_send,
+            });
         }
 
         pub(crate) fn report_sender_destroyed(&self) {

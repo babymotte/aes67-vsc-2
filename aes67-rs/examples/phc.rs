@@ -76,9 +76,9 @@ async fn main() -> ConfigResult<()> {
     .await?;
 
     loop {
-        let phc_time_1 = phc_clock.current_media_time()? as f64;
-        let statime_time = statime_clock.current_media_time()?;
-        let phc_time_2 = phc_clock.current_media_time()? as f64;
+        let phc_time_1 = phc_clock.current_time()?.media_time as f64;
+        let statime_time = statime_clock.current_time()?.media_time as f64;
+        let phc_time_2 = phc_clock.current_time()?.media_time as f64;
         let phc_time = (phc_time_1 + phc_time_2) / 2.0;
 
         eprintln!("Current phc media time: {}", phc_time);

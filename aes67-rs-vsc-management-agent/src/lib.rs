@@ -518,6 +518,7 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
             None => return Err(VscApiError::NotRunning.into()),
             Some(vsc_api) => {
                 let config = self.fetch_sender_config(id).await?;
+                self.increment_session_version(&config).await?;
                 let (api, monitoring, clock) = vsc_api.create_sender(config.clone()).await?;
                 if let Err(e) = self
                     .io_handler
@@ -1054,6 +1055,14 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
         let key = topic!(self.app_id, "config", "tx", id, "session", "version");
         let version = self.wb.get(key).await?;
         Ok(version)
+    }
+
+    async fn increment_session_version(&self, config: &SenderConfig) -> ManagementAgentResult<()> {
+        let key = topic!(self.app_id, "config", "tx", config.id, "session", "version");
+        self.wb
+            .update(key, || 1, |current| *current = *current + 1)
+            .await?;
+        Ok(())
     }
 
     async fn local_ip(&self, iface: &NetworkInterface) -> ManagementAgentResult<IpAddr> {

@@ -156,7 +156,7 @@ impl Receiver {
 
             match recv {
                 Ok((len, addr)) => {
-                    let time = self.clock.current_media_time()?;
+                    let time = self.clock.current_time()?.media_time;
                     self.rtp_data_received(&receive_buffer[..len], addr, time)?;
                 }
                 Err(e) => {
@@ -314,7 +314,7 @@ impl Receiver {
 
     #[instrument(skip(self))]
     fn calibrate_timestamp_offset(&mut self, rtp_timestamp: u32) -> ReceiverInternalResult<()> {
-        let media_time = self.clock.current_media_time()?;
+        let media_time = self.clock.current_time()?.media_time;
 
         let local_wrapped_timestamp = (media_time % U32_WRAP) as u32;
 

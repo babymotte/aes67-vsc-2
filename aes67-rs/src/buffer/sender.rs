@@ -110,10 +110,13 @@ impl SenderBufferProducer {
 
         for i in 0..packets {
             let ingress_time = first_packet_ingress_time + (i as Frames * ptime_frames as Frames);
-            self.tx.try_send((ingress_time, sent_packets + i))?;
+            let slot_index = sent_packets + i;
+            self.tx.try_send((ingress_time, slot_index))?;
         }
 
-        if (spillover_frames == 0 && self.sent_packets >= self.min_phases) || buffer_size_changed {
+        let sent_packets = sent_packets + packets;
+
+        if (spillover_frames == 0 && sent_packets >= self.min_phases) || buffer_size_changed {
             self.received_frames = 0;
             self.sent_frames = 0;
             self.unsent_frames = 0;
@@ -122,7 +125,7 @@ impl SenderBufferProducer {
             self.received_frames += buffer_len_frames;
             self.sent_frames += frames_to_send;
             self.unsent_frames = spillover_frames;
-            self.sent_packets += packets;
+            self.sent_packets = sent_packets;
         }
 
         Ok(())

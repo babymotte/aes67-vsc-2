@@ -68,7 +68,7 @@ impl JackClock {
 
     fn init_clock(&mut self, ps: &ProcessScope) -> ClockResult<ClockOffset> {
         let t1 = ps.frames_since_cycle_start();
-        let ptp_time = self.ptp_clock.current_media_time()? as i64;
+        let ptp_time = self.ptp_clock.current_time()?.media_time as i64;
         let t3 = ps.frames_since_cycle_start();
         let jack_time = (ps.last_frame_time() + (t1 + t3) / 2) as i64;
 
@@ -81,7 +81,7 @@ impl JackClock {
 
     fn compensate_drift(&mut self, offset: i64, ps: &ProcessScope) -> ClockResult<ClockOffset> {
         let t1 = ps.frames_since_cycle_start();
-        let ptp_time = self.ptp_clock.current_media_time()? as i64;
+        let ptp_time = self.ptp_clock.current_time()?.media_time as i64;
         let t3 = ps.frames_since_cycle_start();
         let jack_time = (ps.last_frame_time() + (t1 + t3) / 2) as i64;
 

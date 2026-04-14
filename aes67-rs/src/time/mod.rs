@@ -32,10 +32,13 @@ use crate::{
     nic::{find_nic_with_name, phc_device_for_interface_ethtool},
     time::{phc::PhcClock, statime::StatimePtpMediaClock},
 };
-use clock_steering::{Clock as CSClock, Timestamp, unix::UnixClock};
+use clock_steering::{Clock as CSClock, unix::UnixClock};
+use core::fmt;
 use libc::{clock_gettime, clockid_t, timespec};
+use serde::{Deserialize, Serialize};
 use std::{
     io,
+    ops::Sub,
     time::{Duration, Instant, SystemTime},
 };
 use tracing::{error, info, warn};
@@ -56,10 +59,72 @@ pub const NANOS_PER_MICRO_F: f64 = 1_000.0;
 pub const MILLIS_PER_SEC_F: f32 = 1_000.0;
 pub const MICROS_PER_SEC_F: f64 = 1_000_000.0;
 
-pub trait MediaClock: Clone + Send + 'static {
-    fn current_media_time(&mut self) -> ClockResult<Frames>;
+pub type SystemTimestamp = Timestamp;
+pub type PtpTimestamp = Timestamp;
 
-    fn current_ptp_time_millis(&mut self) -> ClockResult<u64>;
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize,
+)]
+pub struct Timestamp {
+    pub seconds: u64,
+    pub nanos: u32,
+}
+
+impl From<clock_steering::Timestamp> for Timestamp {
+    fn from(value: clock_steering::Timestamp) -> Self {
+        Timestamp {
+            seconds: value.seconds as u64,
+            nanos: value.nanos as u32,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Time {
+    pub media_time: Frames,
+    pub ptp_time: Timestamp,
+    pub system_time: Timestamp,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClockDuration {
+    pub media_duration: Frames,
+    pub ptp_duration: Duration,
+}
+
+impl fmt::Display for ClockDuration {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{} frames ({:?})",
+            self.media_duration, self.ptp_duration
+        )
+    }
+}
+
+impl Sub for Time {
+    type Output = ClockDuration;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        let self_ptp = timestamp_to_duration(self.ptp_time);
+        let rhs_ptp = timestamp_to_duration(rhs.ptp_time);
+        let media_duration = self.media_time.saturating_sub(rhs.media_time);
+        let ptp_duration = self_ptp.saturating_sub(rhs_ptp);
+        ClockDuration {
+            media_duration,
+            ptp_duration,
+        }
+    }
+}
+
+impl Time {
+    pub fn ptp_time_millis(&self) -> u64 {
+        timestamp_to_duration(self.ptp_time).as_millis() as u64
+    }
+}
+
+pub trait MediaClock: Clone + Send + 'static {
+    fn current_time(&mut self) -> ClockResult<Time>;
 }
 
 #[derive(Clone)]
@@ -71,21 +136,12 @@ pub enum Clock {
 }
 
 impl MediaClock for Clock {
-    fn current_media_time(&mut self) -> ClockResult<Frames> {
+    fn current_time(&mut self) -> ClockResult<Time> {
         match self {
-            Clock::System(clock) => clock.current_media_time(),
-            Clock::Phc(clock) => clock.current_media_time(),
+            Clock::System(clock) => clock.current_time(),
+            Clock::Phc(clock) => clock.current_time(),
             #[cfg(feature = "statime")]
-            Clock::Statime(clock) => clock.current_media_time(),
-        }
-    }
-
-    fn current_ptp_time_millis(&mut self) -> ClockResult<u64> {
-        match self {
-            Clock::System(clock) => clock.current_ptp_time_millis(),
-            Clock::Phc(clock) => clock.current_ptp_time_millis(),
-            #[cfg(feature = "statime")]
-            Clock::Statime(clock) => clock.current_ptp_time_millis(),
+            Clock::Statime(clock) => clock.current_time(),
         }
     }
 }
@@ -106,34 +162,39 @@ impl UnixMediaClock {
 }
 
 impl MediaClock for UnixMediaClock {
-    fn current_media_time(&mut self) -> ClockResult<Frames> {
+    fn current_time(&mut self) -> ClockResult<Time> {
+        #[cfg(debug_assertions)]
         let start = Instant::now();
+
         let now = self.unix_clock.now();
+
+        #[cfg(debug_assertions)]
         let end = Instant::now();
 
-        let time = (end - start).as_micros();
-        if time > 500 {
-            warn!("Getting time took {time} µs",);
+        #[cfg(debug_assertions)]
+        {
+            let time = (end - start).as_micros();
+            if time > 500 {
+                warn!("Getting time took {time} µs",);
+            }
         }
 
         let ptp_time = match now {
-            Ok(it) => it,
+            Ok(it) => it.into(),
             Err(e) => return Err(ClockError::other(e)),
         };
-        Ok(to_media_time(ptp_time, self.sample_rate))
-    }
-
-    fn current_ptp_time_millis(&mut self) -> ClockResult<u64> {
-        let ptp_time = match self.unix_clock.now() {
-            Ok(it) => it,
-            Err(e) => return Err(ClockError::other(e)),
-        };
-        Ok(timestamp_to_duration(ptp_time).as_millis() as u64)
+        let system_time = ptp_time;
+        let media_time = to_media_time(ptp_time, self.sample_rate);
+        Ok(Time {
+            media_time,
+            ptp_time,
+            system_time,
+        })
     }
 }
 
 pub fn timestamp_to_duration(ts: Timestamp) -> Duration {
-    Duration::new(ts.seconds as u64, ts.nanos)
+    Duration::new(ts.seconds, ts.nanos)
 }
 
 pub fn timespec_to_duration(tp: timespec) -> Duration {

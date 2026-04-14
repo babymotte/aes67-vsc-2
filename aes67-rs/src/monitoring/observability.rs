@@ -19,7 +19,7 @@ use crate::{
     buffer::AudioBufferPointer,
     formats::{Frames, MilliSeconds},
     monitoring::{
-        HealthReport, ReceiverHealthReport, ReceiverState, ReceiverStatsReport, Report,
+        Delay, HealthReport, ReceiverHealthReport, ReceiverState, ReceiverStatsReport, Report,
         SenderHealthReport, SenderState, SenderStatsReport, StateEvent, StatsReport,
         VscHealthReport, VscState, VscStatsReport,
     },
@@ -50,8 +50,9 @@ struct SenderStats {}
 #[serde(rename_all = "camelCase")]
 struct ReceiverStats {
     clock_offset: u64,
-    network_delay_frames: i64,
-    network_delay_millis: f32,
+    delay: Delay,
+    delays: Vec<Delay>,
+    network_delay: Delay,
     measured_link_offset_frames: Frames,
     measured_link_offset_millis: f32,
     lost_packets: LostPackets,
@@ -297,13 +298,16 @@ impl ObservabilityActor {
             ReceiverStatsReport::MediaClockOffsetChanged { receiver, offset } => {
                 self.receiver_clock_offset_changed(receiver, offset).await;
             }
-            ReceiverStatsReport::NetworkDelay {
+
+            ReceiverStatsReport::Delay {
                 receiver,
-                delay_frames,
-                delay_millis,
+                average,
+                delays,
             } => {
-                self.receiver_network_delay_changed(receiver, delay_frames, delay_millis)
-                    .await;
+                self.receiver_delay_changed(receiver, average, delays).await;
+            }
+            ReceiverStatsReport::NetworkDelay { receiver, delay } => {
+                self.receiver_network_delay_changed(receiver, delay).await;
             }
             ReceiverStatsReport::MeasuredLinkOffset {
                 receiver,
@@ -348,17 +352,26 @@ impl ObservabilityActor {
         self.publish_receiver_stats(&qualified_id, stats).await;
     }
 
-    async fn receiver_network_delay_changed(
+    async fn receiver_delay_changed(
         &mut self,
         qualified_id: String,
-        delay_frames: i64,
-        delay_millis: f32,
+        average: Delay,
+        delays: Vec<Delay>,
     ) {
         let Some(receiver) = self.receivers.get_mut(&qualified_id) else {
             return;
         };
-        receiver.stats.network_delay_frames = delay_frames;
-        receiver.stats.network_delay_millis = delay_millis;
+        receiver.stats.delay = average;
+        receiver.stats.delays = delays;
+        let stats = receiver.stats.clone();
+        self.publish_receiver_stats(&qualified_id, stats).await;
+    }
+
+    async fn receiver_network_delay_changed(&mut self, qualified_id: String, delay: Delay) {
+        let Some(receiver) = self.receivers.get_mut(&qualified_id) else {
+            return;
+        };
+        receiver.stats.network_delay = delay;
         let stats = receiver.stats.clone();
         self.publish_receiver_stats(&qualified_id, stats).await;
     }

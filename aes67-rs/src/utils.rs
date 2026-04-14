@@ -35,6 +35,8 @@ use tokio::sync::mpsc::{self, error::TryRecvError};
 use tracing::{info, warn};
 use worterbuch_client::{Value, Worterbuch, topic};
 
+use crate::time::SystemTimestamp;
+
 pub const U8_WRAP: u16 = 256;
 pub const U16_WRAP: u32 = 65536;
 pub const U32_WRAP: u64 = 4294967296;
@@ -173,15 +175,9 @@ pub fn prevent_deep_c_state() -> miette::Result<std::fs::File> {
     Ok(f)
 }
 
-pub fn sleep_precise(duration: Duration) {
-    let mut now = libc::timespec {
-        tv_sec: 0,
-        tv_nsec: 0,
-    };
-    unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut now) };
-
+pub fn sleep_precise(duration: Duration, now: SystemTimestamp) {
     let target_ns =
-        now.tv_sec as i64 * 1_000_000_000 + now.tv_nsec as i64 + duration.as_nanos() as i64;
+        now.seconds as i64 * 1_000_000_000 + now.nanos as i64 + duration.as_nanos() as i64;
 
     let target = libc::timespec {
         tv_sec: (target_ns / 1_000_000_000) as libc::time_t,
@@ -190,7 +186,7 @@ pub fn sleep_precise(duration: Duration) {
 
     unsafe {
         libc::clock_nanosleep(
-            libc::CLOCK_MONOTONIC,
+            libc::CLOCK_TAI,
             libc::TIMER_ABSTIME,
             &target,
             std::ptr::null_mut(),

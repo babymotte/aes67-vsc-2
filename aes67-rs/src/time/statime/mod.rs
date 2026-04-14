@@ -19,9 +19,9 @@ mod statime_linux;
 use crate::{
     error::{ClockResult, ConfigError, ConfigResult},
     formats::FramesPerSecond,
-    time::{MediaClock, timestamp_to_duration, to_media_time},
+    time::{MediaClock, Time, Timestamp, get_time, to_media_time},
 };
-use clock_steering::Timestamp;
+use libc::CLOCK_TAI;
 use pnet::datalink::NetworkInterface;
 use statime::Clock;
 pub use statime_linux::*;
@@ -54,21 +54,22 @@ impl StatimePtpMediaClock {
 }
 
 impl MediaClock for StatimePtpMediaClock {
-    fn current_media_time(&mut self) -> ClockResult<u64> {
+    fn current_time(&mut self) -> ClockResult<Time> {
+        let tp = get_time(CLOCK_TAI)?;
         let ptp_time = self.statime_ptp_clock.now();
         let ptp_time = Timestamp {
-            seconds: ptp_time.secs() as i64,
+            seconds: ptp_time.secs(),
             nanos: ptp_time.subsec_nanos(),
         };
-        Ok(to_media_time(ptp_time, self.sample_rate))
-    }
-
-    fn current_ptp_time_millis(&mut self) -> ClockResult<u64> {
-        let ptp_time = self.statime_ptp_clock.now();
-        let ptp_time = Timestamp {
-            seconds: ptp_time.secs() as i64,
-            nanos: ptp_time.subsec_nanos(),
+        let media_time = to_media_time(ptp_time, self.sample_rate);
+        let system_time = Timestamp {
+            seconds: tp.tv_sec as u64,
+            nanos: tp.tv_nsec as u32,
         };
-        Ok(timestamp_to_duration(ptp_time).as_millis() as u64)
+        Ok(Time {
+            media_time,
+            ptp_time,
+            system_time,
+        })
     }
 }

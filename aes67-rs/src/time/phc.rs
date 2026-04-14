@@ -18,9 +18,11 @@
 use crate::{
     error::{ClockError, ClockResult},
     formats::FramesPerSecond,
-    time::{MediaClock, get_time, timestamp_to_duration, to_media_time, to_nanos},
+    time::{
+        MediaClock, PtpTimestamp, SystemTimestamp, Time, Timestamp, get_time, to_media_time,
+        to_nanos,
+    },
 };
-use clock_steering::Timestamp;
 use lazy_static::lazy_static;
 use libc::{CLOCK_TAI, clockid_t};
 use std::{
@@ -83,17 +85,23 @@ impl PhcClock {
         Ok(Self { sample_rate })
     }
 
-    fn now(&mut self) -> ClockResult<Timestamp> {
+    fn now(&mut self) -> ClockResult<(SystemTimestamp, PtpTimestamp)> {
         let tp = get_time(CLOCK_TAI)?;
 
         let offset = LAST_OFFSET.load(Ordering::Acquire);
 
         let compensated = Duration::from_nanos((to_nanos(tp) + offset as i128) as u64);
 
-        Ok(Timestamp {
-            seconds: compensated.as_secs() as i64,
+        let system_timestamp = Timestamp {
+            seconds: tp.tv_sec as u64,
+            nanos: tp.tv_nsec as u32,
+        };
+        let ptp_timestamp = Timestamp {
+            seconds: compensated.as_secs(),
             nanos: compensated.subsec_nanos(),
-        })
+        };
+
+        Ok((system_timestamp, ptp_timestamp))
     }
 }
 
@@ -112,28 +120,34 @@ fn get_current_offset(clock: i32) -> ClockResult<i64> {
 }
 
 impl MediaClock for PhcClock {
-    fn current_media_time(&mut self) -> ClockResult<crate::formats::Frames> {
+    fn current_time(&mut self) -> ClockResult<Time> {
+        #[cfg(debug_assertions)]
         let start = Instant::now();
+
         let now = self.now();
+
+        #[cfg(debug_assertions)]
         let end = Instant::now();
 
-        let time = (end - start).as_micros();
-        if time > 500 {
-            warn!("Getting time took {time} µs",);
+        #[cfg(debug_assertions)]
+        {
+            let time = (end - start).as_micros();
+            if time > 500 {
+                warn!("Getting time took {time} µs",);
+            }
         }
 
-        let ptp_time = match now {
+        let (system_time, ptp_time) = match now {
             Ok(it) => it,
             Err(e) => return Err(ClockError::other(e)),
         };
-        Ok(to_media_time(ptp_time, self.sample_rate))
-    }
 
-    fn current_ptp_time_millis(&mut self) -> ClockResult<u64> {
-        let ptp_time = match self.now() {
-            Ok(it) => it,
-            Err(e) => return Err(ClockError::other(e)),
-        };
-        Ok(timestamp_to_duration(ptp_time).as_millis() as u64)
+        let media_time = to_media_time(ptp_time, self.sample_rate);
+
+        Ok(Time {
+            media_time,
+            ptp_time,
+            system_time,
+        })
     }
 }

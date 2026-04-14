@@ -26,9 +26,16 @@ use crate::{
     monitoring::{health::health, observability::observability, stats::stats},
     receiver::config::ReceiverConfig,
     sender::config::SenderConfig,
+    time::Time,
 };
 use rtp_rs::Seq;
-use std::{net::IpAddr, time::SystemTime};
+use serde::Serialize;
+use std::{
+    iter::Sum,
+    net::IpAddr,
+    ops::{Add, Div, Sub},
+    time::SystemTime,
+};
 use tokio::{
     spawn,
     sync::{
@@ -106,6 +113,52 @@ pub enum StatsReport {
     Receiver(ReceiverStatsReport),
 }
 
+#[derive(Debug, Clone, Default, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Delay {
+    frames: Frames,
+    millis: MilliSeconds,
+}
+
+impl Add for Delay {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Delay {
+            frames: self.frames.saturating_add(rhs.frames),
+            millis: self.millis + rhs.millis,
+        }
+    }
+}
+
+impl Sum for Delay {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        iter.fold(Delay::default(), |acc, x| acc + x)
+    }
+}
+
+impl Sub for Delay {
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        Delay {
+            frames: self.frames.saturating_sub(rhs.frames),
+            millis: (self.millis - rhs.millis).max(0.0),
+        }
+    }
+}
+
+impl Div<usize> for Delay {
+    type Output = Self;
+
+    fn div(self, rhs: usize) -> Self::Output {
+        Delay {
+            frames: (self.frames as f64 / rhs as f64).round() as Frames,
+            millis: self.millis as MilliSeconds / rhs as MilliSeconds,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum VscStatsReport {}
 
@@ -118,10 +171,14 @@ pub enum ReceiverStatsReport {
         receiver: String,
         offset: u64,
     },
+    Delay {
+        receiver: String,
+        average: Delay,
+        delays: Vec<Delay>,
+    },
     NetworkDelay {
         receiver: String,
-        delay_frames: i64,
-        delay_millis: MilliSeconds,
+        delay: Delay,
     },
     MeasuredLinkOffset {
         receiver: String,
@@ -170,8 +227,14 @@ pub enum Stats {
 #[derive(Debug, Clone)]
 pub enum TxStats {
     BufferUnderrun,
-    PacketTime(u64),
-    PacketSize(usize),
+    PacketSent {
+        ptime_frames: Frames,
+        packet_size: usize,
+        ingress_time: Frames,
+        seq: Seq,
+        pre_send: Time,
+        post_send: Time,
+    },
 }
 
 #[derive(Debug, Clone)]

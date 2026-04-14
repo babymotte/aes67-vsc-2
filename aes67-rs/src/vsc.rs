@@ -289,6 +289,7 @@ impl VirtualSoundCard {
             config,
             monitoring.clone(),
             &self.subsys,
+            self.clock.clone(),
             #[cfg(feature = "tokio-metrics")]
             self.wb.clone(),
         )
