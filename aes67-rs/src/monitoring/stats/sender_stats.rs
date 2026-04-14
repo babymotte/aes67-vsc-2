@@ -17,12 +17,12 @@
 
 use crate::{
     formats::Frames,
-    monitoring::{Report, TxStats},
+    monitoring::{Report, SenderStatsReport, StatsReport, TxStats},
     time::Time,
 };
 use rtp_rs::Seq;
 use tokio::sync::mpsc;
-use tracing::info;
+use tracing::{debug, warn};
 
 pub struct SenderStats {
     id: String,
@@ -45,7 +45,7 @@ impl SenderStats {
 
     pub(crate) async fn process(&mut self, stats: TxStats) {
         match stats {
-            TxStats::BufferUnderrun => {
+            TxStats::BufferOverflow => {
                 // TODO
             }
             TxStats::PacketSent {
@@ -79,32 +79,47 @@ impl SenderStats {
         post_send: Time,
     ) {
         let pre_post_send_diff = post_send - pre_send;
-        // if pre_post_send_diff.media_duration > 0 {
-        info!("Sending packet {:?} took {}", seq, pre_post_send_diff);
-        // }
+        if pre_post_send_diff.media_duration > 10 {
+            warn!("Sending packet {:?} took {}", seq, pre_post_send_diff);
+        }
+
+        let mut packet_size_changed = false;
 
         if self.ptime_frames != ptime_frames {
             let old_ptime_frames = self.ptime_frames;
             self.ptime_frames = ptime_frames;
-            info!(
+            debug!(
                 "Packet time changed from {} to {}",
                 old_ptime_frames, ptime_frames
             );
-            // TODO: report packet time change
+            packet_size_changed = true;
         }
 
         if self.packet_size != packet_size {
             let old_packet_size = self.packet_size;
             self.packet_size = packet_size;
-            info!(
+            debug!(
                 "Packet size changed from {} to {}",
                 old_packet_size, packet_size
             );
-            // TODO: report packet size change
+            packet_size_changed = true;
+        }
+
+        if packet_size_changed {
+            self.tx
+                .send(Report::Stats(StatsReport::Sender(
+                    SenderStatsReport::PacketTimeChanged {
+                        sender: self.id.clone(),
+                        ptime_frames: self.ptime_frames,
+                        packet_size: self.packet_size,
+                    },
+                )))
+                .await
+                .ok();
         }
 
         if ingress_time != self.expected_next_ingress_time {
-            info!(
+            warn!(
                 "Ingress time mismatch: expected {}, got {}",
                 self.expected_next_ingress_time, ingress_time
             );

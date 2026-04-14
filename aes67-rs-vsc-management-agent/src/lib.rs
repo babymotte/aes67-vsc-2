@@ -1228,7 +1228,7 @@ pub async fn init_management_agent(
 ) -> Result<()> {
     let mut wb_config = worterbuch::Config::new(None).await?;
     wb_config.load_env_with_prefix("AES67_VSC")?;
-    wb_config.persistence_mode = PersistenceMode::ReDB;
+    // wb_config.persistence_mode = PersistenceMode::ReDB;
     wb_config.use_persistence = true;
     wb_config.data_dir = data_dir.as_ref().display().to_string();
     wb_config.ws_endpoint = None;

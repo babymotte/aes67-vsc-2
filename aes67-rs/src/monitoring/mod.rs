@@ -163,7 +163,13 @@ impl Div<usize> for Delay {
 pub enum VscStatsReport {}
 
 #[derive(Debug, Clone)]
-pub enum SenderStatsReport {}
+pub enum SenderStatsReport {
+    PacketTimeChanged {
+        sender: String,
+        ptime_frames: u64,
+        packet_size: usize,
+    },
+}
 
 #[derive(Debug, Clone)]
 pub enum ReceiverStatsReport {
@@ -226,7 +232,7 @@ pub enum Stats {
 
 #[derive(Debug, Clone)]
 pub enum TxStats {
-    BufferUnderrun,
+    BufferOverflow,
     PacketSent {
         ptime_frames: Frames,
         packet_size: usize,

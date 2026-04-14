@@ -45,7 +45,10 @@ struct LostPackets {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct SenderStats {}
+struct SenderStats {
+    ptime_frames: Frames,
+    packet_size: usize,
+}
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ReceiverStats {
@@ -290,7 +293,16 @@ impl ObservabilityActor {
     }
 
     async fn process_sender_stats_report(&mut self, report: SenderStatsReport) {
-        match report {}
+        match report {
+            SenderStatsReport::PacketTimeChanged {
+                sender,
+                ptime_frames,
+                packet_size,
+            } => {
+                self.sender_packet_size_changed(sender, ptime_frames, packet_size)
+                    .await;
+            }
+        }
     }
 
     async fn process_receiver_stats_report(&mut self, report: ReceiverStatsReport) {
@@ -341,6 +353,21 @@ impl ObservabilityActor {
                 self.receiver_muted_changed(receiver, muted).await
             }
         }
+    }
+
+    async fn sender_packet_size_changed(
+        &mut self,
+        qualified_id: String,
+        ptime_frames: Frames,
+        packet_size: usize,
+    ) {
+        let Some(sender) = self.senders.get_mut(&qualified_id) else {
+            return;
+        };
+        sender.stats.ptime_frames = ptime_frames;
+        sender.stats.packet_size = packet_size;
+        let stats = sender.stats.clone();
+        self.publish_sender_stats(&qualified_id, stats).await;
     }
 
     async fn receiver_clock_offset_changed(&mut self, qualified_id: String, offset: u64) {
