@@ -34,6 +34,8 @@ pub enum DiscoveryError {
     NoSuchSession(String),
     #[error("Channel closed")]
     ChannelError(#[from] oneshot::error::RecvError),
+    #[error("SAP discovery is already running")]
+    SapAlreadyRunning,
 }
 
 pub type DiscoveryResult<T> = Result<T, DiscoveryError>;

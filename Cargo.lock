@@ -1806,6 +1806,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "if-addrs"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c0a05c691e1fae256cf7013d99dad472dc52d5543322761f83ec8d47eab40d2b"
+dependencies = [
+ "libc",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "indexmap"
 version = "2.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3383,10 +3393,11 @@ dependencies = [
 
 [[package]]
 name = "sap-rs"
-version = "0.7.2"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "244adcd5e3c398b6b9b327dc4cc6f67462b551f2c81f4ea5f600fc95d8e33b86"
+checksum = "05390541ae9b13e04f6a84e90be26215c72a28750934a503840faf010f2666fe"
 dependencies = [
+ "if-addrs",
  "lazy_static",
  "miette",
  "murmur3",

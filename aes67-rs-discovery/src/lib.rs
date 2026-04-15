@@ -20,12 +20,12 @@ pub mod sap;
 pub mod state_transformers;
 
 use crate::error::{DiscoveryError, DiscoveryResult};
-use aes67_rs::receiver::config::SessionInfo;
+use aes67_rs::{formats::SessionVersion, receiver::config::SessionInfo};
 use aes67_rs_sdp::SdpWrapper;
 use sap_rs::Sap;
 use sdp::SessionDescription;
 use serde::{Deserialize, Serialize};
-use std::{hash::Hash, time::SystemTime};
+use std::{collections::HashMap, hash::Hash, time::SystemTime};
 use tokio::{
     select,
     sync::{mpsc, oneshot},
@@ -85,6 +85,10 @@ enum DiscoveryApiMessage {
         session_id: u64,
         tx: oneshot::Sender<DiscoveryResult<()>>,
     },
+    StartSapDiscovery {
+        iface_name: String,
+        tx: oneshot::Sender<Result<(), DiscoveryError>>,
+    },
 }
 
 #[derive(Clone)]
@@ -122,6 +126,15 @@ impl DiscoveryApi {
             .ok();
         rx.await?
     }
+
+    pub async fn start_sap_discovery(&self, iface_name: String) -> DiscoveryResult<()> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(DiscoveryApiMessage::StartSapDiscovery { iface_name, tx })
+            .await
+            .ok();
+        rx.await?
+    }
 }
 
 struct ApiActor {
@@ -129,7 +142,8 @@ struct ApiActor {
     api_rx: mpsc::Receiver<DiscoveryApiMessage>,
     app_id: String,
     wb: Worterbuch,
-    sap: Sap,
+    sap: Option<Sap>,
+    pending_sessions: HashMap<SessionVersion, SessionInfo>,
 }
 
 pub fn start_discovery(subsys: &SubsystemHandle, app_id: String, wb: Worterbuch) -> DiscoveryApi {
@@ -145,7 +159,7 @@ async fn discovery(
     api_rx: mpsc::Receiver<DiscoveryApiMessage>,
 ) -> DiscoveryResult<()> {
     start_state_transformers(&subsys, app_id.clone(), wb.clone());
-    let sap = start_sap_discovery(&subsys, app_id.clone(), wb.clone()).await?;
+    // let sap = start_sap_discovery(&subsys, app_id.clone(), wb.clone()).await?;
 
     subsys.spawn("api-actor", |s| async {
         ApiActor {
@@ -153,7 +167,8 @@ async fn discovery(
             api_rx,
             app_id,
             wb,
-            sap,
+            sap: None,
+            pending_sessions: HashMap::new(),
         }
         .run()
         .await
@@ -172,8 +187,9 @@ async fn start_sap_discovery(
     subsys: &SubsystemHandle,
     app_id: String,
     wb: Worterbuch,
+    iface_name: String,
 ) -> DiscoveryResult<Sap> {
-    sap::start_discovery(subsys, app_id, wb).await
+    sap::start_discovery(subsys, app_id, wb, iface_name).await
 }
 
 impl ApiActor {
@@ -188,7 +204,7 @@ impl ApiActor {
         Ok(())
     }
 
-    async fn process_message(&self, msg: DiscoveryApiMessage) -> DiscoveryResult<()> {
+    async fn process_message(&mut self, msg: DiscoveryApiMessage) -> DiscoveryResult<()> {
         match msg {
             DiscoveryApiMessage::FetchSessionInfo { session_id, tx } => {
                 tx.send(self.fetch_session_info(session_id).await).ok();
@@ -198,6 +214,9 @@ impl ApiActor {
             }
             DiscoveryApiMessage::RevokeSession { session_id, tx } => {
                 tx.send(self.revoke_session(session_id).await).ok();
+            }
+            DiscoveryApiMessage::StartSapDiscovery { iface_name, tx } => {
+                tx.send(self.start_sap_discovery(iface_name).await).ok();
             }
         }
         Ok(())
@@ -209,7 +228,7 @@ impl ApiActor {
         Ok(res)
     }
 
-    async fn announce_session(&self, session_info: SessionInfo) -> Result<(), DiscoveryError> {
+    async fn announce_session(&mut self, session_info: SessionInfo) -> Result<(), DiscoveryError> {
         info!(
             "Announcing session: {} with version {}",
             session_info.id.id, session_info.id.version
@@ -217,14 +236,50 @@ impl ApiActor {
 
         let sd = SessionDescription::from(&session_info);
 
-        self.sap.announce_session(sd).await?;
+        if let Some(sap) = &self.sap {
+            sap.announce_session(sd).await?;
+        } else {
+            info!("SAP discovery not running, storing session for later announcement");
+            self.pending_sessions
+                .insert(session_info.id.id, session_info.clone());
+        }
+
         Ok(())
     }
 
-    async fn revoke_session(&self, session_id: u64) -> Result<(), DiscoveryError> {
+    async fn revoke_session(&mut self, session_id: u64) -> Result<(), DiscoveryError> {
         info!("Revoking session {}", session_id);
 
-        self.sap.delete_session(session_id).await?;
+        if let Some(sap) = &mut self.sap {
+            sap.delete_session(session_id).await?;
+        } else {
+            info!("SAP discovery not running, cannot revoke session");
+            self.pending_sessions.remove(&session_id);
+        }
+
+        Ok(())
+    }
+
+    async fn start_sap_discovery(&mut self, iface_name: String) -> Result<(), DiscoveryError> {
+        if self.sap.is_some() {
+            return Err(DiscoveryError::SapAlreadyRunning);
+        }
+
+        let sap = start_sap_discovery(
+            &self.subsys,
+            self.app_id.clone(),
+            self.wb.clone(),
+            iface_name,
+        )
+        .await?;
+
+        for (_, session_info) in self.pending_sessions.drain() {
+            let sd = SessionDescription::from(&session_info);
+            sap.announce_session(sd).await?;
+        }
+
+        self.sap = Some(sap);
+
         Ok(())
     }
 }

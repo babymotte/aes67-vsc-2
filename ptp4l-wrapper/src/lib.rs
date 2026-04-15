@@ -63,19 +63,23 @@ async fn run_ptp4l(
     info!("ptp4l running (pid {})", child.id().unwrap_or(0));
 
     tokio::select! {
-        _ = subsys.shutdown_requested() => {
-            info!("Shutdown requested, stopping ptp4l …");
-            child.kill().await.ok();
-            child.wait().await.ok();
-        }
-        result = child.wait() => {
-            let status = result.map_err(error::Error::SpawnError)?;
-            if !status.success() {
-                return Err(error::Error::UnexpectedExit(status));
-            }
-        }
+        _ = subsys.shutdown_requested() => stop(child).await,
+        result = child.wait() => stopped(result)?,
     }
 
+    Ok(())
+}
+
+async fn stop(mut child: tokio::process::Child) {
+    info!("Shutdown requested, stopping ptp4l …");
+    child.kill().await.ok();
+}
+
+fn stopped(result: std::io::Result<std::process::ExitStatus>) -> error::Result<()> {
+    let status = result.map_err(error::Error::SpawnError)?;
+    if !status.success() {
+        return Err(error::Error::UnexpectedExit(status));
+    }
     Ok(())
 }
 

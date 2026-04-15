@@ -31,10 +31,11 @@ pub async fn start_discovery(
     subsys: &SubsystemHandle,
     app_id: String,
     wb: Worterbuch,
+    iface_name: String,
 ) -> DiscoveryResult<Sap> {
     info!("Starting SAP discovery …");
 
-    let (sap, mut events) = Sap::new(subsys).await?;
+    let (sap, mut events) = Sap::new(subsys, iface_name).await?;
 
     let sapc = sap.clone();
     subsys.spawn("sap", |s| async move {

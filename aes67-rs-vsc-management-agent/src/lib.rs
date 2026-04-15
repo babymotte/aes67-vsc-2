@@ -64,10 +64,7 @@ use tokio::{
 };
 use tosub::SubsystemHandle;
 use tracing::{error, info, warn};
-use worterbuch::{
-    PersistenceMode,
-    server::{CloneableWbApi, axum::build_worterbuch_router},
-};
+use worterbuch::server::{CloneableWbApi, axum::build_worterbuch_router};
 use worterbuch_client::{Key, KeyValuePair, Worterbuch, topic};
 
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
@@ -354,7 +351,12 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
             wb.clone(),
         )
         .await?;
+
         let audio_nic = find_nic_with_name(&config.audio.nic)?;
+
+        self.discovery
+            .start_sap_discovery(config.audio.nic.clone())
+            .await?;
 
         let vsc_api = VirtualSoundCardApi::new(name, &self.subsys, wb, clock, audio_nic).await?;
 

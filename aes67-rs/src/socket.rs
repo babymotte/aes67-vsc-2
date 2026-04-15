@@ -94,15 +94,24 @@ pub fn create_tx_socket(
     target: SocketAddr,
     iface: NetworkInterface,
 ) -> SenderInternalResult<UdpSocket> {
-    let has_v4_address = iface.ips.iter().any(|it| it.ip().is_ipv4());
+    let v4_address = iface
+        .ips
+        .iter()
+        .filter_map(|it| match it.ip() {
+            IpAddr::V4(ip) => Some(ip),
+            _ => None,
+        })
+        .next();
 
-    let socket = if has_v4_address {
+    let socket = if let Some(v4_address) = v4_address {
         let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(SockProto::UDP))?;
         socket.bind_device_by_index_v4(NonZeroU32::new(iface.index))?;
+        socket.set_multicast_if_v4(&v4_address)?;
         socket
     } else {
         let socket = Socket::new(Domain::IPV6, Type::DGRAM, Some(SockProto::UDP))?;
         socket.bind_device_by_index_v6(NonZeroU32::new(iface.index))?;
+        socket.set_multicast_if_v6(iface.index)?;
         socket
     };
 
