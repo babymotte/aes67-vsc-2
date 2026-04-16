@@ -30,7 +30,7 @@ pub fn receiver_buffer_channel(
     config: ReceiverConfig,
     monitoring: Monitoring,
 ) -> (ReceiverBufferProducer, ReceiverBufferConsumer) {
-    let buffer_len = config.duration_to_frames(Duration::from_secs(1)) as usize;
+    let buffer_len = config.duration_to_frames(Duration::from_secs(10)) as usize;
     let (tx, rx) = watch::channel(0);
     let buffer = vec![0f32; buffer_len].into_boxed_slice();
     let buffer_pointer = AudioBufferPointer::from_slice(&buffer);
