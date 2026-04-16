@@ -15,11 +15,14 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::error::ManagementAgentResult;
+use crate::error::{ManagementAgentError, ManagementAgentResult};
 use aes67_rs::config::TelemetryConfig;
 use clap::Parser;
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::{
+    net::{IpAddr, Ipv4Addr},
+    path::{Path, PathBuf},
+};
 use tokio::fs;
 
 pub const DEFAULT_PORT: u16 = 43567;
@@ -50,24 +53,34 @@ pub struct AppConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WebUiConfig {
+    pub bind_address: Option<IpAddr>,
     pub port: u16,
 }
 
 impl Default for WebUiConfig {
     fn default() -> Self {
-        Self { port: DEFAULT_PORT }
+        Self {
+            bind_address: Some(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
+            port: DEFAULT_PORT,
+        }
     }
 }
 
 impl AppConfig {
     pub async fn load(path: impl AsRef<Path>) -> ManagementAgentResult<Self> {
-        match fs::read(path).await {
+        match fs::read(path.as_ref()).await {
             Ok(contents) => {
-                let config = serde_yaml::from_slice(&contents)?;
+                let config = serde_yaml::from_slice(&contents).map_err(|e| {
+                    ManagementAgentError::YamlError(path.as_ref().to_string_lossy().to_string(), e)
+                })?;
                 Ok(config)
             }
             Err(e) => {
-                eprintln!("Could not load config: {e}; using default config");
+                eprintln!(
+                    "Could not load config file {}: {}; using default config",
+                    path.as_ref().display(),
+                    e
+                );
                 let default = AppConfig {
                     web_ui: Default::default(),
                     telemetry: Default::default(),

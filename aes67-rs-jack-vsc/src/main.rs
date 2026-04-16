@@ -23,7 +23,7 @@ use aes67_rs_vsc_management_agent::{
     config::{AppConfig, Args},
     init_management_agent,
 };
-use std::time::Duration;
+use std::{net::IpAddr, time::Duration};
 use tosub::SubsystemHandle;
 use tracing::info;
 
@@ -66,6 +66,10 @@ async fn run(
     init_management_agent(
         &subsys,
         id.clone(),
+        config
+            .web_ui
+            .bind_address
+            .unwrap_or(IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED)),
         config.web_ui.port,
         args.data_dir,
         io_handler,

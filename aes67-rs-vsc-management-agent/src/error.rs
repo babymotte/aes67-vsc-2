@@ -36,8 +36,8 @@ pub enum ManagementAgentError {
     WorterbuchError(#[from] WorterbuchAppError),
     #[error("Worterbuch config error: {0}")]
     WbConfigError(#[from] worterbuch::common::error::ConfigError),
-    #[error("YAML error: {0}")]
-    YamlError(#[from] serde_yaml::Error),
+    #[error("Failed to parse YAML file {0}: {1}")]
+    YamlError(String, serde_yaml::Error),
     #[error("SDP error: {0}")]
     SdpError(#[from] sdp::Error),
     #[error("VSC failed to start: {0}")]
@@ -92,7 +92,7 @@ impl From<ManagementAgentError> for (StatusCode, String) {
             ManagementAgentError::WbConfigError(e) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
             }
-            ManagementAgentError::YamlError(e) => {
+            ManagementAgentError::YamlError(_, e) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
             }
             ManagementAgentError::SdpError(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),

@@ -1224,6 +1224,7 @@ pub trait IoHandler: Clone + Send + Sync + 'static {
 pub async fn init_management_agent(
     subsys: &SubsystemHandle,
     app_id: String,
+    bind_address: IpAddr,
     port: u16,
     data_dir: impl AsRef<Path>,
     io_handler: impl IoHandler,
@@ -1257,7 +1258,7 @@ pub async fn init_management_agent(
     .await
     .ok();
 
-    Aes67VscRestApi::create(subsys, app_id, port, worterbuch, io_handler).await?;
+    Aes67VscRestApi::create(subsys, app_id, bind_address, port, worterbuch, io_handler).await?;
 
     Ok(())
 }
@@ -1270,6 +1271,7 @@ impl Aes67VscRestApi {
     pub async fn create(
         subsys: &SubsystemHandle,
         app_id: String,
+        bind_address: IpAddr,
         port: u16,
         worterbuch: CloneableWbApi,
         io_handler: impl IoHandler,
@@ -1303,7 +1305,7 @@ impl Aes67VscRestApi {
 
         info!("Starting VSC management agent REST API …");
         subsys.spawn(name, async move |s: SubsystemHandle| {
-            run_rest_api(s, app_id, port, worterbuch, wbc, api).await
+            run_rest_api(s, app_id, bind_address, port, worterbuch, wbc, api).await
         });
 
         Ok(())
@@ -1313,6 +1315,7 @@ impl Aes67VscRestApi {
 async fn run_rest_api(
     subsys: SubsystemHandle,
     app_id: String,
+    bind_address: IpAddr,
     port: u16,
     worterbuch: CloneableWbApi,
     wb: Worterbuch,
@@ -1323,7 +1326,7 @@ async fn run_rest_api(
     let netinf_watcher =
         netinf_watcher::start(&subsys, app_id.clone(), Duration::from_secs(3), wb).await;
 
-    let listener = TcpListener::bind(format!("127.0.0.1:{port}")).await?;
+    let listener = TcpListener::bind(SocketAddr::new(bind_address, port)).await?;
 
     let app = build_worterbuch_router(
         &subsys,
