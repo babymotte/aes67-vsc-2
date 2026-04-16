@@ -39,4 +39,4 @@ tokio-metrics = [
     "aes67-rs/tokio-metrics",
     "aes67-rs-vsc-management-agent/tokio-metrics",
 ]
-default = ["jemalloc"]
+default = []
