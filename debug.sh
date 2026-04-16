@@ -9,7 +9,7 @@ systemctl --user stop aes67-jack-vsc.service
 # for _ in {1..999}; do
     cargo build --package aes67-rs-jack-vsc || exit $?
     sudo setcap 'cap_net_bind_service+ep cap_sys_nice+ep cap_sys_time+ep cap_net_admin+ep' ./target/debug/aes67-rs-jack-vsc || exit $?
-    RUST_BACKTRACE=1 RUST_LOG="aes67_rs_ui=info,aes67_rs_jack_vsc::session_manager=warn,aes67_rs::monitoring=info,statime=warn,worterbuch=warn,tosub=warn,sap_rs=warn,info" ./target/debug/aes67-rs-jack-vsc --config ./config.yaml --data-dir ./data
+    RUST_BACKTRACE=1 RUST_LOG="aes67_rs_ui=info,aes67_rs_jack_vsc::session_manager=warn,aes67_rs::monitoring=error,statime=warn,worterbuch=warn,tosub=warn,sap_rs=warn,info" pw-jack -p 192 ./target/debug/aes67-rs-jack-vsc --config ./config.yaml --data-dir ./data
 # done
 
 # AES67_VSC_2_CONFIG="./config/receiver2.yaml" ./target/debug/aes-vsc-receiver
