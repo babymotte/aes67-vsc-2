@@ -26,7 +26,7 @@ use rtp_rs::Seq;
 use std::{
     collections::{HashMap, VecDeque},
     net::IpAddr,
-    time::SystemTime,
+    time::{Duration, Instant, SystemTime},
 };
 use tokio::sync::mpsc;
 use tracing::{debug, warn};
@@ -45,6 +45,8 @@ pub struct ReceiverStats {
     buffer_address: Option<crate::buffer::AudioBufferPointer>,
     delays: VecDeque<Delay>,
     packet_counter: u64,
+    pending_lossed_packets_detection: Option<Instant>,
+    pending_late_packets_detection: Option<Instant>,
 }
 
 impl ReceiverStats {
@@ -63,6 +65,8 @@ impl ReceiverStats {
             muted: false,
             delays: VecDeque::new(),
             packet_counter: 0,
+            pending_lossed_packets_detection: None,
+            pending_late_packets_detection: None,
         }
     }
 
@@ -82,12 +86,14 @@ impl ReceiverStats {
                 seq,
                 payload_len,
                 ingress_time,
+                playout_time,
                 media_time_at_reception,
             } => {
                 self.process_packet_reception(
                     seq,
                     payload_len,
                     ingress_time,
+                    playout_time,
                     media_time_at_reception,
                 )
                 .await;
@@ -166,14 +172,14 @@ impl ReceiverStats {
         seq: Seq,
         payload_len: usize,
         ingress_time: Frames,
+        playout_time: Frames,
         media_time_at_reception: Frames,
     ) {
         self.packet_counter += 1;
 
-        if ingress_time > media_time_at_reception {
-            let delay = ingress_time - media_time_at_reception;
-            self.process_late_packet(seq, media_time_at_reception, delay)
-                .await;
+        if media_time_at_reception > playout_time {
+            let delay = media_time_at_reception - playout_time;
+            self.process_late_packet(seq, ingress_time, delay).await;
         }
 
         let Some(config) = &self.config.clone() else {
@@ -191,6 +197,22 @@ impl ReceiverStats {
             .await;
 
         self.skipped_packets.remove(&ingress_time);
+
+        if let Some(pending) = &self.pending_late_packets_detection {
+            if pending.elapsed() >= Duration::from_secs(1) {
+                self.tx
+                    .send(Report::Stats(StatsReport::Receiver(
+                        ReceiverStatsReport::LatePackets {
+                            receiver: self.id.clone(),
+                            late_packets: self.late_packet_counter,
+                            timestamp: SystemTime::now(),
+                        },
+                    )))
+                    .await
+                    .ok();
+                self.pending_late_packets_detection = None;
+            }
+        }
     }
 
     async fn update_delay(&mut self, config: &ReceiverConfig, delay: Frames) {
@@ -294,38 +316,47 @@ impl ReceiverStats {
                 .ok();
         }
 
-        let mut missed_timestamps = vec![];
+        let mut missing_timestamps = vec![];
 
         self.skipped_packets.retain(|ts, seq| {
             let missed = ts > &ingress_time;
             if missed {
-                missed_timestamps.push((*ts, *seq));
+                missing_timestamps.push((*ts, *seq));
             }
             !missed
         });
 
-        if !missed_timestamps.is_empty() {
-            missed_timestamps.sort_by(|(ts_a, _), (ts_b, _)| ts_a.cmp(ts_b));
+        if !missing_timestamps.is_empty() {
+            missing_timestamps.sort_by(|(ts_a, _), (ts_b, _)| ts_a.cmp(ts_b));
             debug!(
                 "{}: Lost packets: {}",
                 self.id,
-                missed_timestamps
+                missing_timestamps
                     .iter()
                     .map(|(ts, seq)| format!("{{seq: {}, ts: {}}}", u16::from(*seq), ts))
                     .collect::<Vec<String>>()
                     .join(", ")
             );
-            self.lost_packet_counter += missed_timestamps.len();
-            self.tx
-                .send(Report::Stats(StatsReport::Receiver(
-                    ReceiverStatsReport::LostPackets {
-                        receiver: self.id.clone(),
-                        lost_packets: self.lost_packet_counter,
-                        timestamp: SystemTime::now(),
-                    },
-                )))
-                .await
-                .ok();
+            self.lost_packet_counter += missing_timestamps.len();
+            if self.pending_lossed_packets_detection.is_none() {
+                self.pending_lossed_packets_detection = Some(Instant::now());
+            }
+        }
+
+        if let Some(pending) = &self.pending_lossed_packets_detection {
+            if pending.elapsed() >= Duration::from_secs(1) {
+                self.tx
+                    .send(Report::Stats(StatsReport::Receiver(
+                        ReceiverStatsReport::LostPackets {
+                            receiver: self.id.clone(),
+                            lost_packets: self.lost_packet_counter,
+                            timestamp: SystemTime::now(),
+                        },
+                    )))
+                    .await
+                    .ok();
+                self.pending_lossed_packets_detection = None;
+            }
         }
     }
 
@@ -391,7 +422,7 @@ impl ReceiverStats {
         }
     }
 
-    async fn process_late_packet(&mut self, seq: Seq, timestamp: u64, delay: Frames) {
+    async fn process_late_packet(&mut self, seq: Seq, timestamp: Frames, delay: Frames) {
         let Some(desc) = &self.config else {
             return;
         };
@@ -406,16 +437,9 @@ impl ReceiverStats {
             delay_usec
         );
         self.late_packet_counter += 1;
-        self.tx
-            .send(Report::Stats(StatsReport::Receiver(
-                ReceiverStatsReport::LatePackets {
-                    receiver: self.id.clone(),
-                    late_packets: self.late_packet_counter,
-                    timestamp: SystemTime::now(),
-                },
-            )))
-            .await
-            .ok();
+        if self.pending_late_packets_detection.is_none() {
+            self.pending_late_packets_detection = Some(Instant::now());
+        }
     }
 
     async fn process_out_of_order_packet(

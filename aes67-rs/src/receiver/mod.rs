@@ -291,7 +291,16 @@ impl Receiver {
             return Ok(());
         };
 
-        self.report_packet_received(media_time_at_reception, &rtp, seq, ingress_time);
+        let link_offset_frames = self.config.frames_in_link_offset();
+        let playout_time = ingress_time + link_offset_frames;
+
+        self.report_packet_received(
+            media_time_at_reception,
+            &rtp,
+            seq,
+            ingress_time,
+            playout_time,
+        );
 
         if ingress_time > media_time_at_reception {
             self.report_time_travelling_packet(media_time_at_reception, &rtp, ingress_time);
@@ -350,7 +359,7 @@ impl Receiver {
 }
 
 mod monitoring {
-    use crate::buffer::AudioBufferPointer;
+    use crate::{buffer::AudioBufferPointer, formats::Frames};
 
     use super::*;
 
@@ -369,12 +378,14 @@ mod monitoring {
             media_time_at_reception: u64,
             rtp: &RtpReader<'_>,
             seq: Seq,
-            ingress_time: u64,
+            ingress_time: Frames,
+            playout_time: Frames,
         ) {
             self.monitoring.receiver_stats(RxStats::PacketReceived {
                 seq,
                 payload_len: rtp.payload().len(),
                 ingress_time,
+                playout_time,
                 media_time_at_reception,
             });
         }

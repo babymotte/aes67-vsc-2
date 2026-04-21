@@ -218,12 +218,12 @@ impl ReceiverConfig {
         )
     }
 
-    pub fn frames_in_link_offset(&self) -> usize {
+    pub fn frames_in_link_offset(&self) -> Frames {
         formats::duration_to_frames(
             Duration::from_micros((self.link_offset.get() * MICROS_PER_MILLI_F).round() as u64),
             self.audio_format.sample_rate,
         )
-        .round() as usize
+        .round() as Frames
     }
 
     pub(crate) fn frames_in_buffer(&self, buffer_len: usize) -> u64 {

@@ -252,6 +252,7 @@ pub enum RxStats {
         seq: Seq,
         payload_len: usize,
         ingress_time: Frames,
+        playout_time: Frames,
         media_time_at_reception: Frames,
     },
     OutOfOrderPacket {
