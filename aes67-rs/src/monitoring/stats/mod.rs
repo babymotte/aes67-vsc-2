@@ -28,7 +28,7 @@ use crate::monitoring::{
 use std::collections::{HashMap, hash_map::Entry};
 use tokio::{select, sync::mpsc};
 use tosub::SubsystemHandle;
-use tracing::{info, warn};
+use tracing::info;
 
 pub async fn stats(
     subsys: SubsystemHandle,
@@ -149,14 +149,14 @@ impl StatsActor {
             ReceiverState::Created {
                 id,
                 config,
-                label: _,
                 address,
+                ..
             } => {
                 self.rx_stats(id.to_owned())
                     .process(RxStats::Started(config.to_owned(), address.to_owned()))
                     .await;
             }
-            ReceiverState::Renamed { id: _, label: _ } => (),
+            ReceiverState::Renamed { .. } => (),
             ReceiverState::Destroyed { id } => {
                 info!("receiver destroyed: {id}");
                 // TODO

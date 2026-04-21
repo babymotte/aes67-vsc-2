@@ -22,7 +22,7 @@ use crate::{
 use aes67_rs::{
     monitoring::Monitoring,
     sender::{api::SenderApi, config::SenderConfig},
-    time::{Clock, MILLIS_PER_SEC_F},
+    time::Clock,
 };
 use jack::{
     AudioIn, Client, ClientOptions, Control, Port, ProcessScope, contrib::ClosureProcessHandler,
@@ -30,10 +30,10 @@ use jack::{
 use miette::IntoDiagnostic;
 use tokio::sync::mpsc;
 use tosub::SubsystemHandle;
-use tracing::{error, info};
+#[cfg(debug_assertions)]
+use tracing::{error, info, warn};
 
 struct State {
-    app_id: String,
     sender: SenderApi,
     ports: Vec<Port<AudioIn>>,
     clock: JackClock,
@@ -42,6 +42,7 @@ struct State {
 
 impl Drop for State {
     fn drop(&mut self) {
+        #[cfg(debug_assertions)]
         info!("JACK recording stopped.");
         self.sender.stop();
     }
@@ -56,12 +57,12 @@ pub async fn start_recording(
     _monitoring: Monitoring,
 ) -> miette::Result<SubsystemHandle> {
     // TODO evaluate client status
-    let (client, status) =
+    let (client, _status) =
         Client::new(&config.label, ClientOptions::default()).into_diagnostic()?;
-
+    #[cfg(debug_assertions)]
     info!(
         "JACK client '{}' created with status {:?}",
-        config.label, status
+        config.label, _status
     );
 
     let mut ports = vec![];
@@ -79,7 +80,6 @@ pub async fn start_recording(
     let client_id = config.label.clone();
     let notification_handler = SessionManagerNotificationHandler { client_id, tx };
     let process_handler_state = State {
-        app_id: app_id.clone(),
         sender,
         ports,
         clock: JackClock::new(clock),
@@ -102,9 +102,13 @@ pub async fn start_recording(
     Ok(session_manager)
 }
 
-fn buffer_change(_: &mut State, client: &Client, buffer_len: jack::Frames) -> Control {
-    let buffer_ms = buffer_len as f32 * MILLIS_PER_SEC_F / client.sample_rate() as f32;
-    info!("JACK buffer size changed to {buffer_len} frames / {buffer_ms:.1} ms");
+fn buffer_change(_: &mut State, _client: &Client, _buffer_len: jack::Frames) -> Control {
+    #[cfg(debug_assertions)]
+    {
+        use aes67_rs::time::MILLIS_PER_SEC_F;
+        let buffer_ms = _buffer_len as f32 * MILLIS_PER_SEC_F / _client.sample_rate() as f32;
+        info!("JACK buffer size changed to {_buffer_len} frames / {buffer_ms:.1} ms");
+    }
     Control::Continue
 }
 
@@ -115,14 +119,18 @@ fn process(state: &mut State, _: &Client, ps: &ProcessScope) -> Control {
         return Control::Quit;
     }
 
-    let ingress_time = match state.clock.update_clock(ps) {
-        Ok(ClockState::Stable(it)) => it,
+    let (ingress_time, compensation) = match state.clock.update_clock(ps, false) {
+        Ok(ClockState::Stable {
+            current_time,
+            compensation,
+        }) => (current_time, compensation),
         Ok(ClockState::Unstable) => {
             // TODO send empty packet
             return Control::Continue;
         }
-        Err(e) => {
-            error!("Could not get current media time: {e}");
+        Err(_e) => {
+            #[cfg(debug_assertions)]
+            error!("Could not get current media time: {_e}");
             return Control::Quit;
         }
     };

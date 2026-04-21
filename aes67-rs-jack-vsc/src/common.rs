@@ -22,7 +22,8 @@ use aes67_rs::{
     utils::AverageCalculationBuffer,
 };
 use jack::ProcessScope;
-use tracing::{debug, warn};
+#[cfg(debug_assertions)]
+use tracing::{debug, info, warn};
 
 pub struct JackClock {
     ptp_clock: Clock,
@@ -32,12 +33,15 @@ pub struct JackClock {
 }
 
 pub enum ClockOffset {
-    Stable(i64),
+    Stable { offset: i64, compensation: i64 },
     Unstable,
 }
 
 pub enum ClockState {
-    Stable(Frames),
+    Stable {
+        current_time: Frames,
+        compensation: i64,
+    },
     Unstable,
 }
 
@@ -46,21 +50,37 @@ impl JackClock {
         JackClock {
             ptp_clock,
             jack_clock_offset: None,
-            drift_buffer: AverageCalculationBuffer::new([0i64; 1024].into()),
+            drift_buffer: AverageCalculationBuffer::new([0i64; 100].into()),
             slew: 0,
         }
     }
 
-    pub fn update_clock(&mut self, ps: &ProcessScope) -> ClockResult<ClockState> {
+    pub fn update_clock(
+        &mut self,
+        ps: &ProcessScope,
+        continuously_compensate_drift: bool,
+    ) -> ClockResult<ClockState> {
+        let drift_buf_len = 50_000 / ps.n_frames() as usize;
+        if self.drift_buffer.len() != drift_buf_len {
+            info!("Updating drift buffer length to {drift_buf_len}");
+            self.drift_buffer = AverageCalculationBuffer::new(vec![0i64; drift_buf_len].into());
+        }
+
         let state = match self.jack_clock_offset {
-            Some(offset) => self.compensate_drift(offset, ps)?,
+            Some(offset) => self.compensate_drift(offset, ps, continuously_compensate_drift)?,
             None => self.init_clock(ps)?,
         };
 
         Ok(match state {
-            ClockOffset::Stable(offset) => {
-                // TODO this might wrap, wrap needs to be detected and handled!
-                ClockState::Stable((ps.last_frame_time() as i64 + offset) as Frames)
+            ClockOffset::Stable {
+                offset,
+                compensation,
+            } => {
+                ClockState::Stable {
+                    // TODO this might wrap, wrap needs to be detected and handled!
+                    current_time: (ps.last_frame_time() as i64 + offset) as Frames,
+                    compensation,
+                }
             }
             ClockOffset::Unstable => ClockState::Unstable,
         })
@@ -79,40 +99,67 @@ impl JackClock {
         Ok(ClockOffset::Unstable)
     }
 
-    fn compensate_drift(&mut self, offset: i64, ps: &ProcessScope) -> ClockResult<ClockOffset> {
+    fn compensate_drift(
+        &mut self,
+        offset: i64,
+        ps: &ProcessScope,
+        continuously_compensate_drift: bool,
+    ) -> ClockResult<ClockOffset> {
         let t1 = ps.frames_since_cycle_start();
         let ptp_time = self.ptp_clock.current_time()?.media_time as i64;
         let t3 = ps.frames_since_cycle_start();
         let jack_time = (ps.last_frame_time() + (t1 + t3) / 2) as i64;
 
+        let jack_ptpt_time = jack_time + offset;
+
         let diff = ptp_time - jack_time;
-        let drift = diff - offset;
+        let drift = ptp_time - jack_ptpt_time;
 
         let drift_abs = drift.abs();
         if drift_abs > ps.n_frames() as i64 {
+            #[cfg(debug_assertions)]
             warn!("JACK clock is off by {drift} frames, resetting JACK clock.");
             self.jack_clock_offset = Some(diff);
             return Ok(ClockOffset::Unstable);
         }
 
-        if let Some(drift) = self.drift_buffer.update(drift) {
-            self.slew -= drift;
+        if !continuously_compensate_drift {
+            return Ok(ClockOffset::Stable {
+                offset,
+                compensation: 0,
+            });
         }
 
-        let signum = self.slew.signum();
+        let slew = if let Some(drift) = self.drift_buffer.update(drift) {
+            let slew = drift.signum();
 
-        if signum != 0 {
-            debug!(
-                "JACK clock drift: {}; slewing jack clock by {}",
-                -self.slew, signum
-            );
-        }
+            #[cfg(debug_assertions)]
+            if drift != 0 {
+                if drift > 0 {
+                    debug!(
+                        "JACK clock is {} frames BEHIND; slewing jack clock by {}",
+                        drift, slew
+                    );
+                } else {
+                    debug!(
+                        "JACK clock is {} frames AHEAD; slewing jack clock by {}",
+                        -drift, slew
+                    );
+                }
+            }
 
-        self.slew -= signum;
-        let updated_offset = offset - signum;
+            slew
+        } else {
+            0
+        };
+
+        let updated_offset = offset + slew;
 
         self.jack_clock_offset = Some(updated_offset);
 
-        Ok(ClockOffset::Stable(updated_offset))
+        Ok(ClockOffset::Stable {
+            offset: updated_offset,
+            compensation: slew,
+        })
     }
 }

@@ -99,6 +99,10 @@ where
         Self { buffer, cursor: 0 }
     }
 
+    pub fn len(&self) -> usize {
+        self.buffer.len()
+    }
+
     pub fn update(&mut self, value: N) -> Option<N> {
         self.buffer[self.cursor] = value;
         self.cursor += 1;

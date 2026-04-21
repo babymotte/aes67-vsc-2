@@ -24,7 +24,7 @@ use aes67_rs::{
     formats::{Frames, frames_to_duration},
     monitoring::Monitoring,
     receiver::{api::ReceiverApi, config::ReceiverConfig},
-    time::{Clock, MILLIS_PER_SEC_F},
+    time::Clock,
 };
 use jack::{
     AudioOut, Client, ClientOptions, Control, Port, ProcessScope, contrib::ClosureProcessHandler,
@@ -33,6 +33,7 @@ use miette::IntoDiagnostic;
 use std::{thread, time::Instant};
 use tokio::sync::mpsc;
 use tosub::SubsystemHandle;
+#[cfg(debug_assertions)]
 use tracing::{error, info};
 
 struct State {
@@ -56,12 +57,13 @@ pub async fn start_playout(
     monitoring: Monitoring,
 ) -> miette::Result<SubsystemHandle> {
     // TODO evaluate client status
-    let (client, status) =
+    let (client, _status) =
         Client::new(&config.label, ClientOptions::default()).into_diagnostic()?;
 
+    #[cfg(debug_assertions)]
     info!(
         "JACK client '{}' created with status {:?}",
-        config.label, status
+        config.label, _status
     );
 
     let mut ports = vec![];
@@ -108,9 +110,13 @@ pub async fn start_playout(
     Ok(session_manager)
 }
 
-fn buffer_change(_: &mut State, client: &Client, buffer_len: jack::Frames) -> Control {
-    let buffer_ms = buffer_len as f32 * MILLIS_PER_SEC_F / client.sample_rate() as f32;
-    info!("JACK buffer size changed to {buffer_len} frames / {buffer_ms:.1} ms");
+fn buffer_change(_: &mut State, _client: &Client, _buffer_len: jack::Frames) -> Control {
+    #[cfg(debug_assertions)]
+    {
+        use aes67_rs::time::MILLIS_PER_SEC_F;
+        let buffer_ms = _buffer_len as f32 * MILLIS_PER_SEC_F / _client.sample_rate() as f32;
+        info!("JACK buffer size changed to {_buffer_len} frames / {buffer_ms:.1} ms");
+    }
     Control::Continue
 }
 
@@ -124,13 +130,14 @@ fn process(state: &mut State, _: &Client, ps: &ProcessScope) -> Control {
 
     let start = Instant::now();
 
-    let playout_time = match state.clock.update_clock(ps) {
-        Ok(ClockState::Stable(it)) => it,
+    let playout_time = match state.clock.update_clock(ps, true) {
+        Ok(ClockState::Stable { current_time, .. }) => current_time,
         Ok(ClockState::Unstable) => {
             muted(state, ps);
             return Control::Continue;
         }
         Err(e) => {
+            #[cfg(debug_assertions)]
             error!("Could not get current media time: {e}");
             return Control::Quit;
         }
@@ -173,6 +180,7 @@ fn process(state: &mut State, _: &Client, ps: &ProcessScope) -> Control {
             }
             Err(_) => {
                 if !state.muted {
+                    #[cfg(debug_assertions)]
                     error!("Receiving audio data timed out.");
                 }
                 muted(state, ps);
