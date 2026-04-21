@@ -136,9 +136,9 @@ fn process(state: &mut State, client: &Client, ps: &ProcessScope) -> Control {
             muted(state, ps);
             return Control::Continue;
         }
-        Err(e) => {
+        Err(_e) => {
             #[cfg(debug_assertions)]
-            error!("Could not get current media time: {e}");
+            error!("Could not get current media time: {_e}");
             return Control::Quit;
         }
     };

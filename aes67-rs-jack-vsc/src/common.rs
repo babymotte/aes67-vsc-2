@@ -62,6 +62,7 @@ impl JackClock {
         let drift_buf_len =
             (client.sample_rate() as usize / 48_000) * (10_000 / ps.n_frames() as usize);
         if self.drift_buffer.len() != drift_buf_len {
+            #[cfg(debug_assertions)]
             info!("Updating drift buffer length to {drift_buf_len}");
             self.drift_buffer = AverageCalculationBuffer::new(vec![0i64; drift_buf_len].into());
         }
