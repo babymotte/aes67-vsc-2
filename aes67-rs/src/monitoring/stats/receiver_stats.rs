@@ -199,19 +199,20 @@ impl ReceiverStats {
         self.skipped_packets.remove(&ingress_time);
 
         if let Some(pending) = &self.pending_late_packets_detection
-            && pending.elapsed() >= Duration::from_secs(1) {
-                self.tx
-                    .send(Report::Stats(StatsReport::Receiver(
-                        ReceiverStatsReport::LatePackets {
-                            receiver: self.id.clone(),
-                            late_packets: self.late_packet_counter,
-                            timestamp: SystemTime::now(),
-                        },
-                    )))
-                    .await
-                    .ok();
-                self.pending_late_packets_detection = None;
-            }
+            && pending.elapsed() >= Duration::from_secs(1)
+        {
+            self.tx
+                .send(Report::Stats(StatsReport::Receiver(
+                    ReceiverStatsReport::LatePackets {
+                        receiver: self.id.clone(),
+                        late_packets: self.late_packet_counter,
+                        timestamp: SystemTime::now(),
+                    },
+                )))
+                .await
+                .ok();
+            self.pending_late_packets_detection = None;
+        }
     }
 
     async fn update_delay(&mut self, config: &ReceiverConfig, delay: Frames) {
@@ -343,19 +344,20 @@ impl ReceiverStats {
         }
 
         if let Some(pending) = &self.pending_lossed_packets_detection
-            && pending.elapsed() >= Duration::from_secs(1) {
-                self.tx
-                    .send(Report::Stats(StatsReport::Receiver(
-                        ReceiverStatsReport::LostPackets {
-                            receiver: self.id.clone(),
-                            lost_packets: self.lost_packet_counter,
-                            timestamp: SystemTime::now(),
-                        },
-                    )))
-                    .await
-                    .ok();
-                self.pending_lossed_packets_detection = None;
-            }
+            && pending.elapsed() >= Duration::from_secs(1)
+        {
+            self.tx
+                .send(Report::Stats(StatsReport::Receiver(
+                    ReceiverStatsReport::LostPackets {
+                        receiver: self.id.clone(),
+                        lost_packets: self.lost_packet_counter,
+                        timestamp: SystemTime::now(),
+                    },
+                )))
+                .await
+                .ok();
+            self.pending_lossed_packets_detection = None;
+        }
     }
 
     async fn process_media_clock_offset_change(&mut self, offset: u64, rtp_timestamp: u32) {
