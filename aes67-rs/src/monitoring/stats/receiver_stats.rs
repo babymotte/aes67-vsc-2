@@ -198,8 +198,8 @@ impl ReceiverStats {
 
         self.skipped_packets.remove(&ingress_time);
 
-        if let Some(pending) = &self.pending_late_packets_detection {
-            if pending.elapsed() >= Duration::from_secs(1) {
+        if let Some(pending) = &self.pending_late_packets_detection
+            && pending.elapsed() >= Duration::from_secs(1) {
                 self.tx
                     .send(Report::Stats(StatsReport::Receiver(
                         ReceiverStatsReport::LatePackets {
@@ -212,7 +212,6 @@ impl ReceiverStats {
                     .ok();
                 self.pending_late_packets_detection = None;
             }
-        }
     }
 
     async fn update_delay(&mut self, config: &ReceiverConfig, delay: Frames) {
@@ -226,7 +225,7 @@ impl ReceiverStats {
             self.delays.pop_front();
         }
         self.delays.push_back(delay);
-        if self.packet_counter % 1000 == 0 {
+        if self.packet_counter.is_multiple_of(1000) {
             self.evaluate_delays().await;
         }
     }
@@ -343,8 +342,8 @@ impl ReceiverStats {
             }
         }
 
-        if let Some(pending) = &self.pending_lossed_packets_detection {
-            if pending.elapsed() >= Duration::from_secs(1) {
+        if let Some(pending) = &self.pending_lossed_packets_detection
+            && pending.elapsed() >= Duration::from_secs(1) {
                 self.tx
                     .send(Report::Stats(StatsReport::Receiver(
                         ReceiverStatsReport::LostPackets {
@@ -357,7 +356,6 @@ impl ReceiverStats {
                     .ok();
                 self.pending_lossed_packets_detection = None;
             }
-        }
     }
 
     async fn process_media_clock_offset_change(&mut self, offset: u64, rtp_timestamp: u32) {

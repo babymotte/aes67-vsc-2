@@ -31,7 +31,7 @@ use miette::IntoDiagnostic;
 use tokio::sync::mpsc;
 use tosub::SubsystemHandle;
 #[cfg(debug_assertions)]
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 struct State {
     sender: SenderApi,
@@ -119,7 +119,7 @@ fn process(state: &mut State, client: &Client, ps: &ProcessScope) -> Control {
         return Control::Quit;
     }
 
-    let (ingress_time, compensation) = match state.clock.update_clock(client, ps, false) {
+    let (ingress_time, _compensation) = match state.clock.update_clock(client, ps, false) {
         Ok(ClockState::Stable {
             current_time,
             compensation,
@@ -143,7 +143,7 @@ fn process(state: &mut State, client: &Client, ps: &ProcessScope) -> Control {
         state.sender.write_channel(ch, port.as_slice(ps));
     }
 
-    if let Err(e) = state.sender.end_write() {
+    if let Err(_e) = state.sender.end_write() {
         // TODO sender was not ready; send to monitoring
     }
 

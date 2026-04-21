@@ -31,7 +31,7 @@ use crate::{
         config::SenderConfig,
     },
     socket::create_tx_socket,
-    time::{Clock, MICROS_PER_MILLI, MediaClock},
+    time::{Clock, MediaClock},
     utils::{U32_WRAP, set_realtime_priority, sleep_precise},
 };
 use pnet::datalink::NetworkInterface;
@@ -43,7 +43,6 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
     thread,
-    time::Duration,
 };
 use tokio::{
     select,

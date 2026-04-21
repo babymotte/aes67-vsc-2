@@ -17,7 +17,7 @@
 
 use aes67_rs::{
     error::ClockResult,
-    formats::{Frames, FramesPerSecond},
+    formats::Frames,
     time::{Clock, MediaClock},
     utils::AverageCalculationBuffer,
 };
@@ -29,7 +29,6 @@ pub struct JackClock {
     ptp_clock: Clock,
     jack_clock_offset: Option<i64>,
     drift_buffer: AverageCalculationBuffer<i64>,
-    slew: i64,
 }
 
 pub enum ClockOffset {
@@ -51,7 +50,6 @@ impl JackClock {
             ptp_clock,
             jack_clock_offset: None,
             drift_buffer: AverageCalculationBuffer::new([0i64; 100].into()),
-            slew: 0,
         }
     }
 

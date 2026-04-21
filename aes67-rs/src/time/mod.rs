@@ -74,7 +74,7 @@ impl From<clock_steering::Timestamp> for Timestamp {
     fn from(value: clock_steering::Timestamp) -> Self {
         Timestamp {
             seconds: value.seconds as u64,
-            nanos: value.nanos as u32,
+            nanos: value.nanos,
         }
     }
 }

@@ -143,7 +143,7 @@ fn process(state: &mut State, client: &Client, ps: &ProcessScope) -> Control {
         }
     };
 
-    let link_offset_frames = state.config.frames_in_link_offset() as u64;
+    let link_offset_frames = state.config.frames_in_link_offset();
     let ingress_time = playout_time - link_offset_frames;
 
     let pre_req = Instant::now();

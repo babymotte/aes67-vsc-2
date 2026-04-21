@@ -1062,7 +1062,7 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
     async fn increment_session_version(&self, config: &SenderConfig) -> ManagementAgentResult<()> {
         let key = topic!(self.app_id, "config", "tx", config.id, "session", "version");
         self.wb
-            .update(key, || 1, |current| *current = *current + 1)
+            .update(key, || 1, |current| *current += 1)
             .await?;
         Ok(())
     }

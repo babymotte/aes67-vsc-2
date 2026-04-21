@@ -185,7 +185,7 @@ pub fn sleep_precise(duration: Duration, now: SystemTimestamp) {
 
     let target = libc::timespec {
         tv_sec: (target_ns / 1_000_000_000) as libc::time_t,
-        tv_nsec: (target_ns % 1_000_000_000) as i64,
+        tv_nsec: (target_ns % 1_000_000_000),
     };
 
     unsafe {
