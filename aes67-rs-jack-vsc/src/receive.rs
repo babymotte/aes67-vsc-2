@@ -120,7 +120,7 @@ fn buffer_change(_: &mut State, _client: &Client, _buffer_len: jack::Frames) -> 
     Control::Continue
 }
 
-fn process(state: &mut State, _: &Client, ps: &ProcessScope) -> Control {
+fn process(state: &mut State, client: &Client, ps: &ProcessScope) -> Control {
     // Check for shutdown early to avoid accessing resources during teardown
     // and prevent logging races that can cause RefCell panics
     if state.subsys.is_shut_down() {
@@ -130,7 +130,7 @@ fn process(state: &mut State, _: &Client, ps: &ProcessScope) -> Control {
 
     let start = Instant::now();
 
-    let playout_time = match state.clock.update_clock(ps, true) {
+    let playout_time = match state.clock.update_clock(client, ps, true) {
         Ok(ClockState::Stable { current_time, .. }) => current_time,
         Ok(ClockState::Unstable) => {
             muted(state, ps);

@@ -17,11 +17,11 @@
 
 use aes67_rs::{
     error::ClockResult,
-    formats::Frames,
+    formats::{Frames, FramesPerSecond},
     time::{Clock, MediaClock},
     utils::AverageCalculationBuffer,
 };
-use jack::ProcessScope;
+use jack::{Client, ProcessScope};
 #[cfg(debug_assertions)]
 use tracing::{debug, info, warn};
 
@@ -57,10 +57,12 @@ impl JackClock {
 
     pub fn update_clock(
         &mut self,
+        client: &Client,
         ps: &ProcessScope,
         continuously_compensate_drift: bool,
     ) -> ClockResult<ClockState> {
-        let drift_buf_len = 50_000 / ps.n_frames() as usize;
+        let drift_buf_len =
+            (client.sample_rate() as usize / 48_000) * (10_000 / ps.n_frames() as usize);
         if self.drift_buffer.len() != drift_buf_len {
             info!("Updating drift buffer length to {drift_buf_len}");
             self.drift_buffer = AverageCalculationBuffer::new(vec![0i64; drift_buf_len].into());
@@ -123,15 +125,12 @@ impl JackClock {
             return Ok(ClockOffset::Unstable);
         }
 
-        if !continuously_compensate_drift {
-            return Ok(ClockOffset::Stable {
-                offset,
-                compensation: 0,
-            });
-        }
-
         let slew = if let Some(drift) = self.drift_buffer.update(drift) {
-            let slew = drift.signum();
+            let slew = if continuously_compensate_drift {
+                drift.signum()
+            } else {
+                0
+            };
 
             #[cfg(debug_assertions)]
             if drift != 0 {
