@@ -17,7 +17,7 @@
 
 use std::io;
 
-use aes67_rs::error::{ClockError, ConfigError, VscApiError};
+use aes67_rs::error::{ClockCreationError, ClockError, ConfigError, VscApiError};
 use aes67_rs_discovery::error::DiscoveryError;
 use axum::{http::StatusCode, response::IntoResponse};
 use miette::{Diagnostic, Report};
@@ -48,6 +48,8 @@ pub enum ManagementAgentError {
     ChannelError,
     #[error("VSC api error: {0}")]
     VscApiError(#[from] VscApiError),
+    #[error("Clock creation error: {0}")]
+    ClockCreationError(#[from] ClockCreationError),
     #[error("Clock error: {0}")]
     ClockError(#[from] ClockError),
     #[error("Config error: {0}")]
@@ -104,6 +106,9 @@ impl From<ManagementAgentError> for (StatusCode, String) {
                 (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
             }
             ManagementAgentError::VscApiError(e) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+            }
+            ManagementAgentError::ClockCreationError(e) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
             }
             ManagementAgentError::ClockError(e) => {

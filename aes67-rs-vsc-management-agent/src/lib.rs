@@ -29,7 +29,7 @@ use crate::{
     },
 };
 use aes67_rs::{
-    config::{Config, adjust_labels_for_channel_count},
+    config::{Config, PtpMode, adjust_labels_for_channel_count},
     error::{ConfigError, VscApiError, VscApiResult},
     formats::{AudioFormat, FrameFormat, Seconds, Session, SessionId},
     monitoring::Monitoring,
@@ -42,7 +42,7 @@ use aes67_rs::{
         api::SenderApi,
         config::{PartialSenderConfig, SenderConfig},
     },
-    time::{Clock, get_clock},
+    time::{Clock, ClockMode, ClockNic, get_primary_clock},
     vsc::VirtualSoundCardApi,
 };
 use aes67_rs_discovery::{DiscoveryApi, start_discovery};
@@ -344,13 +344,18 @@ impl<IOH: IoHandler> VscApiActor<IOH> {
 
         let name = self.app_id.clone();
         let wb = self.wb.clone();
-        let clock = get_clock(
-            name.clone(),
-            config.ptp,
-            config.audio.sample_rate,
-            wb.clone(),
-        )
-        .await?;
+        let clock_mode = config.ptp.map(|ptp| match ptp {
+            PtpMode::System => ClockMode::System,
+            PtpMode::Phc { nic } => ClockMode::Phc {
+                nic: ClockNic::NonRedundant(nic),
+                subsys: &self.subsys,
+            },
+            PtpMode::Internal { nic } => ClockMode::Internal {
+                nic: ClockNic::NonRedundant(nic),
+                wb: wb.clone(),
+            },
+        });
+        let clock = get_primary_clock(name.clone(), clock_mode, config.audio.sample_rate)?;
 
         let audio_nic = find_nic_with_name(&config.audio.nic)?;
 

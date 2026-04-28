@@ -21,7 +21,7 @@ pub mod config;
 use crate::{
     buffer::{
         AudioBufferPointer,
-        sender::{SenderBufferConsumer, sender_buffer_channel},
+        sender::{OutgoingPacketPointer, SenderBufferConsumer, sender_buffer_channel},
     },
     error::{SenderInternalError, SenderInternalResult, WrappedRtpPacketBuildError},
     formats::{Frames, frames_to_duration},
@@ -38,6 +38,7 @@ use pnet::datalink::NetworkInterface;
 use rtp_rs::{RtpPacketBuilder, Seq};
 use std::{
     net::{SocketAddr, UdpSocket},
+    ops::Range,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -67,7 +68,7 @@ pub(crate) async fn start_sender(
 ) -> SenderInternalResult<SenderApi> {
     let sender_id = id.clone();
     let (api_tx, api_rx) = mpsc::channel(1024);
-    let (tx, rx) = sender_buffer_channel(config.clone());
+    let (tx, rx) = sender_buffer_channel(config.clone(), 5);
     let target = config.target;
     let socket = create_tx_socket(target, iface)?;
 
@@ -145,8 +146,12 @@ impl Sender {
 
         while !exit.load(Ordering::SeqCst) {
             // read packet data
-            let recv = self.rx.read();
-            if let Ok((ingress_time, slot_index)) = recv {
+            let recv = self.rx.recv();
+            if let Ok(OutgoingPacketPointer {
+                ingress_time,
+                payload_range,
+            }) = recv
+            {
                 // packets may come in bursts if the system uses a large buffer, so we sleep to make sure we don't overrun the receiver's buffer
                 let ptime_frames = self.config.ptime_frames() as Frames;
                 let current_time = self.clock.current_time()?;
@@ -159,7 +164,7 @@ impl Sender {
                     );
                 }
 
-                self.send(ingress_time, slot_index)?;
+                self.send(ingress_time, payload_range)?;
             } else {
                 break;
             }
@@ -194,16 +199,17 @@ impl Sender {
         Ok(())
     }
 
-    fn send(&mut self, ingress_time: Frames, slot_index: usize) -> SenderInternalResult<()> {
-        let payload_len = self.config.send_buffer_len();
+    fn send(
+        &mut self,
+        ingress_time: Frames,
+        payload_range: Range<usize>,
+    ) -> SenderInternalResult<()> {
         let payload_type = self.config.payload_type;
         let seq = self.sequence_number;
         self.sequence_number = seq.next();
         let timestamp = (ingress_time % U32_WRAP) as u32;
 
-        let start_index = slot_index * payload_len;
-        let end_index = start_index + payload_len;
-        let payload = &self.rx.buffer[start_index..end_index];
+        let payload = &self.rx.buffer[payload_range];
 
         let len = RtpPacketBuilder::new()
             .payload_type(payload_type)

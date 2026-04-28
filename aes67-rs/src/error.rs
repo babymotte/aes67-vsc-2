@@ -15,7 +15,10 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::formats::{Frames, SessionId};
+use crate::{
+    buffer::sender::OutgoingPacketPointer,
+    formats::{Frames, SessionId},
+};
 use axum::{http::StatusCode, response::IntoResponse};
 use miette::Diagnostic;
 use rtp_rs::{RtpPacketBuildError, RtpReaderError};
@@ -23,6 +26,7 @@ use std::{
     fmt::{Debug, Display},
     io,
     net::AddrParseError,
+    path::PathBuf,
 };
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot, watch};
@@ -143,7 +147,7 @@ pub enum SenderInternalError {
     #[error("No buffers provided.")]
     NoBuffersProvided,
     #[error("Send error: {0}")]
-    TrySendError(#[from] mpsc::error::TrySendError<(Frames, usize)>),
+    TrySendError(#[from] mpsc::error::TrySendError<OutgoingPacketPointer>),
 }
 
 #[derive(Error, Debug, Diagnostic)]
@@ -198,6 +202,23 @@ pub enum ConfigError {
     InvalidPacketTimeFormat(String),
 }
 
+#[derive(Error, Debug, Diagnostic, Clone)]
+pub enum ClockCreationError {
+    #[error("NIC with specified IP not found: {0}")]
+    NoSuchNIC(String),
+    #[error("Could not get PTP capabilities for NIC '{0}'")]
+    PtpCapabilities(String),
+    #[error("NIC {0} does not support PTP")]
+    PtpNotSupported(String),
+    #[error("Could not open PHC clock file descriptor '{0}': {1}")]
+    Open(String, String),
+    #[error("Could not get PHC clock time for '{0}': {1}")]
+    GetTime(String, String),
+    #[error("NIC {0} has no IP address assigned")]
+    NoIPAddressForNIC(String),
+}
+pub type ClockCreationResult<T> = Result<T, ClockCreationError>;
+
 #[derive(Error, Debug, Diagnostic)]
 #[error("PHC clock error: {0}")]
 pub enum ClockError {
@@ -205,8 +226,6 @@ pub enum ClockError {
     ClockError(Box<dyn std::error::Error + 'static + Sync + Send>),
     #[error("I/O Error: {0}")]
     IoError(#[from] io::Error),
-    #[error("NIC {0} does not support PTP")]
-    PtpNotSupported(String),
 }
 
 impl ClockError {

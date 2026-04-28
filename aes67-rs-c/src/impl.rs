@@ -17,15 +17,12 @@
 
 use ::safer_ffi::prelude::*;
 use aes67_rs::{
-    config::Config,
     error::{
         ConfigError, ConfigResult, GetErrorCode, ReceiverApiResult, ReceiverInternalResult,
-        ToBoxedResult, VscApiResult, VscInternalError, VscInternalResult,
+        VscApiResult,
     },
     formats::SessionId,
-    nic::find_nic_with_name,
     receiver::{api::ReceiverApi, config::ReceiverConfig},
-    time::get_clock,
     vsc::VirtualSoundCardApi,
 };
 use aes67_rs_sdp::SdpWrapper;
@@ -33,8 +30,7 @@ use dashmap::DashMap;
 use futures_lite::future::block_on;
 use lazy_static::lazy_static;
 use sdp::SessionDescription;
-use std::{env, io::Cursor, sync::Arc, time::Duration};
-use tracing::info;
+use std::{io::Cursor, sync::Arc};
 
 use crate::{AES_VSC_ERROR_RECEIVER_NOT_FOUND, AES_VSC_OK, Aes67VscReceiverConfig};
 
@@ -45,26 +41,33 @@ lazy_static! {
 }
 
 fn init_vsc() -> VscApiResult<Arc<VirtualSoundCardApi>> {
-    let config = try_init().boxed()?;
-    let (wb, _, _) = block_on(worterbuch_client::connect_with_default_config())
-        .map_err(VscInternalError::from)
-        .boxed()?;
-    let _audio_nic = find_nic_with_name(config.audio.nic)?;
-    let vsc_name = env::var("AES67_VSC_NAME").unwrap_or("aes67-virtual-sound-card".to_owned());
-    info!("Creating new VSC with name '{vsc_name}' …");
-    let _subsys = tosub::build_root(vsc_name.clone())
-        .with_timeout(Duration::from_secs(5))
-        .start(|s| async move {
-            s.shutdown_requested().await;
-            Ok::<(), VscInternalError>(())
-        });
+    // let config = try_init().boxed()?;
+    // let (wb, _, _) = block_on(worterbuch_client::connect_with_default_config())
+    //     .map_err(VscInternalError::from)
+    //     .boxed()?;
+    // let _audio_nic = find_nic_with_name(config.audio.nic)?;
+    // let vsc_name = env::var("AES67_VSC_NAME").unwrap_or("aes67-virtual-sound-card".to_owned());
+    // info!("Creating new VSC with name '{vsc_name}' …");
+    // let _subsys = tosub::build_root(vsc_name.clone())
+    //     .with_timeout(Duration::from_secs(5))
+    //     .start(|s| async move {
+    //         s.shutdown_requested().await;
+    //         Ok::<(), VscInternalError>(())
+    //     });
 
-    let _clock = block_on(get_clock(
-        vsc_name.clone(),
-        config.ptp,
-        config.audio.sample_rate,
-        wb.clone(),
-    ))?;
+    // let clock_mode = config.ptp.map(|ptp| match ptp {
+    //     PtpMode::System => ClockMode::System,
+    //     PtpMode::Phc { nic } => ClockMode::Phc {
+    //         nic: ClockNic::NonRedundant(nic),
+    //         subsys: &subsys,
+    //     },
+    //     PtpMode::Internal { nic } => ClockMode::Internal {
+    //         nic: ClockNic::NonRedundant(nic),
+    //         wb: wb.clone(),
+    //     },
+    // });
+
+    // let _clock = get_primary_clock(vsc_name.clone(), clock_mode, config.audio.sample_rate);
     // let vsc = block_on(VirtualSoundCardApi::new(
     //     vsc_name.clone(),
     //     &subsys,
@@ -73,27 +76,27 @@ fn init_vsc() -> VscApiResult<Arc<VirtualSoundCardApi>> {
     //     audio_nic,
     // ))?;
     // TODO store subsys somewhere to keep it alive
-    info!("VSC '{}' created.", vsc_name);
+    // info!("VSC '{}' created.", vsc_name);
     // Ok(Arc::new(vsc))
     todo!()
 }
 
-fn try_init() -> VscInternalResult<Config> {
-    // let config = Config::load()?;
-    //
-    let config = Config::default();
-    // let runtime = runtime::Builder::new_current_thread()
-    //     .enable_all()
-    //     .build()?;
-    let init_future = async {
-        // telemetry::init(&config).await?;
-        Ok::<(), VscInternalError>(())
-    };
-    // runtime.block_on(init_future)?;
-    block_on(init_future)?;
-    info!("AES67 VSC SubsystemHandle initialized successfully.");
-    Ok(config)
-}
+// fn try_init() -> VscInternalResult<Config> {
+//     // let config = Config::load()?;
+//     //
+//     let config = Config::default();
+//     // let runtime = runtime::Builder::new_current_thread()
+//     //     .enable_all()
+//     //     .build()?;
+//     let init_future = async {
+//         // telemetry::init(&config).await?;
+//         Ok::<(), VscInternalError>(())
+//     };
+//     // runtime.block_on(init_future)?;
+//     block_on(init_future)?;
+//     info!("AES67 VSC SubsystemHandle initialized successfully.");
+//     Ok(config)
+// }
 
 impl<'a> TryFrom<&Aes67VscReceiverConfig<'a>> for ReceiverConfig {
     type Error = ConfigError;

@@ -15,22 +15,21 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::error::{ConfigError, ConfigResult};
+use crate::error::{ClockCreationError, ClockCreationResult, ConfigError, ConfigResult};
 use pnet::datalink::{self, NetworkInterface};
-use std::{io, net::IpAddr, path::PathBuf, process::Command};
+use std::{net::IpAddr, path::PathBuf, process::Command};
 
 /// Returns Some("/dev/ptpX") if the interface has a PHC, None if not
-pub fn phc_device_for_interface_ethtool(iface: &NetworkInterface) -> io::Result<Option<PathBuf>> {
-    let output = Command::new("ethtool")
-        .arg("-T")
-        .arg(&iface.name)
-        .output()?;
+pub fn phc_device_for_interface_ethtool(
+    iface: &NetworkInterface,
+) -> ClockCreationResult<Option<PathBuf>> {
+    let output = match Command::new("ethtool").arg("-T").arg(&iface.name).output() {
+        Ok(output) => output,
+        Err(_) => return Err(ClockCreationError::PtpCapabilities(iface.name.clone())),
+    };
 
     if !output.status.success() {
-        return Err(io::Error::other(format!(
-            "ethtool failed for {}",
-            iface.name
-        )));
+        return Err(ClockCreationError::PtpCapabilities(iface.name.clone()));
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -58,14 +57,20 @@ pub fn find_ptp_interfaces() -> Vec<NetworkInterface> {
 }
 
 pub fn find_nic_with_name(name: impl AsRef<str>) -> ConfigResult<NetworkInterface> {
-    let name = name.as_ref();
+    find_nic(name.as_ref()).ok_or_else(|| ConfigError::NoSuchNIC(name.as_ref().to_owned()))
+}
+
+pub fn find_clock_nic_with_name(name: impl AsRef<str>) -> ClockCreationResult<NetworkInterface> {
+    find_nic(name.as_ref()).ok_or_else(|| ClockCreationError::NoSuchNIC(name.as_ref().to_owned()))
+}
+
+fn find_nic(name: &str) -> Option<NetworkInterface> {
     for iface in datalink::interfaces() {
         if iface.name == name {
-            return Ok(iface);
+            return Some(iface);
         }
     }
-
-    Err(ConfigError::NoSuchNIC(name.to_owned()))
+    None
 }
 
 pub fn find_nic_for_ip(ip: IpAddr) -> ConfigResult<NetworkInterface> {

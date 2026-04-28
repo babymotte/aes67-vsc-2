@@ -30,7 +30,8 @@ pub struct SenderApi {
     tx: SenderBufferProducer,
     ingress_time: Frames,
     buffer_len_frames: usize,
-    buffer_size_changed: bool,
+    new_frames: usize,
+    compensation: i64,
 }
 
 impl SenderApi {
@@ -40,7 +41,8 @@ impl SenderApi {
             tx,
             ingress_time: 0,
             buffer_len_frames: 0,
-            buffer_size_changed: false,
+            new_frames: 0,
+            compensation: 0,
         }
     }
 
@@ -51,29 +53,30 @@ impl SenderApi {
         }
     }
 
-    pub fn start_write(&mut self, ingress_time: u64, frames: usize) {
-        self.ingress_time = ingress_time;
-        self.buffer_size_changed = self.buffer_len_frames != frames;
-        self.buffer_len_frames = frames;
+    pub fn start_write(&mut self, ingress_time: u64, buffer_len: usize, compensation: i64) {
+        self.ingress_time = (ingress_time as i64 - compensation) as Frames;
+        self.buffer_len_frames = buffer_len;
+        self.new_frames = (buffer_len as i64 + compensation) as usize;
+        self.compensation = compensation;
     }
 
     pub fn write_channel(&mut self, ch: usize, channel_buffer: &[f32]) {
-        debug_assert_eq!(
-            self.buffer_len_frames,
-            channel_buffer.len(),
-            "expected buffer of length {}, but got buffer of length {}",
-            self.buffer_len_frames,
-            channel_buffer.len()
-        );
-
-        self.tx.write_channel(ch, channel_buffer);
+        if self.compensation > 0 {
+            let offset_frames = self.compensation as usize;
+            // insert first sample as many times as is required for the compensation, then write the actual buffer
+            for i in 0..offset_frames {
+                self.tx.write_channel(ch, i, &channel_buffer[0..1]);
+            }
+            self.tx.write_channel(ch, offset_frames, channel_buffer);
+        } else if self.compensation < 0 {
+            let buf = &channel_buffer[(-self.compensation) as usize..];
+            self.tx.write_channel(ch, 0, buf);
+        } else {
+            self.tx.write_channel(ch, 0, channel_buffer);
+        }
     }
 
     pub fn end_write(&mut self) -> SenderInternalResult<()> {
-        self.tx.send_packets(
-            self.ingress_time,
-            self.buffer_len_frames,
-            self.buffer_size_changed,
-        )
+        self.tx.send_packets(self.ingress_time, self.new_frames)
     }
 }

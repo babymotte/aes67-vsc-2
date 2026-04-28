@@ -20,6 +20,7 @@ use crate::{
     session_manager::{SessionManagerNotificationHandler, start_session_manager},
 };
 use aes67_rs::{
+    formats::Frames,
     monitoring::Monitoring,
     sender::{api::SenderApi, config::SenderConfig},
     time::Clock,
@@ -38,6 +39,7 @@ struct State {
     ports: Vec<Port<AudioIn>>,
     clock: JackClock,
     subsys: SubsystemHandle,
+    config: SenderConfig,
 }
 
 impl Drop for State {
@@ -84,6 +86,7 @@ pub async fn start_recording(
         ports,
         clock: JackClock::new(clock),
         subsys: subsys.clone(),
+        config: config.clone(),
     };
     let process_handler =
         ClosureProcessHandler::with_state(process_handler_state, process, buffer_change);
@@ -119,13 +122,20 @@ fn process(state: &mut State, client: &Client, ps: &ProcessScope) -> Control {
         return Control::Quit;
     }
 
-    let (ingress_time, _compensation) = match state.clock.update_clock(client, ps, false) {
+    let (ingress_time, compensation) = match state.clock.update_clock(
+        client,
+        ps,
+        state
+            .config
+            .packet_time
+            .frames(state.config.audio_format.sample_rate),
+        true,
+    ) {
         Ok(ClockState::Stable {
             current_time,
             compensation,
         }) => (current_time, compensation),
         Ok(ClockState::Unstable) => {
-            // TODO send empty packet
             return Control::Continue;
         }
         Err(_e) => {
@@ -137,7 +147,7 @@ fn process(state: &mut State, client: &Client, ps: &ProcessScope) -> Control {
 
     state
         .sender
-        .start_write(ingress_time, ps.n_frames() as usize);
+        .start_write(ingress_time, ps.n_frames() as usize, compensation);
 
     for (ch, port) in state.ports.iter().enumerate() {
         state.sender.write_channel(ch, port.as_slice(ps));

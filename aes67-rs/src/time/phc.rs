@@ -16,37 +16,40 @@
  */
 
 use crate::{
-    error::{ClockError, ClockResult},
+    error::{ClockCreationError, ClockCreationResult, ClockError, ClockResult},
     formats::FramesPerSecond,
     time::{
         MediaClock, PtpTimestamp, SystemTimestamp, Time, Timestamp, get_time, to_media_time,
         to_nanos,
     },
 };
-use lazy_static::lazy_static;
 use libc::{CLOCK_TAI, clockid_t};
 use std::{
     os::fd::{IntoRawFd, RawFd},
     path::Path,
-    sync::{Arc, Mutex, atomic::Ordering},
-    thread,
+    sync::{Arc, LazyLock, Mutex, atomic::Ordering},
     time::Duration,
 };
 use std::{sync::atomic::AtomicI64, time::Instant};
-use tracing::{info, warn};
+use tokio::{select, time::MissedTickBehavior};
+use tosub::{SubsystemError, SubsystemHandle};
+use tracing::{error, info, warn};
 
 #[derive(Debug, Clone)]
 pub struct PhcClock {
     sample_rate: FramesPerSecond,
 }
 
-lazy_static! {
-    static ref LAST_OFFSET: AtomicI64 = AtomicI64::new(0);
-    static ref CLOCK_ID: Arc<Mutex<Option<(clockid_t, RawFd)>>> = Arc::new(Mutex::new(None));
-}
+static LAST_OFFSET: LazyLock<AtomicI64> = LazyLock::new(|| AtomicI64::new(0));
+static CLOCK_ID: LazyLock<Arc<Mutex<Option<(clockid_t, RawFd)>>>> =
+    LazyLock::new(|| Arc::new(Mutex::new(None)));
 
 impl PhcClock {
-    pub fn open(path: impl AsRef<Path>, sample_rate: FramesPerSecond) -> ClockResult<Self> {
+    pub fn open(
+        subsys: &SubsystemHandle,
+        path: impl AsRef<Path>,
+        sample_rate: FramesPerSecond,
+    ) -> ClockCreationResult<Self> {
         let clock = {
             let mut guard = CLOCK_ID.lock().expect("mutex poisoned");
             if let Some((clock_id, _)) = guard.as_ref() {
@@ -55,30 +58,49 @@ impl PhcClock {
                 let file = std::fs::OpenOptions::new()
                     .write(true)
                     .read(true)
-                    .open(path)?;
+                    .open(path.as_ref())
+                    .map_err(|e| {
+                        ClockCreationError::Open(path.as_ref().display().to_string(), e.to_string())
+                    })?;
                 let fd = file.into_raw_fd();
                 let clock = ((!(fd as libc::clockid_t)) << 3) | 3;
                 *guard = Some((clock, fd));
 
                 info!("Starting PHC clock sync thread …");
-                thread::spawn(move || {
-                    loop {
-                        let offset = match get_current_offset(clock) {
-                            Ok(value) => value,
-                            _ => return,
-                        };
+                subsys.spawn(
+                    format!("phc-clock-sync-{}", path.as_ref().display()),
+                    move |s| async move {
+                        let mut interval = tokio::time::interval(Duration::from_secs(1));
+                        interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
-                        LAST_OFFSET.store(offset, Ordering::Release);
+                        loop {
+                            let offset = match get_current_offset(clock) {
+                                Ok(value) => value,
+                                Err(e) => {
+                                    error!("Failed to get PHC offset: {e}");
+                                    continue;
+                                }
+                            };
 
-                        thread::sleep(Duration::from_secs(1));
-                    }
-                });
+                            LAST_OFFSET.store(offset, Ordering::Release);
+
+                            select! {
+                                _ = s.shutdown_requested() => break,
+                                _ = interval.tick() => continue,
+                            }
+                        }
+
+                        Ok::<(), SubsystemError>(())
+                    },
+                );
 
                 clock
             }
         };
 
-        let offset = get_current_offset(clock)?;
+        let offset = get_current_offset(clock).map_err(|e| {
+            ClockCreationError::GetTime(e.to_string(), path.as_ref().display().to_string())
+        })?;
 
         LAST_OFFSET.store(offset, Ordering::Release);
 

@@ -17,7 +17,7 @@
 
 mod statime_linux;
 use crate::{
-    error::{ClockResult, ConfigError, ConfigResult},
+    error::{ClockCreationError, ClockCreationResult, ClockResult, ConfigError, ConfigResult},
     formats::FramesPerSecond,
     time::{MediaClock, Time, Timestamp, get_time, to_media_time},
 };
@@ -27,25 +27,25 @@ use statime::Clock;
 pub use statime_linux::*;
 use worterbuch_client::Worterbuch;
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct StatimePtpMediaClock {
     sample_rate: FramesPerSecond,
     statime_ptp_clock: StatimeClock,
 }
 
 impl StatimePtpMediaClock {
-    pub async fn new(
+    pub fn new(
         root_key: String,
         iface: NetworkInterface,
         sample_rate: FramesPerSecond,
         wb: Worterbuch,
-    ) -> ConfigResult<Self> {
+    ) -> ClockCreationResult<Self> {
         let ip = iface
             .ips
             .first()
-            .ok_or_else(|| ConfigError::NoIPAddressForNIC(iface.name.clone()))?
+            .ok_or_else(|| ClockCreationError::NoIPAddressForNIC(iface.name.clone()))?
             .ip();
-        let statime_ptp_clock = statime_linux(iface, ip, wb, root_key).await;
+        let statime_ptp_clock = statime_linux(iface, ip, wb, root_key);
         Ok(StatimePtpMediaClock {
             sample_rate,
             statime_ptp_clock,

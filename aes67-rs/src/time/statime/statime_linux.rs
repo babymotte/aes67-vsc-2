@@ -88,7 +88,7 @@ impl Future for Timer {
     }
 }
 
-pub async fn statime_linux(
+pub fn statime_linux(
     iface: NetworkInterface,
     ip: IpAddr,
     wb: Worterbuch,
@@ -206,8 +206,7 @@ pub async fn statime_linux(
 
     // All ports created, so we can start running them.
     main_task_sender
-        .send(port)
-        .await
+        .try_send(port)
         .expect("space in channel buffer");
 
     spawn(run(

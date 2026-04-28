@@ -130,7 +130,10 @@ fn process(state: &mut State, client: &Client, ps: &ProcessScope) -> Control {
 
     let start = Instant::now();
 
-    let playout_time = match state.clock.update_clock(client, ps, true) {
+    let playout_time = match state
+        .clock
+        .update_clock(client, ps, ps.n_frames() as Frames, true)
+    {
         Ok(ClockState::Stable { current_time, .. }) => current_time,
         Ok(ClockState::Unstable) => {
             muted(state, ps);

@@ -26,10 +26,9 @@ mod phc;
 mod statime;
 
 use crate::{
-    config::PtpMode,
-    error::{ClockError, ClockResult, ConfigResult},
+    error::{ClockCreationError, ClockCreationResult, ClockError, ClockResult},
     formats::{Frames, FramesPerSecond},
-    nic::{find_nic_with_name, phc_device_for_interface_ethtool},
+    nic::{find_clock_nic_with_name, phc_device_for_interface_ethtool},
     time::{phc::PhcClock, statime::StatimePtpMediaClock},
 };
 use clock_steering::{Clock as CSClock, unix::UnixClock};
@@ -39,8 +38,10 @@ use serde::{Deserialize, Serialize};
 use std::{
     io,
     ops::Sub,
+    sync::OnceLock,
     time::{Duration, Instant, SystemTime},
 };
+use tosub::SubsystemHandle;
 use tracing::{error, info, warn};
 #[cfg(feature = "statime")]
 use worterbuch_client::{Worterbuch, topic};
@@ -59,8 +60,34 @@ pub const NANOS_PER_MICRO_F: f64 = 1_000.0;
 pub const MILLIS_PER_SEC_F: f32 = 1_000.0;
 pub const MICROS_PER_SEC_F: f64 = 1_000_000.0;
 
+static CLOCKS: OnceLock<ClockCreationResult<Clocks>> = OnceLock::new();
+
 pub type SystemTimestamp = Timestamp;
 pub type PtpTimestamp = Timestamp;
+
+pub enum ClockMode<'a> {
+    System,
+    Phc {
+        nic: ClockNic,
+        subsys: &'a SubsystemHandle,
+    },
+    #[cfg(feature = "statime")]
+    Internal {
+        nic: ClockNic,
+        wb: Worterbuch,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub enum Clocks {
+    NonRedundant(Clock),
+    Redundant { primary: Clock, secondary: Clock },
+}
+
+pub enum ClockNic {
+    NonRedundant(String),
+    Redundant { primary: String, secondary: String },
+}
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize,
@@ -127,7 +154,7 @@ pub trait MediaClock: Clone + Send + 'static {
     fn current_time(&mut self) -> ClockResult<Time>;
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum Clock {
     System(UnixMediaClock),
     Phc(PhcClock),
@@ -225,51 +252,116 @@ pub fn get_time(clock_id: clockid_t) -> io::Result<timespec> {
     }
 }
 
-pub async fn get_clock(
+pub fn get_primary_clock(
     app_name: String,
-    ptp_mode: Option<PtpMode>,
+    ptp_mode: Option<ClockMode>,
     sample_rate: FramesPerSecond,
-    wb: Worterbuch,
-) -> ConfigResult<Clock> {
+) -> ClockCreationResult<Clock> {
+    let clock = match CLOCKS
+        .get_or_init(|| create_clocks(app_name, ptp_mode, sample_rate))
+        .to_owned()?
+    {
+        Clocks::NonRedundant(clock) => clock,
+        Clocks::Redundant { primary, .. } => primary,
+    };
+    Ok(clock)
+}
+
+pub fn get_secondary_clock(
+    app_name: String,
+    ptp_mode: Option<ClockMode>,
+    sample_rate: FramesPerSecond,
+) -> ClockCreationResult<Clock> {
+    let clock = match CLOCKS
+        .get_or_init(|| create_clocks(app_name, ptp_mode, sample_rate))
+        .to_owned()?
+    {
+        Clocks::NonRedundant(clock) => clock,
+        Clocks::Redundant { secondary, .. } => secondary,
+    };
+    Ok(clock)
+}
+
+fn create_clocks(
+    app_name: String,
+    ptp_mode: Option<ClockMode>,
+    sample_rate: FramesPerSecond,
+) -> ClockCreationResult<Clocks> {
     match ptp_mode {
-        Some(PtpMode::System) => create_system_clock(sample_rate).map(Clock::System),
-        Some(PtpMode::Phc { nic }) => create_phc_clock(sample_rate, nic).map(Clock::Phc),
+        Some(ClockMode::System) => create_system_clock(sample_rate)
+            .map(Clock::System)
+            .map(Clocks::NonRedundant),
+        Some(ClockMode::Phc { nic, subsys }) => match nic {
+            ClockNic::NonRedundant(nic) => create_phc_clock(subsys, sample_rate, nic)
+                .map(Clock::Phc)
+                .map(Clocks::NonRedundant),
+            ClockNic::Redundant { primary, secondary } => {
+                let primary = create_phc_clock(subsys, sample_rate, primary).map(Clock::Phc)?;
+                let secondary = create_phc_clock(subsys, sample_rate, secondary).map(Clock::Phc)?;
+                Ok(Clocks::Redundant { primary, secondary })
+            }
+        },
         #[cfg(feature = "statime")]
-        Some(PtpMode::Internal { nic }) => {
-            create_statime_clock(topic!(app_name, "clock"), sample_rate, wb, nic)
-                .await
-                .map(Clock::Statime)
-        }
-        None => create_system_clock(sample_rate).map(Clock::System),
+        Some(ClockMode::Internal { nic, wb }) => match nic {
+            ClockNic::NonRedundant(nic) => {
+                create_statime_clock(topic!(app_name, "clock"), sample_rate, wb, nic)
+                    .map(Clock::Statime)
+                    .map(Clocks::NonRedundant)
+            }
+            ClockNic::Redundant { primary, secondary } => {
+                let primary = create_statime_clock(
+                    topic!(app_name, "clock", "primary"),
+                    sample_rate,
+                    wb.clone(),
+                    primary,
+                )
+                .map(Clock::Statime)?;
+                let secondary = create_statime_clock(
+                    topic!(app_name, "clock", "secondary"),
+                    sample_rate,
+                    wb.clone(),
+                    secondary,
+                )
+                .map(Clock::Statime)?;
+                Ok(Clocks::Redundant { primary, secondary })
+            }
+        },
+        None => create_system_clock(sample_rate)
+            .map(Clock::System)
+            .map(Clocks::NonRedundant),
     }
 }
 
-fn create_system_clock(sample_rate: FramesPerSecond) -> ConfigResult<UnixMediaClock> {
+fn create_system_clock(sample_rate: FramesPerSecond) -> ClockCreationResult<UnixMediaClock> {
     info!("Creating new system clock …");
     let clock = UnixMediaClock::system_clock(sample_rate);
     Ok(clock)
 }
 
-fn create_phc_clock(sample_rate: FramesPerSecond, nic: String) -> ConfigResult<PhcClock> {
+fn create_phc_clock(
+    subsys: &SubsystemHandle,
+    sample_rate: FramesPerSecond,
+    nic: String,
+) -> ClockCreationResult<PhcClock> {
     info!("Creating new PHC clock on NIC {nic} …");
-    let iface = find_nic_with_name(&nic)?;
+    let iface = find_clock_nic_with_name(&nic)?;
     let Some(path) = phc_device_for_interface_ethtool(&iface)? else {
-        return Err(ClockError::PtpNotSupported(iface.name.clone()).into());
+        return Err(ClockCreationError::PtpNotSupported(iface.name.clone()));
     };
-    let clock = PhcClock::open(path, sample_rate)?;
+    let clock = PhcClock::open(subsys, path, sample_rate)?;
     Ok(clock)
 }
 
 #[cfg(feature = "statime")]
-async fn create_statime_clock(
+fn create_statime_clock(
     app_name: String,
     sample_rate: FramesPerSecond,
     wb: Worterbuch,
     nic: String,
-) -> ConfigResult<StatimePtpMediaClock> {
+) -> ClockCreationResult<StatimePtpMediaClock> {
     info!("Creating new statime clock on NIC {nic} …");
-    let iface = find_nic_with_name(&nic)?;
-    let clock = StatimePtpMediaClock::new(app_name, iface, sample_rate, wb).await?;
+    let iface = find_clock_nic_with_name(&nic)?;
+    let clock = StatimePtpMediaClock::new(app_name, iface, sample_rate, wb)?;
     Ok(clock)
 }
 

@@ -57,6 +57,7 @@ impl JackClock {
         &mut self,
         client: &Client,
         ps: &ProcessScope,
+        max_drift: Frames,
         continuously_compensate_drift: bool,
     ) -> ClockResult<ClockState> {
         let drift_buf_len =
@@ -68,7 +69,9 @@ impl JackClock {
         }
 
         let state = match self.jack_clock_offset {
-            Some(offset) => self.compensate_drift(offset, ps, continuously_compensate_drift)?,
+            Some(offset) => {
+                self.compensate_drift(offset, ps, max_drift, continuously_compensate_drift)?
+            }
             None => self.init_clock(ps)?,
         };
 
@@ -104,6 +107,7 @@ impl JackClock {
         &mut self,
         offset: i64,
         ps: &ProcessScope,
+        max_drift: Frames,
         continuously_compensate_drift: bool,
     ) -> ClockResult<ClockOffset> {
         let t1 = ps.frames_since_cycle_start();
@@ -116,8 +120,8 @@ impl JackClock {
         let diff = ptp_time - jack_time;
         let drift = ptp_time - jack_ptpt_time;
 
-        let drift_abs = drift.abs();
-        if drift_abs > ps.n_frames() as i64 {
+        let drift_abs = drift.abs() as Frames;
+        if drift_abs > max_drift {
             #[cfg(debug_assertions)]
             warn!("JACK clock is off by {drift} frames, resetting JACK clock.");
             self.jack_clock_offset = Some(diff);

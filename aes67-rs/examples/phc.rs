@@ -16,19 +16,19 @@
  */
 
 use aes67_rs::{
-    config::PtpMode,
-    error::ConfigResult,
     formats::{AudioFormat, FrameFormat, SampleFormat},
-    time::{MediaClock, get_clock},
+    time::{ClockMode, ClockNic, MediaClock, get_primary_clock},
 };
-use std::{io, thread, time::Duration};
+use miette::IntoDiagnostic;
+use std::{env, io, thread, time::Duration};
 use supports_color::Stream;
+use tosub::{SubsystemHandle, SubsystemResult};
 use tracing_subscriber::{
     EnvFilter, Layer, filter::filter_fn, fmt, layer::SubscriberExt, util::SubscriberInitExt,
 };
 
 #[tokio::main]
-async fn main() -> ConfigResult<()> {
+async fn main() -> SubsystemResult {
     tracing_subscriber::registry()
         .with(
             fmt::Layer::new()
@@ -40,6 +40,20 @@ async fn main() -> ConfigResult<()> {
                 })),
         )
         .init();
+
+    tosub::build_root("phc-clock-demo")
+        .catch_signals()
+        .with_timeout(Duration::from_secs(1))
+        .start(run)
+        .await
+}
+
+async fn run(subsys: SubsystemHandle) -> miette::Result<()> {
+    let Some(nic) = env::args().skip(1).next() else {
+        return Err(miette::miette!(
+            "Please provide a network interface as argument"
+        ));
+    };
 
     let audio_format = AudioFormat {
         frame_format: FrameFormat {
@@ -53,27 +67,25 @@ async fn main() -> ConfigResult<()> {
         .await
         .expect("no wb connection");
 
-    let nic = "enp0s13f0u3";
-
-    let mut phc_clock = get_clock(
+    let mut phc_clock = get_primary_clock(
         "phc_clock".into(),
-        Some(PtpMode::Phc {
-            nic: nic.to_owned(),
+        Some(ClockMode::Phc {
+            nic: ClockNic::NonRedundant(nic.to_owned()),
+            subsys: &subsys,
         }),
         audio_format.sample_rate,
-        wb.clone(),
     )
-    .await?;
+    .into_diagnostic()?;
 
-    let mut statime_clock = get_clock(
+    let mut statime_clock = get_primary_clock(
         "statime_clock".into(),
-        Some(PtpMode::Internal {
-            nic: nic.to_owned(),
+        Some(ClockMode::Internal {
+            nic: ClockNic::NonRedundant(nic.to_owned()),
+            wb: wb.clone(),
         }),
         audio_format.sample_rate,
-        wb.clone(),
     )
-    .await?;
+    .into_diagnostic()?;
 
     loop {
         let phc_time_1 = phc_clock.current_time()?.media_time as f64;
