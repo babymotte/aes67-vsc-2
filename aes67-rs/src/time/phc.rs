@@ -27,7 +27,7 @@ use libc::{CLOCK_TAI, clockid_t};
 use std::{
     os::fd::{IntoRawFd, RawFd},
     path::Path,
-    sync::{Arc, LazyLock, Mutex, atomic::Ordering},
+    sync::{LazyLock, OnceLock, atomic::Ordering},
     time::Duration,
 };
 use std::{sync::atomic::AtomicI64, time::Instant};
@@ -40,9 +40,10 @@ pub struct PhcClock {
     sample_rate: FramesPerSecond,
 }
 
+type CLockId = (clockid_t, RawFd);
+
 static LAST_OFFSET: LazyLock<AtomicI64> = LazyLock::new(|| AtomicI64::new(0));
-static CLOCK_ID: LazyLock<Arc<Mutex<Option<(clockid_t, RawFd)>>>> =
-    LazyLock::new(|| Arc::new(Mutex::new(None)));
+static CLOCK_ID: OnceLock<ClockCreationResult<CLockId>> = OnceLock::new();
 
 impl PhcClock {
     pub fn open(
@@ -50,53 +51,9 @@ impl PhcClock {
         path: impl AsRef<Path>,
         sample_rate: FramesPerSecond,
     ) -> ClockCreationResult<Self> {
-        let clock = {
-            let mut guard = CLOCK_ID.lock().expect("mutex poisoned");
-            if let Some((clock_id, _)) = guard.as_ref() {
-                *clock_id
-            } else {
-                let file = std::fs::OpenOptions::new()
-                    .write(true)
-                    .read(true)
-                    .open(path.as_ref())
-                    .map_err(|e| {
-                        ClockCreationError::Open(path.as_ref().display().to_string(), e.to_string())
-                    })?;
-                let fd = file.into_raw_fd();
-                let clock = ((!(fd as libc::clockid_t)) << 3) | 3;
-                *guard = Some((clock, fd));
-
-                info!("Starting PHC clock sync thread …");
-                subsys.spawn(
-                    format!("phc-clock-sync-{}", path.as_ref().display()),
-                    move |s| async move {
-                        let mut interval = tokio::time::interval(Duration::from_secs(1));
-                        interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
-
-                        loop {
-                            let offset = match get_current_offset(clock) {
-                                Ok(value) => value,
-                                Err(e) => {
-                                    error!("Failed to get PHC offset: {e}");
-                                    continue;
-                                }
-                            };
-
-                            LAST_OFFSET.store(offset, Ordering::Release);
-
-                            select! {
-                                _ = s.shutdown_requested() => break,
-                                _ = interval.tick() => continue,
-                            }
-                        }
-
-                        Ok::<(), SubsystemError>(())
-                    },
-                );
-
-                clock
-            }
-        };
+        let (clock, _) = CLOCK_ID
+            .get_or_init(|| init_phc_clock(subsys, path.as_ref()))
+            .to_owned()?;
 
         let offset = get_current_offset(clock).map_err(|e| {
             ClockCreationError::GetTime(e.to_string(), path.as_ref().display().to_string())
@@ -125,6 +82,52 @@ impl PhcClock {
 
         Ok((system_timestamp, ptp_timestamp))
     }
+}
+
+fn init_phc_clock(
+    subsys: &SubsystemHandle,
+    path: impl AsRef<Path>,
+) -> ClockCreationResult<CLockId> {
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .read(true)
+        .open(path.as_ref())
+        .map_err(|e| {
+            ClockCreationError::Open(path.as_ref().display().to_string(), e.to_string())
+        })?;
+    let fd = file.into_raw_fd();
+    let clock_id = ((!(fd as libc::clockid_t)) << 3) | 3;
+    let clock = (clock_id, fd);
+
+    info!("Starting PHC clock sync task …");
+    subsys.spawn(
+        format!("phc-clock-sync-{}", path.as_ref().display()),
+        move |s| async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(1));
+            interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
+            loop {
+                let offset = match get_current_offset(clock_id) {
+                    Ok(value) => value,
+                    Err(e) => {
+                        error!("Failed to get PHC offset: {e}");
+                        continue;
+                    }
+                };
+
+                LAST_OFFSET.store(offset, Ordering::Release);
+
+                select! {
+                    _ = s.shutdown_requested() => break,
+                    _ = interval.tick() => continue,
+                }
+            }
+
+            Ok::<(), SubsystemError>(())
+        },
+    );
+
+    Ok(clock)
 }
 
 fn get_current_offset(clock: i32) -> ClockResult<i64> {

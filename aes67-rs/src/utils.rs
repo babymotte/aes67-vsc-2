@@ -103,6 +103,10 @@ where
         self.buffer.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.buffer.is_empty()
+    }
+
     pub fn update(&mut self, value: N) -> Option<N> {
         self.buffer[self.cursor] = value;
         self.cursor += 1;

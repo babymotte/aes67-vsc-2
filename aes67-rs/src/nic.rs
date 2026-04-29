@@ -65,12 +65,9 @@ pub fn find_clock_nic_with_name(name: impl AsRef<str>) -> ClockCreationResult<Ne
 }
 
 fn find_nic(name: &str) -> Option<NetworkInterface> {
-    for iface in datalink::interfaces() {
-        if iface.name == name {
-            return Some(iface);
-        }
-    }
-    None
+    datalink::interfaces()
+        .into_iter()
+        .find(|it| it.name == name)
 }
 
 pub fn find_nic_for_ip(ip: IpAddr) -> ConfigResult<NetworkInterface> {
