@@ -78,7 +78,15 @@ pub struct SenderBufferConsumer {
 
 impl SenderBufferProducer {
     pub fn write_channel(&mut self, channel: usize, offset_frames: usize, channel_buffer: &[f32]) {
-        let phase_offset = self.phase * self.buffer_pointer.len() / self.phases;
+        let phase_len = self.buffer_pointer.len() / self.phases;
+        let phase_offset = self.phase * phase_len;
+
+        debug_assert_eq!(
+            self.buffer_pointer.len(),
+            self.phases * phase_len,
+            "Buffer length is not divisible by number of phases"
+        );
+
         let unsent_frames = self.unsent_frames;
         let bytes_per_sample = self.target_bytes_per_sample;
         let channels = self.config.audio_format.frame_format.channels;
@@ -109,7 +117,15 @@ impl SenderBufferProducer {
         ingress_time: Frames,
         written_frames: usize,
     ) -> SenderInternalResult<()> {
-        let phase_offset = self.phase * self.buffer_pointer.len() / self.phases;
+        let phase_len = self.buffer_pointer.len() / self.phases;
+        let phase_offset = self.phase * phase_len;
+
+        debug_assert_eq!(
+            self.buffer_pointer.len(),
+            self.phases * phase_len,
+            "Buffer length is not divisible by number of phases"
+        );
+
         let payload_len = self.config.send_buffer_len();
         let ptime_frames = self.config.ptime_frames() as usize;
         let available_frames = written_frames + self.unsent_frames;
