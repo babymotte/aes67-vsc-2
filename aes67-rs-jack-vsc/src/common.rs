@@ -120,7 +120,7 @@ impl JackClock {
         let diff = ptp_time - jack_time;
         let drift = ptp_time - jack_ptpt_time;
 
-        let drift_abs = drift.abs() as Frames;
+        let drift_abs = drift.unsigned_abs();
         if drift_abs > max_drift {
             #[cfg(debug_assertions)]
             warn!("JACK clock is off by {drift} frames, resetting JACK clock.");

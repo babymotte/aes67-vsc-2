@@ -17,7 +17,7 @@
 
 use crate::{
     buffer::sender::OutgoingPacketPointer,
-    formats::{Frames, SessionId},
+    formats::SessionId,
 };
 use axum::{http::StatusCode, response::IntoResponse};
 use miette::Diagnostic;
@@ -26,7 +26,6 @@ use std::{
     fmt::{Debug, Display},
     io,
     net::AddrParseError,
-    path::PathBuf,
 };
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot, watch};

@@ -17,7 +17,7 @@
 
 mod statime_linux;
 use crate::{
-    error::{ClockCreationError, ClockCreationResult, ClockResult, ConfigError, ConfigResult},
+    error::{ClockCreationError, ClockCreationResult, ClockResult},
     formats::FramesPerSecond,
     time::{MediaClock, Time, Timestamp, get_time, to_media_time},
 };
