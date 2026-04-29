@@ -15,10 +15,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::{
-    buffer::sender::OutgoingPacketPointer,
-    formats::SessionId,
-};
+use crate::{buffer::sender::OutgoingPacketPointer, formats::SessionId};
 use axum::{http::StatusCode, response::IntoResponse};
 use miette::Diagnostic;
 use rtp_rs::{RtpPacketBuildError, RtpReaderError};
