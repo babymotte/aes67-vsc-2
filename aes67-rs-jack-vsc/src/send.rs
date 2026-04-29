@@ -121,15 +121,12 @@ fn process(state: &mut State, client: &Client, ps: &ProcessScope) -> Control {
         return Control::Quit;
     }
 
-    let (ingress_time, compensation) = match state.clock.update_clock(
-        client,
-        ps,
-        state
-            .config
-            .packet_time
-            .frames(state.config.audio_format.sample_rate),
-        true,
-    ) {
+    let max_drift = state
+        .config
+        .packet_time
+        .frames(state.config.audio_format.sample_rate);
+
+    let (ingress_time, compensation) = match state.clock.update_clock(client, ps, max_drift, true) {
         Ok(ClockState::Stable {
             current_time,
             compensation,

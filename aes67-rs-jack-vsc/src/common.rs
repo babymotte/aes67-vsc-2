@@ -25,10 +25,13 @@ use jack::{Client, ProcessScope};
 #[cfg(debug_assertions)]
 use tracing::{debug, info, warn};
 
+const MAX_DRIFT_EXCEEDED_COUNT: u16 = 10;
+
 pub struct JackClock {
     ptp_clock: Clock,
     jack_clock_offset: Option<i64>,
     drift_buffer: AverageCalculationBuffer<i64>,
+    drift_exceeded_counter: u16,
 }
 
 pub enum ClockOffset {
@@ -50,6 +53,7 @@ impl JackClock {
             ptp_clock,
             jack_clock_offset: None,
             drift_buffer: AverageCalculationBuffer::new([0i64; 100].into()),
+            drift_exceeded_counter: 0,
         }
     }
 
@@ -121,11 +125,39 @@ impl JackClock {
         let drift = ptp_time - jack_ptpt_time;
 
         let drift_abs = drift.unsigned_abs();
-        if drift_abs > max_drift {
+
+        // hard reset when drift exceeds JACK buffer size
+        // this will cause an audible glitch
+        if drift_abs > ps.n_frames() as u64 {
             #[cfg(debug_assertions)]
             warn!("JACK clock is off by {drift} frames, resetting JACK clock.");
             self.jack_clock_offset = Some(diff);
+            self.drift_exceeded_counter = 0;
             return Ok(ClockOffset::Unstable);
+        }
+
+        if drift_abs > max_drift {
+            self.drift_exceeded_counter += 1;
+
+            #[cfg(debug_assertions)]
+            warn!(
+                "Max JACK clock drift exceeded: {}/{} ({}/{}).",
+                drift_abs, max_drift, self.drift_exceeded_counter, MAX_DRIFT_EXCEEDED_COUNT
+            );
+
+            // soft reset when drift exceeds client's requested max drift
+            // this may cause an audible glitch, depending on how the receiver
+            // handles the resulting timestamp inconsitency
+            if self.drift_exceeded_counter >= MAX_DRIFT_EXCEEDED_COUNT {
+                #[cfg(debug_assertions)]
+                warn!("JACK clock is off by {drift} frames, resetting JACK clock.");
+                self.jack_clock_offset = Some(diff);
+                self.drift_exceeded_counter = 0;
+                return Ok(ClockOffset::Stable {
+                    offset: diff,
+                    compensation: 0,
+                });
+            }
         }
 
         let slew = if let Some(drift) = self.drift_buffer.update(drift) {
