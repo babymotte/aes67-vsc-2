@@ -29,12 +29,11 @@ tosub = "1.0.0"
 tracing = "0.1.41"
 tracing-opentelemetry = "0.32.0"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
-worterbuch = "1.5.0-rc.3"
+worterbuch = { version = "1.5.0-rc.3", default-features = false }
 worterbuch-client = "1.5.0-rc.3"
 
 [features]
 tokio-console = ["console-subscriber"]
-jemalloc = ["worterbuch/jemalloc"]
 tokio-metrics = [
     "aes67-rs/tokio-metrics",
     "aes67-rs-vsc-management-agent/tokio-metrics",
