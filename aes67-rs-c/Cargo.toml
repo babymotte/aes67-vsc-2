@@ -11,9 +11,9 @@ futures-lite = "2.6.1"
 lazy_static = "1.5.0"
 safer-ffi = "0.1.13"
 sdp = "0.17.1"
-tosub = "1.0.0"
+tosub = "1.1.3"
 tracing = "0.1.43"
-worterbuch-client = "1.5.0-rc.3"
+worterbuch-client = "1.5.0-rc.5"
 
 [features]
 headers = ["safer-ffi/headers"]
