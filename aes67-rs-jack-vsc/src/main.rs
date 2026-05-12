@@ -29,6 +29,8 @@ use tracing::info;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> miette::Result<()> {
+    dotenvy::dotenv().ok();
+
     let args = Args::get();
 
     let app_id = "aes67-jack-vsc".to_owned();

@@ -2,6 +2,7 @@
 name = "aes67-rs-jack-vsc"
 version = "0.1.0"
 edition = "2024"
+default-run = "aes67-rs-jack-vsc"
 
 [dependencies]
 aes67-rs = { path = "../aes67-rs" }
@@ -10,6 +11,7 @@ aes67-rs-vsc-management-agent = { path = "../aes67-rs-vsc-management-agent" }
 console-subscriber = { version = "0.5.0", optional = true }
 directories = "6.0.0"
 dirs = "6.0.0"
+dotenvy = "0.15.7"
 futures-lite = "2.6.1"
 jack = "0.13.5"
 lazy_static = "1.5.0"
@@ -31,6 +33,7 @@ tracing-opentelemetry = "0.32.0"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 worterbuch = { version = "1.5.0-rc.5", default-features = false }
 worterbuch-client = "1.5.0-rc.5"
+
 
 [features]
 tokio-console = ["console-subscriber"]
