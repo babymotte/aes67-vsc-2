@@ -4,14 +4,14 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-aes67-rs = { version = "0.1.0", path = "../aes67-rs" }
-aes67-rs-sdp = { version = "0.1.0", path = "../aes67-rs-sdp" }
-miette = "7.6.0"
-sap-rs = "0.9.0"
-sdp = "0.17.1"
-serde = "1.0.228"
-thiserror = "2.0.17"
-tokio = "1.48.0"
-tosub = "1.1.3"
-tracing = "0.1.43"
-worterbuch-client = "1.5.0-rc.6"
+aes67-rs = { workspace = true }
+aes67-rs-sdp = { workspace = true }
+miette = { workspace = true }
+sap-rs = { workspace = true }
+sdp = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tosub = { workspace = true }
+tracing = { workspace = true }
+worterbuch-client = { workspace = true }

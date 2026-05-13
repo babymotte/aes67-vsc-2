@@ -4,14 +4,14 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-dirs = "6.0.0"
-miette = "7.6.0"
-serde_yaml = "0.9.34"
-thiserror = "2.0.18"
-tokio = { version = "1.51.1", features = ["fs", "process"] }
-tosub = "1.1.1"
-tracing = "0.1.44"
+dirs = { workspace = true }
+miette = { workspace = true }
+serde_yaml = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["fs", "process"] }
+tosub = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
-tokio = { version = "1.51.1", features = ["full"] }
-tracing-subscriber = "0.3.23"
+tokio = { workspace = true, features = ["full"] }
+tracing-subscriber = { workspace = true }
