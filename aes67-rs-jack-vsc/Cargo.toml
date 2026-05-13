@@ -31,8 +31,8 @@ tosub = "1.1.3"
 tracing = "0.1.41"
 tracing-opentelemetry = "0.32.0"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
-worterbuch = { version = "1.5.0-rc.5", default-features = false }
-worterbuch-client = "1.5.0-rc.5"
+worterbuch = { version = "1.5.0-rc.6", default-features = false }
+worterbuch-client = "1.5.0-rc.6"
 
 
 [features]

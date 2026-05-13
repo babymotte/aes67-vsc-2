@@ -5121,9 +5121,9 @@ dependencies = [
 
 [[package]]
 name = "worterbuch"
-version = "1.5.0-rc.5"
+version = "1.5.0-rc.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af4733458d1e347bd291eb507980f7f7f6e0266d09f722bee16f48f5ca73863e"
+checksum = "79a5850ed648cad12a49ac3e2da16f0f7661ab567216c287a7591f3742ef1fbe"
 dependencies = [
  "axum",
  "axum-extra",
@@ -5166,9 +5166,9 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-client"
-version = "1.5.0-rc.5"
+version = "1.5.0-rc.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46b5709fe3cd02a569dba829dc6e311db111fc9103df098501fc7702ac6cad4a"
+checksum = "0e14bf63c98b18c5ce3e5469f583c89d579a912c67d0978cba5aa1cee6d54e43"
 dependencies = [
  "async-stream",
  "futures-util",
@@ -5184,9 +5184,9 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-common"
-version = "1.5.0-rc.5"
+version = "1.5.0-rc.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a391c624e19e162fcf35fdeaef29f6eed7276fc9317d2c3e8a94326fbcdeb97"
+checksum = "617fae980adb7ae8c52718c72ee5192a8cacd656b7ba2bd4875f6760ea2a088a"
 dependencies = [
  "axum",
  "hashbrown 0.16.1",
@@ -5195,6 +5195,7 @@ dependencies = [
  "miette",
  "opentelemetry",
  "opentelemetry-otlp",
+ "redb",
  "serde",
  "serde_json",
  "serde_repr",
