@@ -16,16 +16,16 @@
  */
 
 use dirs::config_local_dir;
-use jack::{AsyncClient, Client, Control, NotificationHandler, ProcessHandler};
+use jack::{AsyncClient, Client, Control, NotificationHandler, PortId, ProcessHandler};
 use miette::{Context, IntoDiagnostic, Result, miette};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{HashMap, hash_map::Entry},
+    collections::{BTreeSet, HashMap, hash_map::Entry},
     path::PathBuf,
 };
 use tokio::{fs, select, sync::mpsc};
 use tosub::SubsystemHandle;
-use tracing::{error, info, instrument, warn};
+use tracing::{debug, error, info, instrument, warn};
 
 pub enum Notification {
     ThreadInit,
@@ -149,10 +149,13 @@ where
 {
     restore_connections(client.as_client(), &app_id).await;
 
+    let mut notification_handler =
+        JackNotificationHandler::new(client.as_client().name().to_owned());
+
     loop {
         select! {
             recv = notifications.recv() => if let Some(notification) = recv {
-                handle_notification(client.as_client(), notification, &app_id).await?;
+                notification_handler.handle_notification(client.as_client(), notification, &app_id).await?;
             } else {
                 break;
             },
@@ -171,67 +174,126 @@ where
     Ok(())
 }
 
-async fn handle_notification(
-    client: &Client,
-    notification: Notification,
-    app_id: &str,
-) -> miette::Result<()> {
-    match notification {
-        Notification::ThreadInit => {
-            info!("JACK thread initialized");
-        }
-        Notification::Shutdown(client_status, reason) => {
-            info!(
-                "JACK thread shutting down with status {:?}: {}",
-                client_status, reason
-            );
-        }
-        Notification::SampleRate(srate) => {
-            info!("JACK sample rate changed to {srate} Hz");
-        }
-        Notification::ClientRegistration(name, is_registered) => {
-            info!("JACK client '{name}' registered: {is_registered}");
-        }
-        Notification::PortRegistration(port_id, is_registered) => {
-            info!("JACK port '{port_id}' registered: {is_registered}");
-            // TODO check if we should be sending to a newly connected port and establish a connection if necessary
-        }
-        Notification::PortRename(_port_id, _old_name, _new_name) => {
-            // TODO check if this affects our persisted connection table
-        }
-        Notification::PortConnected(port_id_a, port_id_b, are_connected) => {
-            if let Some(port) = client.port_by_id(port_id_b)
-                && client.is_mine(&port)
-            {
-                if are_connected {
-                    info!("JACK sender ports connected: {port_id_a} -> {port_id_b}")
-                } else {
-                    info!("JACK sender ports disconnected: {port_id_a} -/> {port_id_b}")
-                }
-                store_connection(client, port_id_a, port_id_b, are_connected, app_id).await;
-            }
+pub struct JackNotificationHandler {
+    client_name: String,
+    registered_ports: BTreeSet<PortId>,
+}
 
-            if let Some(port) = client.port_by_id(port_id_a)
-                && client.is_mine(&port)
-            {
-                if are_connected {
-                    info!("JACK receiver ports connected: {port_id_a} -> {port_id_b}")
-                } else {
-                    info!("JACK receiver ports disconnected: {port_id_a} -/> {port_id_b}")
-                }
-                store_connection(client, port_id_a, port_id_b, are_connected, app_id).await;
-            }
-        }
-        Notification::GraphReorder => {
-            info!("JACK graph reorder");
-        }
-        Notification::XRun(client) => {
-            // TODO report playout xrun
-            warn!("JACK buffer xrun in client {client}");
+impl JackNotificationHandler {
+    pub fn new(client_name: String) -> Self {
+        JackNotificationHandler {
+            client_name,
+            registered_ports: BTreeSet::new(),
         }
     }
 
-    Ok(())
+    fn is_registered(&self, port_id: &PortId) -> bool {
+        self.registered_ports.contains(port_id)
+    }
+
+    async fn handle_notification(
+        &mut self,
+        client: &Client,
+        notification: Notification,
+        app_id: &str,
+    ) -> miette::Result<()> {
+        match notification {
+            Notification::ThreadInit => {
+                info!("{}: JACK thread initialized", self.client_name);
+            }
+            Notification::Shutdown(client_status, reason) => {
+                info!(
+                    "{}: JACK thread shutting down with status {:?}: {}",
+                    self.client_name, client_status, reason
+                );
+                self.registered_ports.clear();
+            }
+            Notification::SampleRate(srate) => {
+                info!(
+                    "{}: JACK sample rate changed to {srate} Hz",
+                    self.client_name
+                );
+            }
+            Notification::ClientRegistration(name, is_registered) => {
+                if is_registered {
+                    info!("{}: JACK client '{name}' registered", self.client_name);
+                } else {
+                    info!("{}: JACK client '{name}' unregistered", self.client_name);
+                }
+            }
+            Notification::PortRegistration(port_id, is_registered) => {
+                if is_registered
+                    && let Some(port) = client.port_by_id(port_id)
+                    && let Ok(port_name) = port.name()
+                {
+                    info!("{}: JACK port '{port_name}' registered", self.client_name);
+                    self.registered_ports.insert(port_id);
+                    restore_connections(client, app_id).await;
+                } else if !is_registered {
+                    info!("{}: JACK port '{port_id}' unregistered", self.client_name);
+                    self.registered_ports.remove(&port_id);
+                }
+            }
+            Notification::PortRename(_port_id, _old_name, _new_name) => {
+                // TODO check if this affects our persisted connection table
+            }
+            Notification::PortConnected(port_id_a, port_id_b, are_connected) => {
+                let Some(port_a) = client.port_by_id(port_id_a) else {
+                    warn!("{}: Unknown port: {port_id_a}", self.client_name);
+                    return Ok(());
+                };
+                let Some(port_b) = client.port_by_id(port_id_b) else {
+                    warn!("{}: Unknown port: {port_id_b}", self.client_name);
+                    return Ok(());
+                };
+
+                let other_port_id = if client.is_mine(&port_a) {
+                    debug!("{}: port_a is mine: {port_id_a}", self.client_name);
+                    port_id_b
+                } else if client.is_mine(&port_b) {
+                    debug!("{}: port_b is mine: {port_id_b}", self.client_name);
+                    port_id_a
+                } else {
+                    debug!(
+                        "{}: neither port is mine: {port_id_a}, {port_id_b}",
+                        self.client_name
+                    );
+                    return Ok(());
+                };
+
+                if are_connected {
+                    info!(
+                        "{}: JACK ports connected: {port_id_a} -> {port_id_b}",
+                        self.client_name
+                    );
+                    store_connection(client, port_id_a, port_id_b, are_connected, app_id).await;
+                } else {
+                    info!(
+                        "{}: JACK ports disconnected: {port_id_a} -/> {port_id_b}",
+                        self.client_name
+                    );
+
+                    if self.is_registered(&other_port_id) {
+                        store_connection(client, port_id_a, port_id_b, are_connected, app_id).await;
+                    } else {
+                        debug!(
+                            "{}: Port {} is not registered, not persisting removed connection.",
+                            self.client_name, other_port_id
+                        );
+                    }
+                }
+            }
+            Notification::GraphReorder => {
+                info!("{}: JACK graph reorder", self.client_name);
+            }
+            Notification::XRun(client) => {
+                // TODO report playout xrun
+                warn!("{}: JACK buffer xrun in client {client}", self.client_name);
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[instrument(skip(client))]
@@ -301,6 +363,7 @@ fn add_connection(config: &mut ClientConfig, port_name: String, other_port: Stri
 
 #[instrument(skip(config))]
 fn remove_connection(config: &mut ClientConfig, port_name: String, other_port: String) {
+    info!("Removing connection from config: {port_name} -> {other_port}");
     if let Entry::Occupied(mut e) = config.connections.entry(port_name) {
         let connections = e.get_mut();
         connections.retain(|it| it != &other_port);
