@@ -1135,6 +1135,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320bea982e85d42441eb25c49b41218e7eaa2657e8f90bc4eca7437376751e23"
 
 [[package]]
+name = "fallible-iterator"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2acce4a10f12dc2fb14a218589d4f1f62ef011b2d0cc4b3cb1bba8e94da14649"
+
+[[package]]
+name = "fallible-streaming-iterator"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7360491ce676a36bf9bb3c56c1aa791658183a54d2744120f27285738d90465a"
+
+[[package]]
 name = "fastrand"
 version = "2.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2080,6 +2092,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e02f3bb43d335493c96bf3fd3a321600bf6bd07ed34bc64118e9293bdffea46c"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "libsqlite3-sys"
+version = "0.37.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1f111c8c41e7c61a49cd34e44c7619462967221a6443b0ec299e0ac30cfb9b1"
+dependencies = [
+ "cc",
+ "pkg-config",
+ "vcpkg",
 ]
 
 [[package]]
@@ -3127,10 +3150,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "rsqlite-vfs"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c51c9ae4df8a7fba42103df5c621fa3c37eccf3a3c650879e90fc48b11cc192c"
+dependencies = [
+ "hashbrown 0.16.1",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "rtp-rs"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d4ed274a5b3d36c4434cff6a4de1b42f43e64ae326b1cfa72d13d9037a314355"
+
+[[package]]
+name = "rusqlite"
+version = "0.39.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a0d2b0146dd9661bf67bb107c0bb2a55064d556eeb3fc314151b957f313bcd4e"
+dependencies = [
+ "bitflags 2.11.1",
+ "fallible-iterator",
+ "fallible-streaming-iterator",
+ "hashlink",
+ "libsqlite3-sys",
+ "smallvec",
+ "sqlite-wasm-rs",
+]
 
 [[package]]
 name = "rustc-demangle"
@@ -3647,6 +3695,18 @@ checksum = "d91ed6c858b01f942cd56b37a94b3e0a1798290327d1236e4d9cf4eaca44d29d"
 dependencies = [
  "base64ct",
  "der",
+]
+
+[[package]]
+name = "sqlite-wasm-rs"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc3efc0da82635d7e1ced0053bbbfa8c7ab9645d0bf36ceb4f7127bb85315d75"
+dependencies = [
+ "cc",
+ "js-sys",
+ "rsqlite-vfs",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -4216,9 +4276,9 @@ dependencies = [
 
 [[package]]
 name = "tosub"
-version = "1.1.3"
+version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a2ccd7e1f3192b39cb9500e9066c426b347c5ab1c8d93577a638a312c19f4ece"
+checksum = "0f872191a5776612a5a9eca813da6b4ecfd39ea4aed1ad486e90a0473e1fba97"
 dependencies = [
  "miette",
  "thiserror 2.0.18",
@@ -4496,6 +4556,12 @@ name = "valuable"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
+
+[[package]]
+name = "vcpkg"
+version = "0.2.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 
 [[package]]
 name = "version_check"
@@ -5153,9 +5219,9 @@ dependencies = [
 
 [[package]]
 name = "worterbuch"
-version = "1.5.0-rc.7"
+version = "1.6.0-alpha.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4037ece17496bb64dcb34cc8db132b2124d8c93a2c5b7ecc826d2eca42513d72"
+checksum = "b2fc81b0db9cc8823723a21fd3aa92dc5f38df1f6154b9a414008764d2b7056c"
 dependencies = [
  "axum",
  "axum-extra",
@@ -5176,7 +5242,7 @@ dependencies = [
  "lazy_static",
  "libc",
  "miette",
- "redb",
+ "rusqlite",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -5198,9 +5264,9 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-client"
-version = "1.5.0-rc.7"
+version = "1.6.0-alpha.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "522a1296e73bea3dad82cd344811d779171e2c47b3a37ded102d7309d67cf3ed"
+checksum = "7bb23e0c41ae808a388a4ce711bd7ab814862e3c577aa2b4f23812a8fd80a2a1"
 dependencies = [
  "async-stream",
  "futures-util",
@@ -5216,17 +5282,15 @@ dependencies = [
 
 [[package]]
 name = "worterbuch-common"
-version = "1.5.0-rc.7"
+version = "1.6.0-alpha.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e39e5b5c9db061190321bbf9aa5770de4781b5bc0ca7226d7ddfb2b4b4d6e75d"
+checksum = "e216d198bd8dda48b2344dc8bcd9b26f3aac681d3add6b710ce9743e8c4c9766"
 dependencies = [
  "axum",
  "hashbrown 0.17.1",
  "http",
  "jsonwebtoken",
  "miette",
- "opentelemetry",
- "opentelemetry-otlp",
  "redb",
  "serde",
  "serde_json",
