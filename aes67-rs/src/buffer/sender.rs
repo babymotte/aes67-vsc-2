@@ -30,7 +30,7 @@ pub fn sender_buffer_channel(
 ) -> (SenderBufferProducer, SenderBufferConsumer) {
     let (tx, rx) = mpsc::channel(phases);
     let max_ptime = 4.0;
-    let max_producer_buffer_duration = 1_000.0;
+    let max_producer_buffer_duration = 100.0;
     let buffer_len = config
         .audio_format
         .bytes_per_buffer((max_producer_buffer_duration + max_ptime) * phases as MilliSeconds);
@@ -129,9 +129,8 @@ impl SenderBufferProducer {
         let payload_len = self.config.send_buffer_len();
         let ptime_frames = self.config.ptime_frames() as usize;
         let available_frames = written_frames + self.unsent_frames;
+        let packets = available_frames / ptime_frames;
         let spillover_frames = available_frames % ptime_frames;
-        let frames_to_send = available_frames - spillover_frames;
-        let packets = frames_to_send / ptime_frames;
         let first_packet_ingress_time = ingress_time - self.unsent_frames as Frames;
 
         for i in 0..packets {
