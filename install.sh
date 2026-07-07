@@ -22,13 +22,13 @@ mkdir -p "$SYSTEMD_USER_DIR" || exit $?
 # clear old files
 rm -rf "$DATA_DIR/html/*"
 
-systemctl --user stop aes67-jack-vsc.service
+systemctl --user stop aes67-pipewire-vsc.service
 
 # copy files
 cp -r "$WEB_APP"/* "$DATA_DIR/html/" || exit $?
 cp "$BIN" "$BIN_DIR" || exit $?
 cp ./config.yaml "$CONFIG_DIR" || exit $?
-cp ./systemd/aes67-jack-vsc.service "$SYSTEMD_USER_DIR" || exit $?
+cp ./systemd/aes67-pipewire-vsc.service "$SYSTEMD_USER_DIR" || exit $?
 sudo cp ./systemd/ptp4l@.service "$SYSTEMD_DIR" || exit $?
 sudo mkdir -p /etc/linuxptp || exit $?
 sudo cp ./linuxptp/ptp4l.conf /etc/linuxptp/ptp4l.conf || exit $?
@@ -52,7 +52,7 @@ sudo usermod -aG audio $USER || exit $?
 
 # enable service
 systemctl --user daemon-reload || exit $?
-systemctl --user enable --now aes67-jack-vsc.service || exit $?
+systemctl --user enable --now aes67-pipewire-vsc.service || exit $?
 
 # enable ptp4l service
 for iface in /sys/class/net/*/; do
